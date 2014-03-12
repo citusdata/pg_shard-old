@@ -1,5 +1,5 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "CREATE EXTENSION pair" to load this file. \quit
+\echo Use "CREATE EXTENSION topsie" to load this file. \quit
 
 /*
  * Stores lists of shards for a given table. `shard_id` begins at 1 and should
