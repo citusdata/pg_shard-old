@@ -1,0 +1,118 @@
+--
+--  Test topsie extension
+--
+CREATE EXTENSION topsie; -- fail, must install postgres_fdw first
+ERROR:  required extension "postgres_fdw" is not installed
+CREATE EXTENSION postgres_fdw;
+CREATE EXTENSION topsie;
+-- Create shards for loopback server
+CREATE TABLE widgets_s0 (
+	c1 int PRIMARY KEY,
+	c2 text
+);
+INSERT INTO topsie.dist_shards (shard_id, table_name) VALUES (0, 'widgets');
+CREATE TABLE widgets_s1 (
+	c1 int PRIMARY KEY,
+	c2 text
+);
+INSERT INTO topsie.dist_shards (shard_id, table_name) VALUES (1, 'widgets');
+-- Create main table on master
+CREATE TABLE widgets (
+	c1 int NOT NULL,
+	c2 text
+);
+-- "Place" shards on loopback servers
+INSERT INTO topsie.dist_shard_placements VALUES ('loopback', -1, 1);
+INSERT INTO topsie.dist_shard_placements VALUES ('loopback', -1, 2);
+-- Create servers
+SELECT topsie.create_servers();
+ create_servers 
+----------------
+ 
+(1 row)
+
+-- Enhance widgets table
+SELECT topsie.rti_enhance_table('widgets', ARRAY['c1']);
+ rti_enhance_table 
+-------------------
+ 
+(1 row)
+
+-- Verify that selects query all shards
+EXPLAIN (COSTS false) SELECT COUNT(*) FROM widgets;
+                QUERY PLAN                 
+-------------------------------------------
+ Aggregate
+   ->  Append
+         ->  Foreign Scan on widgets_s0_r0
+         ->  Foreign Scan on widgets_s1_r0
+(4 rows)
+
+-- Insert some data
+INSERT INTO widgets VALUES ( 1, 'first row');
+INSERT INTO widgets VALUES ( 2, 'second row');
+INSERT INTO widgets VALUES ( 3, 'third row');
+INSERT INTO widgets VALUES ( 4, 'fourth row');
+INSERT INTO widgets VALUES ( 5, 'fifth row');
+INSERT INTO widgets VALUES ( 6, 'sixth row');
+INSERT INTO widgets VALUES ( 7, 'seventh row');
+INSERT INTO widgets VALUES ( 8, 'eighth row');
+INSERT INTO widgets VALUES ( 9, 'ninth row');
+INSERT INTO widgets VALUES (10, 'last row');
+-- Check that no duplicate data exists when querying all shards...
+SELECT COUNT(DISTINCT c1) FROM widgets;
+ count 
+-------
+    10
+(1 row)
+
+-- ... and that each shard has some data itself
+SELECT COUNT(DISTINCT c1) FROM topsie.widgets_s0_r0;
+ count 
+-------
+     5
+(1 row)
+
+SELECT COUNT(DISTINCT c1) FROM topsie.widgets_s1_r0;
+ count 
+-------
+     5
+(1 row)
+
+-- Check that our table was turned into a view
+\dv+
+                    List of relations
+ Schema |  Name   | Type | Owner |  Size   | Description 
+--------+---------+------+-------+---------+-------------
+ public | widgets | view | jason | 0 bytes | 
+(1 row)
+
+-- And that it has a trigger attached
+SELECT tgname FROM pg_trigger WHERE tgrelid='widgets'::regclass;
+   tgname    
+-------------
+ dist_insert
+(1 row)
+
+-- Check for the foreign servers and tables.
+\des
+                            List of foreign servers
+                      Name                      | Owner | Foreign-data wrapper 
+------------------------------------------------+-------+----------------------
+ topsie_worker-26cd883713b6905988484c1f7c71aae9 | jason | postgres_fdw
+(1 row)
+
+\det
+                         List of foreign tables
+ Schema |     Table     |                     Server                     
+--------+---------------+------------------------------------------------
+ topsie | widgets_s0_r0 | topsie_worker-26cd883713b6905988484c1f7c71aae9
+ topsie | widgets_s1_r0 | topsie_worker-26cd883713b6905988484c1f7c71aae9
+(2 rows)
+
+DROP EXTENSION topsie; -- fail, because the trigger function lives in extension
+ERROR:  cannot drop extension topsie because other objects depend on it
+DETAIL:  trigger dist_insert on view widgets depends on function topsie.t001_shard_insert()
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+DROP EXTENSION topsie CASCADE;
+NOTICE:  drop cascades to trigger dist_insert on view widgets

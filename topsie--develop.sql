@@ -117,20 +117,24 @@ CREATE OR REPLACE FUNCTION create_servers() RETURNS void AS $create_servers$
     server_tmpl CONSTANT text := $$CREATE SERVER %I TYPE 'postgres_fdw'
       FOREIGN DATA WRAPPER postgres_fdw
       OPTIONS (
-        host %L,
-        dbname 'postgres',
-        port %L,
+        %s
+        dbname %L,
         application_name 'topsie'
       )$$;
+    opts_tmpl CONSTANT text := 'host %L, port %L,';
     user_tmpl CONSTANT text := 'CREATE USER MAPPING FOR PUBLIC SERVER %I OPTIONS (user %L)';
 
     entry topsie.dist_shard_placements%ROWTYPE;
     server_name text;
+    opts text = '';
   BEGIN
-    FOR entry IN SELECT * FROM topsie.dist_shard_placements LOOP
+    FOR entry IN SELECT DISTINCT ON (node_name, node_port) * FROM topsie.dist_shard_placements LOOP
       server_name := topsie.fserver_name(entry.node_name, entry.node_port);
+      IF entry.node_name != 'loopback' THEN
+          opts = format(opts_tmpl, node_name, entry.node_port);
+      END IF;
 
-      EXECUTE format(server_tmpl, server_name, entry.node_name, entry.node_port);
+      EXECUTE format(server_tmpl, server_name, opts, current_database());
       EXECUTE format(user_tmpl, server_name, CURRENT_USER);
     END LOOP;
   END;
@@ -234,8 +238,6 @@ CREATE OR REPLACE FUNCTION rti_enhance_table(a_table regclass, hash_cols text[])
         table_name text;
         server_name text;
     BEGIN
-        EXECUTE format($$DROP RULE IF EXISTS "_RETURN" ON %I$$, a_table);
-
         SELECT max(ds.shard_id) + 1 INTO STRICT shard_count FROM topsie.dist_shards ds WHERE ds.table_name=a_table::text;
 
         FOR placement_info IN
@@ -245,7 +247,7 @@ CREATE OR REPLACE FUNCTION rti_enhance_table(a_table regclass, hash_cols text[])
             table_name := topsie.ftable_name(a_table::text, placement_info.shard_id, placement_info.replica_id::integer);
             server_name := topsie.fserver_name(placement_info.node_name, placement_info.node_port);
 
-            EXECUTE format(ftable_tmpl, table_name, server_name, a_table);
+            EXECUTE format(ftable_tmpl, table_name, server_name, a_table || '_s' || placement_info.shard_id);
         END LOOP;
 
         FOR shard_id IN 0..(shard_count - 1) LOOP
