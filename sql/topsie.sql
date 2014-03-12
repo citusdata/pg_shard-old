@@ -57,11 +57,8 @@ SELECT COUNT(DISTINCT c1) FROM widgets;
 SELECT COUNT(DISTINCT c1) FROM topsie.widgets_s0_r0;
 SELECT COUNT(DISTINCT c1) FROM topsie.widgets_s1_r0;
 
--- Check that our table was turned into a view
-\dv+
-
--- And that it has a trigger attached
-SELECT tgname FROM pg_trigger WHERE tgrelid='widgets'::regclass;
+-- Check that our table is now a view with a trigger
+\dS widgets
 
 -- Check for the foreign servers and tables.
 \des
