@@ -1,0 +1,6 @@
+# topsie remote partitioning extension
+comment = 'transparently partition data across remote nodes'
+default_version = 'develop'
+requires = 'postgres_fdw'
+relocatable = false
+schema = 'topsie'
