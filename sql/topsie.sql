@@ -4,6 +4,9 @@
 
 CREATE EXTENSION topsie; -- fail, must install postgres_fdw first
 CREATE EXTENSION postgres_fdw;
+
+CREATE EXTENSION topsie SCHEMA public; -- fail, topsie is not relocatable
+
 CREATE EXTENSION topsie;
 
 -- Create shards for loopback server

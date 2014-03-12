@@ -4,6 +4,8 @@
 CREATE EXTENSION topsie; -- fail, must install postgres_fdw first
 ERROR:  required extension "postgres_fdw" is not installed
 CREATE EXTENSION postgres_fdw;
+CREATE EXTENSION topsie SCHEMA public; -- fail, topsie is not relocatable
+ERROR:  extension "topsie" must be installed in schema "topsie"
 CREATE EXTENSION topsie;
 -- Create shards for loopback server
 CREATE TABLE widgets_s0 (
