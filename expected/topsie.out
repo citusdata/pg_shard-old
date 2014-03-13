@@ -24,8 +24,8 @@ CREATE TABLE widgets (
 	c2 text
 );
 -- "Place" shards on loopback servers
-INSERT INTO topsie.dist_shard_placements VALUES ('loopback', -1, 1);
-INSERT INTO topsie.dist_shard_placements VALUES ('loopback', -1, 2);
+INSERT INTO topsie.dist_shard_placements VALUES ('', (SELECT setting::integer FROM pg_settings WHERE name='port'), 1);
+INSERT INTO topsie.dist_shard_placements VALUES ('', (SELECT setting::integer FROM pg_settings WHERE name='port'), 2);
 -- Create servers
 SELECT topsie.create_servers();
  create_servers 
@@ -96,15 +96,15 @@ Triggers:
                             List of foreign servers
                       Name                      | Owner | Foreign-data wrapper 
 ------------------------------------------------+-------+----------------------
- topsie_worker-26cd883713b6905988484c1f7c71aae9 | jason | postgres_fdw
+ topsie_worker-98f309c260d2c990f9b1a9afe75c486c | jason | postgres_fdw
 (1 row)
 
 \det
                          List of foreign tables
  Schema |     Table     |                     Server                     
 --------+---------------+------------------------------------------------
- topsie | widgets_s0_r0 | topsie_worker-26cd883713b6905988484c1f7c71aae9
- topsie | widgets_s1_r0 | topsie_worker-26cd883713b6905988484c1f7c71aae9
+ topsie | widgets_s0_r0 | topsie_worker-98f309c260d2c990f9b1a9afe75c486c
+ topsie | widgets_s1_r0 | topsie_worker-98f309c260d2c990f9b1a9afe75c486c
 (2 rows)
 
 DROP EXTENSION topsie; -- fail, because the trigger function lives in extension

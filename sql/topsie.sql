@@ -29,8 +29,8 @@ CREATE TABLE widgets (
 );
 
 -- "Place" shards on loopback servers
-INSERT INTO topsie.dist_shard_placements VALUES ('loopback', -1, 1);
-INSERT INTO topsie.dist_shard_placements VALUES ('loopback', -1, 2);
+INSERT INTO topsie.dist_shard_placements VALUES ('', (SELECT setting::integer FROM pg_settings WHERE name='port'), 1);
+INSERT INTO topsie.dist_shard_placements VALUES ('', (SELECT setting::integer FROM pg_settings WHERE name='port'), 2);
 
 -- Create servers
 SELECT topsie.create_servers();

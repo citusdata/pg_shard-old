@@ -117,24 +117,20 @@ CREATE OR REPLACE FUNCTION create_servers() RETURNS void AS $create_servers$
     server_tmpl CONSTANT text := $$CREATE SERVER %I TYPE 'postgres_fdw'
       FOREIGN DATA WRAPPER postgres_fdw
       OPTIONS (
-        %s
+        host %L,
+        port %L,
         dbname %L,
         application_name 'topsie'
       )$$;
-    opts_tmpl CONSTANT text := 'host %L, port %L,';
     user_tmpl CONSTANT text := 'CREATE USER MAPPING FOR PUBLIC SERVER %I OPTIONS (user %L)';
 
     entry topsie.dist_shard_placements%ROWTYPE;
     server_name text;
-    opts text = '';
   BEGIN
     FOR entry IN SELECT DISTINCT ON (node_name, node_port) * FROM topsie.dist_shard_placements LOOP
       server_name := topsie.fserver_name(entry.node_name, entry.node_port);
-      IF entry.node_name != 'loopback' THEN
-          opts = format(opts_tmpl, node_name, entry.node_port);
-      END IF;
 
-      EXECUTE format(server_tmpl, server_name, opts, current_database());
+      EXECUTE format(server_tmpl, server_name, entry.node_name, entry.node_port, current_database());
       EXECUTE format(user_tmpl, server_name, CURRENT_USER);
     END LOOP;
   END;
