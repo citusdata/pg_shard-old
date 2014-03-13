@@ -1,0 +1,9 @@
+language: c
+before_install:
+  # - wget https://gist.githubusercontent.com/jasonmp85/9535155/raw/22814fa7d28c0a81434677ab68236f8565644648/apt.postgresql.org.sh
+  - wget https://gist.githubusercontent.com/jasonmp85/9535149/raw/40774457fb3b93866d1a8be1f138378bf4c03cc3/pg-travis-test.sh
+  # - sudo sh ./apt.postgresql.org.sh
+env:
+  - PGVERSION=9.2
+  - PGVERSION=9.3
+script: bash ./pg-travis-test.sh
