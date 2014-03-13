@@ -92,20 +92,17 @@ Triggers:
     dist_insert INSTEAD OF INSERT ON widgets FOR EACH ROW EXECUTE PROCEDURE topsie.t001_shard_insert('2', '1', 'c1')
 
 -- Check for the foreign servers and tables.
-\des
-                            List of foreign servers
-                      Name                      | Owner | Foreign-data wrapper 
-------------------------------------------------+-------+----------------------
- topsie_worker-98f309c260d2c990f9b1a9afe75c486c | jason | postgres_fdw
+SELECT COUNT(*) FROM pg_foreign_server;
+ count 
+-------
+     1
 (1 row)
 
-\det
-                         List of foreign tables
- Schema |     Table     |                     Server                     
---------+---------------+------------------------------------------------
- topsie | widgets_s0_r0 | topsie_worker-98f309c260d2c990f9b1a9afe75c486c
- topsie | widgets_s1_r0 | topsie_worker-98f309c260d2c990f9b1a9afe75c486c
-(2 rows)
+SELECT COUNT(*) FROM pg_foreign_table;
+ count 
+-------
+     2
+(1 row)
 
 DROP EXTENSION topsie; -- fail, because the trigger function lives in extension
 ERROR:  cannot drop extension topsie because other objects depend on it

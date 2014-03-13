@@ -64,8 +64,8 @@ SELECT COUNT(DISTINCT c1) FROM topsie.widgets_s1_r0;
 \dS widgets
 
 -- Check for the foreign servers and tables.
-\des
-\det
+SELECT COUNT(*) FROM pg_foreign_server;
+SELECT COUNT(*) FROM pg_foreign_table;
 
 DROP EXTENSION topsie; -- fail, because the trigger function lives in extension
 
