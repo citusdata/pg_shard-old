@@ -1,6 +1,6 @@
 # topsie
 
-[![Build Status](http://img.shields.io/travis/jasonmp85/pg_travis_research.svg)][status]
+[![Build Status](http://img.shields.io/travis/jasonmp85/pg_travis_research/master.svg)][status]
 
 Sharding extension for PostgreSQL supporting DML statements in real-time.
 
