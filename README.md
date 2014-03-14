@@ -1,5 +1,7 @@
 # topsie
 
+[![Build Status](http://img.shields.io/travis/jasonmp85/pg_travis_research.svg)][status]
+
 Sharding extension for PostgreSQL supporting DML statements in real-time.
 
 ## Prerequisites
@@ -112,3 +114,5 @@ SELECT * FROM topsie.pgbench_accounts_s1_r0 WHERE aid=23456789;
 |23456789|100|500     |∅     |
 
 So this must have ended up on shard 1.
+
+[status]: https://travis-ci.org/jasonmp85/pg_travis_research
