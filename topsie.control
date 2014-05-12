@@ -1,0 +1,5 @@
+# topsie extension
+comment = 'generic hash algorithm for sharding'
+default_version = 'develop'
+module_pathname = '$libdir/topsie'
+relocatable = true
