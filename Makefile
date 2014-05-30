@@ -1,4 +1,4 @@
-# contrib/postgres_fdw/Makefile
+# Makefile
 
 MODULE_big = postgres_fdw
 OBJS = postgres_fdw.o option.o deparse.o connection.o

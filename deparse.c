@@ -26,7 +26,7 @@
  * Portions Copyright (c) 2012-2013, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *		  contrib/postgres_fdw/deparse.c
+ *		  deparse.c
  *
  *-------------------------------------------------------------------------
  */
