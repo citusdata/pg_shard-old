@@ -8,11 +8,11 @@ RETURNS fdw_handler
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION postgres_fdw_validator(text[], oid)
+CREATE FUNCTION topsie_validator(text[], oid)
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
 CREATE FOREIGN DATA WRAPPER topsie
   HANDLER postgres_fdw_handler
-  VALIDATOR postgres_fdw_validator;
+  VALIDATOR topsie_validator;

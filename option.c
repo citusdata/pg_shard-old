@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * option.c
- *		  FDW option handling for postgres_fdw
+ *		  FDW option handling for topsie
  *
  * Portions Copyright (c) 2012-2013, PostgreSQL Global Development Group
  *
@@ -32,10 +32,10 @@ typedef struct PgFdwOption
 } PgFdwOption;
 
 /*
- * Valid options for postgres_fdw.
+ * Valid options for topsie.
  * Allocated and filled in InitPgFdwOptions.
  */
-static PgFdwOption *postgres_fdw_options;
+static PgFdwOption *topsie_options;
 
 /*
  * Valid options for libpq.
@@ -53,16 +53,16 @@ static bool is_libpq_option(const char *keyword);
 
 /*
  * Validate the generic options given to a FOREIGN DATA WRAPPER, SERVER,
- * USER MAPPING or FOREIGN TABLE that uses postgres_fdw.
+ * USER MAPPING or FOREIGN TABLE that uses topsie.
  *
  * Raise an ERROR if the option or its value is considered invalid.
  */
-extern Datum postgres_fdw_validator(PG_FUNCTION_ARGS);
+extern Datum topsie_validator(PG_FUNCTION_ARGS);
 
-PG_FUNCTION_INFO_V1(postgres_fdw_validator);
+PG_FUNCTION_INFO_V1(topsie_validator);
 
 Datum
-postgres_fdw_validator(PG_FUNCTION_ARGS)
+topsie_validator(PG_FUNCTION_ARGS)
 {
 	List	   *options_list = untransformRelOptions(PG_GETARG_DATUM(0));
 	Oid			catalog = PG_GETARG_OID(1);
@@ -72,7 +72,7 @@ postgres_fdw_validator(PG_FUNCTION_ARGS)
 	InitPgFdwOptions();
 
 	/*
-	 * Check that only options supported by postgres_fdw, and allowed for the
+	 * Check that only options supported by topsie, and allowed for the
 	 * current object type, are given.
 	 */
 	foreach(cell, options_list)
@@ -89,7 +89,7 @@ postgres_fdw_validator(PG_FUNCTION_ARGS)
 			StringInfoData buf;
 
 			initStringInfo(&buf);
-			for (opt = postgres_fdw_options; opt->keyword; opt++)
+			for (opt = topsie_options; opt->keyword; opt++)
 			{
 				if (catalog == opt->optcontext)
 					appendStringInfo(&buf, "%s%s", (buf.len > 0) ? ", " : "",
@@ -159,7 +159,7 @@ InitPgFdwOptions(void)
 	};
 
 	/* Prevent redundant initialization. */
-	if (postgres_fdw_options)
+	if (topsie_options)
 		return;
 
 	/*
@@ -183,22 +183,22 @@ InitPgFdwOptions(void)
 
 	/*
 	 * Construct an array which consists of all valid options for
-	 * postgres_fdw, by appending FDW-specific options to libpq options.
+	 * topsie, by appending FDW-specific options to libpq options.
 	 *
-	 * We use plain malloc here to allocate postgres_fdw_options because it
+	 * We use plain malloc here to allocate topsie_options because it
 	 * lives as long as the backend process does.  Besides, keeping
 	 * libpq_options in memory allows us to avoid copying every keyword
 	 * string.
 	 */
-	postgres_fdw_options = (PgFdwOption *)
+	topsie_options = (PgFdwOption *)
 		malloc(sizeof(PgFdwOption) * num_libpq_opts +
 			   sizeof(non_libpq_options));
-	if (postgres_fdw_options == NULL)
+	if (topsie_options == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_FDW_OUT_OF_MEMORY),
 				 errmsg("out of memory")));
 
-	popt = postgres_fdw_options;
+	popt = topsie_options;
 	for (lopt = libpq_options; lopt->keyword; lopt++)
 	{
 		/* Hide debug options, as well as settings we override internally. */
@@ -228,7 +228,7 @@ InitPgFdwOptions(void)
 }
 
 /*
- * Check whether the given option is one of the valid postgres_fdw options.
+ * Check whether the given option is one of the valid topsie options.
  * context is the Oid of the catalog holding the object the option is for.
  */
 static bool
@@ -236,9 +236,9 @@ is_valid_option(const char *keyword, Oid context)
 {
 	PgFdwOption *opt;
 
-	Assert(postgres_fdw_options);		/* must be initialized already */
+	Assert(topsie_options);		/* must be initialized already */
 
-	for (opt = postgres_fdw_options; opt->keyword; opt++)
+	for (opt = topsie_options; opt->keyword; opt++)
 	{
 		if (context == opt->optcontext && strcmp(opt->keyword, keyword) == 0)
 			return true;
@@ -255,9 +255,9 @@ is_libpq_option(const char *keyword)
 {
 	PgFdwOption *opt;
 
-	Assert(postgres_fdw_options);		/* must be initialized already */
+	Assert(topsie_options);		/* must be initialized already */
 
-	for (opt = postgres_fdw_options; opt->keyword; opt++)
+	for (opt = topsie_options; opt->keyword; opt++)
 	{
 		if (opt->is_libpq_opt && strcmp(opt->keyword, keyword) == 0)
 			return true;
