@@ -1,4 +1,4 @@
-/* postgres_fdw--1.0.sql */
+/* postgres_fdw--develop.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION postgres_fdw" to load this file. \quit

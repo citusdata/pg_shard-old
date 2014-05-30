@@ -7,7 +7,7 @@ PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
 
 EXTENSION = postgres_fdw
-DATA = postgres_fdw--1.0.sql
+DATA = postgres_fdw--develop.sql
 
 REGRESS = postgres_fdw
 
