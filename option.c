@@ -143,6 +143,11 @@ InitTopsieOptions(void)
 
 	/* non-libpq FDW-specific FDW options */
 	static const TopsieOption non_libpq_options[] = {
+		/* settings related to sharding */
+		{"replication_factor", ForeignTableRelationId, false},
+		{"shard_count", ForeignTableRelationId, false},
+		{"partition_column", ForeignTableRelationId, false},
+		/* schema-mapping settings */
 		{"schema_name", ForeignTableRelationId, false},
 		{"table_name", ForeignTableRelationId, false},
 		{"column_name", AttributeRelationId, false},
@@ -201,9 +206,15 @@ InitTopsieOptions(void)
 	popt = topsie_options;
 	for (lopt = libpq_options; lopt->keyword; lopt++)
 	{
-		/* Hide debug options, as well as settings we override internally. */
+		/*
+		 * Hide debug options, settings we override internally, and connection
+		 * settings that are provided by the node list (such as host and port).
+		 */
 		if (strchr(lopt->dispchar, 'D') ||
 			strcmp(lopt->keyword, "fallback_application_name") == 0 ||
+			strcmp(lopt->keyword, "host") == 0                      ||
+			strcmp(lopt->keyword, "hostaddr") == 0                  ||
+			strcmp(lopt->keyword, "port") == 0                      ||
 			strcmp(lopt->keyword, "client_encoding") == 0)
 			continue;
 
