@@ -24,29 +24,29 @@
 /*
  * Describes the valid options for objects that this wrapper uses.
  */
-typedef struct PgFdwOption
+typedef struct TopsieOption
 {
 	const char *keyword;
 	Oid			optcontext;		/* OID of catalog in which option may appear */
 	bool		is_libpq_opt;	/* true if it's used in libpq */
-} PgFdwOption;
+} TopsieOption;
 
 /*
  * Valid options for topsie.
- * Allocated and filled in InitPgFdwOptions.
+ * Allocated and filled in InitTopsieOptions.
  */
-static PgFdwOption *topsie_options;
+static TopsieOption *topsie_options;
 
 /*
  * Valid options for libpq.
- * Allocated and filled in InitPgFdwOptions.
+ * Allocated and filled in InitTopsieOptions.
  */
 static PQconninfoOption *libpq_options;
 
 /*
  * Helper functions
  */
-static void InitPgFdwOptions(void);
+static void InitTopsieOptions(void);
 static bool is_valid_option(const char *keyword, Oid context);
 static bool is_libpq_option(const char *keyword);
 
@@ -69,7 +69,7 @@ topsie_validator(PG_FUNCTION_ARGS)
 	ListCell   *cell;
 
 	/* Build our options lists if we didn't yet. */
-	InitPgFdwOptions();
+	InitTopsieOptions();
 
 	/*
 	 * Check that only options supported by topsie, and allowed for the
@@ -85,7 +85,7 @@ topsie_validator(PG_FUNCTION_ARGS)
 			 * Unknown option specified, complain about it. Provide a hint
 			 * with list of valid options for the object.
 			 */
-			PgFdwOption *opt;
+			TopsieOption *opt;
 			StringInfoData buf;
 
 			initStringInfo(&buf);
@@ -135,14 +135,14 @@ topsie_validator(PG_FUNCTION_ARGS)
  * Initialize option lists.
  */
 static void
-InitPgFdwOptions(void)
+InitTopsieOptions(void)
 {
 	int			num_libpq_opts;
 	PQconninfoOption *lopt;
-	PgFdwOption *popt;
+	TopsieOption *popt;
 
 	/* non-libpq FDW-specific FDW options */
-	static const PgFdwOption non_libpq_options[] = {
+	static const TopsieOption non_libpq_options[] = {
 		{"schema_name", ForeignTableRelationId, false},
 		{"table_name", ForeignTableRelationId, false},
 		{"column_name", AttributeRelationId, false},
@@ -190,8 +190,8 @@ InitPgFdwOptions(void)
 	 * libpq_options in memory allows us to avoid copying every keyword
 	 * string.
 	 */
-	topsie_options = (PgFdwOption *)
-		malloc(sizeof(PgFdwOption) * num_libpq_opts +
+	topsie_options = (TopsieOption *)
+		malloc(sizeof(TopsieOption) * num_libpq_opts +
 			   sizeof(non_libpq_options));
 	if (topsie_options == NULL)
 		ereport(ERROR,
@@ -234,7 +234,7 @@ InitPgFdwOptions(void)
 static bool
 is_valid_option(const char *keyword, Oid context)
 {
-	PgFdwOption *opt;
+	TopsieOption *opt;
 
 	Assert(topsie_options);		/* must be initialized already */
 
@@ -253,7 +253,7 @@ is_valid_option(const char *keyword, Oid context)
 static bool
 is_libpq_option(const char *keyword)
 {
-	PgFdwOption *opt;
+	TopsieOption *opt;
 
 	Assert(topsie_options);		/* must be initialized already */
 
@@ -279,7 +279,7 @@ ExtractConnectionOptions(List *defelems, const char **keywords,
 	int			i;
 
 	/* Build our options lists if we didn't yet. */
-	InitPgFdwOptions();
+	InitTopsieOptions();
 
 	i = 0;
 	foreach(lc, defelems)
