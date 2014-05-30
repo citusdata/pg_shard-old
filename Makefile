@@ -1,15 +1,15 @@
 # Makefile
 
-MODULE_big = postgres_fdw
+MODULE_big = topsie
 OBJS = postgres_fdw.o option.o deparse.o connection.o
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)
 
-EXTENSION = postgres_fdw
-DATA = postgres_fdw--develop.sql
+EXTENSION = topsie
+DATA = topsie--develop.sql
 
-REGRESS = postgres_fdw
+REGRESS = topsie
 
 # the db name is hard-coded in the tests
 override USE_MODULE_DB =

@@ -2,10 +2,10 @@
 -- create FDW objects
 -- ===================================================================
 
-CREATE EXTENSION postgres_fdw;
+CREATE EXTENSION topsie;
 
-CREATE SERVER testserver1 FOREIGN DATA WRAPPER postgres_fdw;
-CREATE SERVER loopback FOREIGN DATA WRAPPER postgres_fdw
+CREATE SERVER testserver1 FOREIGN DATA WRAPPER topsie;
+CREATE SERVER loopback FOREIGN DATA WRAPPER topsie
   OPTIONS (dbname 'contrib_regression');
 
 CREATE USER MAPPING FOR public SERVER testserver1
