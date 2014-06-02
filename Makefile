@@ -1,7 +1,7 @@
 # Makefile
 
 MODULE_big = topsie
-OBJS = postgres_fdw.o option.o deparse.o connection.o topsie.o
+OBJS = postgres_fdw.o option.o deparse.o connection.o topsie.o metadata.o
 
 PG_CPPFLAGS = -I$(libpq_srcdir)
 SHLIB_LINK = $(libpq)

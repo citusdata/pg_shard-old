@@ -33,6 +33,9 @@ extern unsigned int GetPrepStmtNumber(PGconn *conn);
 extern void pgfdw_report_error(int elevel, PGresult *res, PGconn *conn,
 				   bool clear, const char *sql);
 
+/* in metadata.c */
+extern List * TopsieLoadShardList(Oid relationId);
+
 /* in option.c */
 extern int ExtractConnectionOptions(List *defelems,
 						 const char **keywords,
