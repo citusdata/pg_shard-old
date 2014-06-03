@@ -9,9 +9,10 @@
 PG_MODULE_MAGIC;
 #endif
 
-Datum topsie_hash(PG_FUNCTION_ARGS);
 
+Datum topsie_hash(PG_FUNCTION_ARGS);
 static uint32 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc);
+
 
 /*
  * topsie_hash accepts a record and attribute number and returns
