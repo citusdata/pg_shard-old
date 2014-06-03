@@ -2631,3 +2631,60 @@ SELECT topsie_hash(many_types, 1::smallint) FROM many_types WHERE four = 0;
            0
 (1 row)
 
+-- ===================================================================
+-- test metadata functionality
+-- ===================================================================
+CREATE TABLE events ();
+INSERT INTO topsie_metadata.shards (relation_id, min_value, max_value) VALUES
+('events'::regclass, 0, 10),
+('events'::regclass, 10, 20),
+('events'::regclass, 20, 30),
+('events'::regclass, 30, 40);
+INSERT INTO topsie_metadata.placements (host, port, shard_id) VALUES
+('foo', 123, 1),
+('foo', 123, 2),
+('bar', 456, 3),
+('bar', 456, 4);
+SELECT topsie_print_metadata('events'::regclass);
+INFO:  Found 4 shards...
+INFO:  Shard #1
+INFO:  	relation:	events
+INFO:  	min value:	0
+INFO:  	max value:	10
+INFO:  	1 placements:
+INFO:  		Placement #1
+INFO:  			shard:	1
+INFO:  			host:	foo
+INFO:  			port:	123
+INFO:  Shard #2
+INFO:  	relation:	events
+INFO:  	min value:	10
+INFO:  	max value:	20
+INFO:  	1 placements:
+INFO:  		Placement #2
+INFO:  			shard:	2
+INFO:  			host:	foo
+INFO:  			port:	123
+INFO:  Shard #3
+INFO:  	relation:	events
+INFO:  	min value:	20
+INFO:  	max value:	30
+INFO:  	1 placements:
+INFO:  		Placement #3
+INFO:  			shard:	3
+INFO:  			host:	bar
+INFO:  			port:	456
+INFO:  Shard #4
+INFO:  	relation:	events
+INFO:  	min value:	30
+INFO:  	max value:	40
+INFO:  	1 placements:
+INFO:  		Placement #4
+INFO:  			shard:	4
+INFO:  			host:	bar
+INFO:  			port:	456
+ topsie_print_metadata 
+-----------------------
+ 
+(1 row)
+

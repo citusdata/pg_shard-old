@@ -459,3 +459,23 @@ RESET TIME ZONE;
 
 INSERT INTO many_types ( four ) VALUES ( 0 );
 SELECT topsie_hash(many_types, 1::smallint) FROM many_types WHERE four = 0;
+
+-- ===================================================================
+-- test metadata functionality
+-- ===================================================================
+
+CREATE TABLE events ();
+
+INSERT INTO topsie_metadata.shards (relation_id, min_value, max_value) VALUES
+('events'::regclass, 0, 10),
+('events'::regclass, 10, 20),
+('events'::regclass, 20, 30),
+('events'::regclass, 30, 40);
+
+INSERT INTO topsie_metadata.placements (host, port, shard_id) VALUES
+('foo', 123, 1),
+('foo', 123, 2),
+('bar', 456, 3),
+('bar', 456, 4);
+
+SELECT topsie_print_metadata('events'::regclass);

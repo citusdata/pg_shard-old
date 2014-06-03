@@ -14,15 +14,20 @@
 
 #include "postgres_fdw.h"
 
+#include "fmgr.h"
+
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/htup.h"
 #include "access/skey.h"
 #include "catalog/namespace.h"
 #include "executor/executor.h"
+#include "nodes/pg_list.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
+#include "utils/palloc.h"
 #include "utils/rel.h"
 #include "utils/tqual.h"
 
@@ -69,6 +74,60 @@ static int64 * AllocateInt64(int64 src);
 
 /* Returns a placement populated with values from a given tuple */
 static TopsiePlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
+
+Datum topsie_print_metadata(PG_FUNCTION_ARGS);
+
+
+PG_FUNCTION_INFO_V1(topsie_print_metadata);
+
+Datum
+topsie_print_metadata(PG_FUNCTION_ARGS)
+{
+	Oid relationId = InvalidOid;
+
+	List *shardList = NIL;
+	TopsieShard *shard = NULL;
+	List *placementList = NIL;
+
+	ListCell   *cell = NULL;
+
+	relationId = PG_GETARG_OID(0);
+
+	shardList = TopsieLoadShardList(relationId);
+	elog(INFO, "Found %d shards...", list_length(shardList));
+
+	foreach(cell, shardList)
+	{
+		ListCell *placementCell = NULL;
+		int64 *shardId = NULL;
+
+		shardId = (int64 *) lfirst(cell);
+		shard = TopsieLoadShard(*shardId);
+
+		elog(INFO, "Shard #" INT64_FORMAT, shard->id);
+		elog(INFO, "\trelation:\t%s", get_rel_name(shard->relationId));
+		elog(INFO, "\tmin value:\t%d", shard->minValue);
+		elog(INFO, "\tmax value:\t%d", shard->maxValue);
+
+		placementList = TopsieLoadPlacementList(*shardId);
+		elog(INFO, "\t%d placements:", list_length(placementList));
+
+		foreach(placementCell, placementList)
+
+		{
+			TopsiePlacement *placement = NULL;
+
+			placement = (TopsiePlacement *) lfirst(placementCell);
+
+			elog(INFO, "\t\tPlacement #" INT64_FORMAT, placement->id);
+			elog(INFO, "\t\t\tshard:\t" INT64_FORMAT, placement->shardId);
+			elog(INFO, "\t\t\thost:\t%s", placement->host);
+			elog(INFO, "\t\t\tport:\t%u", placement->port);
+		}
+	}
+
+	PG_RETURN_VOID();
+}
 
 /*
  * Return a List of shard identifiers related to a given relation.
@@ -138,7 +197,7 @@ TopsieLoadShard(int64 shardId)
 	shard = (TopsieShard *) palloc0(sizeof(TopsieShard));
 
 	ScanKeyInit(&scanKey[0], ANUM_SHARDS_ID,
-			InvalidStrategy, F_INT8EQ, DatumGetInt64(shardId));
+			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
 	rv = makeRangeVarFromNameList(
 			stringToQualifiedNameList(METADATA_SCHEMA "." SHARDS_TABLE));
@@ -183,6 +242,7 @@ TopsieLoadPlacementList(int64 shardId)
 	const int scanKeyCount = 1;
 
 	List *placementList = NIL;
+
 	RangeVar *rv = NULL;
 	Relation rel = NULL;
 	HeapScanDesc scanDesc = NULL;
@@ -191,8 +251,7 @@ TopsieLoadPlacementList(int64 shardId)
 	HeapTuple tup = NULL;
 	TopsiePlacement *placement;
 	ScanKeyInit(&scanKey[0], ANUM_PLACEMENTS_SHARD_ID,
-
-			InvalidStrategy, F_INT8EQ, DatumGetInt64(shardId));
+			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
 	rv = makeRangeVarFromNameList(
 			stringToQualifiedNameList(METADATA_SCHEMA "." PLACEMENTS_TABLE));
@@ -205,7 +264,7 @@ TopsieLoadPlacementList(int64 shardId)
 	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
 		placement = TupleToPlacement(tup, tupleDesc);
-		lappend(placementList, placement);
+		placementList = lappend(placementList, placement);
 	}
 
 	heap_endscan(scanDesc);
