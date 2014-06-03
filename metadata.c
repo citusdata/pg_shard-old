@@ -16,10 +16,12 @@
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
+#include "access/htup.h"
 #include "access/skey.h"
 #include "catalog/namespace.h"
 #include "executor/executor.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
 #include "utils/tqual.h"
@@ -32,6 +34,8 @@
 
 #define ANUM_SHARDS_ID 1
 #define ANUM_SHARDS_RELATION_ID 2
+#define ANUM_SHARDS_MIN_VALUE 3
+#define ANUM_SHARDS_MAX_VALUE 4
 
 /* Information about placements table */
 #define PLACEMENTS_TABLE "placements"
@@ -102,6 +106,64 @@ TopsieLoadShardList(Oid relationId)
 	relation_close(rel, AccessShareLock);
 
 	return shardList;
+}
+
+/*
+ * Retrieves the shard metadata for a specified shard identifier. If no such
+ * shard exists, an error is thrown.
+ */
+TopsieShard *
+TopsieLoadShard(int64 shardId)
+{
+	const int scanKeyCount = 1;
+
+	RangeVar *rv = NULL;
+	Relation rel = NULL;
+	HeapScanDesc scanDesc = NULL;
+	ScanKeyData scanKey[scanKeyCount];
+	TupleDesc tupleDesc = NULL;
+	HeapTuple tup = NULL;
+	Datum shardFieldDatum = 0;
+	bool shardFieldIsNull = false;
+	TopsieShard *shard = NULL;
+
+	shard = (TopsieShard *) palloc0(sizeof(TopsieShard));
+
+	ScanKeyInit(&scanKey[0], ANUM_SHARDS_ID,
+			InvalidStrategy, F_INT8EQ, DatumGetInt64(shardId));
+
+	rv = makeRangeVarFromNameList(
+			stringToQualifiedNameList(METADATA_SCHEMA "." SHARDS_TABLE));
+
+	rel = relation_openrv(rv, AccessShareLock);
+	tupleDesc = RelationGetDescr(rel);
+	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
+
+	if(HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection))) {
+		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc,
+				&shardFieldIsNull);
+		shard->id = DatumGetInt64(shardFieldDatum);
+
+		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_RELATION_ID, tupleDesc,
+				&shardFieldIsNull);
+		shard->relationId = DatumGetObjectId(shardFieldDatum);
+
+		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_MIN_VALUE, tupleDesc,
+				&shardFieldIsNull);
+		shard->minValue = DatumGetInt32(shardFieldDatum);
+
+		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_MAX_VALUE, tupleDesc,
+				&shardFieldIsNull);
+		shard->maxValue = DatumGetInt32(shardFieldDatum);
+	} else {
+		ereport(ERROR, (errmsg("could not find entry for shard "
+							   INT64_FORMAT, shardId)));
+	}
+
+	heap_endscan(scanDesc);
+	relation_close(rel, AccessShareLock);
+
+	return shard;
 }
 
 static int64 *
