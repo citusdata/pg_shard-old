@@ -21,7 +21,8 @@ static uint32 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc);
  */
 PG_FUNCTION_INFO_V1(topsie_hash);
 
-Datum topsie_hash(PG_FUNCTION_ARGS) {
+Datum
+topsie_hash(PG_FUNCTION_ARGS) {
   HeapTupleHeader tup = PG_GETARG_HEAPTUPLEHEADER(0);
   int16 attNum = PG_GETARG_INT16(1);
 
@@ -55,18 +56,21 @@ Datum topsie_hash(PG_FUNCTION_ARGS) {
  * function. The provided Datum is passed to that hash function to arrive at
  * a final hash value.
  */
-static uint32 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc) {
-  Oid attType;
-  TypeCacheEntry *typeEntry;
-  FunctionCallInfoData locfcinfo;
+static uint32
+HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc) {
+  Oid attType = InvalidOid;
+  TypeCacheEntry *typeEntry = NULL;
+  FunctionCallInfoData locfcinfo = { 0 };
 
   attType = tupDesc->attrs[attNum - 1]->atttypid;
 
   typeEntry = lookup_type_cache(attType, TYPECACHE_HASH_PROC_FINFO);
   if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
+  {
     ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
                     errmsg("could not identify a hash function for type %s",
                            format_type_be(attType))));
+  }
 
   InitFunctionCallInfoData(locfcinfo, &typeEntry->hash_proc_finfo, 1,
                            InvalidOid, NULL, NULL);
