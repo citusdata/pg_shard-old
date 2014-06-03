@@ -40,6 +40,11 @@
 /* Information about placements table */
 #define PLACEMENTS_TABLE "placements"
 
+#define ANUM_PLACEMENTS_ID 1
+#define ANUM_PLACEMENTS_SHARD_ID 2
+#define ANUM_PLACEMENTS_HOST 3
+#define ANUM_PLACEMENTS_PORT 4
+
 /* In-memory representation of a tuple from topsie.shards */
 typedef struct TopsieShard
 {
@@ -61,6 +66,9 @@ typedef struct TopsiePlacement
 
 /* Returns a pointer to a newly palloc'd int64 with the value from src */
 static int64 * AllocateInt64(int64 src);
+
+/* Returns a placement populated with values from a given tuple */
+static TopsiePlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
 
 /*
  * Return a List of shard identifiers related to a given relation.
@@ -166,6 +174,46 @@ TopsieLoadShard(int64 shardId)
 	return shard;
 }
 
+/*
+ * Return a List of placements related to a given shard.
+ */
+List *
+TopsieLoadPlacementList(int64 shardId)
+{
+	const int scanKeyCount = 1;
+
+	List *placementList = NIL;
+	RangeVar *rv = NULL;
+	Relation rel = NULL;
+	HeapScanDesc scanDesc = NULL;
+	ScanKeyData scanKey[scanKeyCount];
+	TupleDesc tupleDesc = NULL;
+	HeapTuple tup = NULL;
+	TopsiePlacement *placement;
+	ScanKeyInit(&scanKey[0], ANUM_PLACEMENTS_SHARD_ID,
+
+			InvalidStrategy, F_INT8EQ, DatumGetInt64(shardId));
+
+	rv = makeRangeVarFromNameList(
+			stringToQualifiedNameList(METADATA_SCHEMA "." PLACEMENTS_TABLE));
+
+	rel = relation_openrv(rv, AccessShareLock);
+
+	tupleDesc = RelationGetDescr(rel);
+	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
+
+	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
+	{
+		placement = TupleToPlacement(tup, tupleDesc);
+		lappend(placementList, placement);
+	}
+
+	heap_endscan(scanDesc);
+	relation_close(rel, AccessShareLock);
+
+	return placementList;
+}
+
 static int64 *
 AllocateInt64(int64 src)
 {
@@ -174,4 +222,32 @@ AllocateInt64(int64 src)
 	*dest = src;
 
 	return dest;
+}
+
+static TopsiePlacement *
+TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc)
+{
+	TopsiePlacement *placement = NULL;
+	Datum fieldDatum = 0;
+	bool fieldIsNull = false;
+
+
+	placement = palloc0(sizeof(TopsiePlacement));
+
+	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_ID, tupleDesc, &fieldIsNull);
+	placement->id = DatumGetInt64(fieldDatum);
+
+	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_SHARD_ID, tupleDesc,
+			&fieldIsNull);
+	placement->shardId = DatumGetInt64(fieldDatum);
+
+	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_HOST, tupleDesc,
+			&fieldIsNull);
+	placement->host = TextDatumGetCString(fieldDatum);
+
+	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_PORT, tupleDesc,
+			&fieldIsNull);
+	placement->port = DatumGetInt32(fieldDatum);
+
+	return placement;
 }
