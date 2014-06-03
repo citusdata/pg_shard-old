@@ -34,7 +34,10 @@ extern void pgfdw_report_error(int elevel, PGresult *res, PGconn *conn,
 				   bool clear, const char *sql);
 
 /* in metadata.c */
+struct TopsieShard;
+
 extern List * TopsieLoadShardList(Oid relationId);
+extern struct TopsieShard * TopsieLoadShard(int64 shardId);
 
 /* in option.c */
 extern int ExtractConnectionOptions(List *defelems,
