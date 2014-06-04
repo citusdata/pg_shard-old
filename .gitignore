@@ -26,3 +26,8 @@
 # ====================
 
 !/expected/*.out
+
+# Generated subdirectories
+/log/
+/results/
+/tmp_check/

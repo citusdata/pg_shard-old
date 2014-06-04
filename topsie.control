@@ -1,5 +1,5 @@
 # topsie extension
-comment = 'generic hash algorithm for sharding'
+comment = 'foreign-data wrapper for sharding across remote PostgreSQL servers'
 default_version = 'develop'
 module_pathname = '$libdir/topsie'
 relocatable = true
