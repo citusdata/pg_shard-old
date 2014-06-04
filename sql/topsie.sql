@@ -94,9 +94,6 @@ ALTER SERVER testserver1 OPTIONS (
 	service 'value',
 	connect_timeout 'value',
 	dbname 'value',
-	host 'value',
-	hostaddr 'value',
-	port 'value',
 	--client_encoding 'value',
 	application_name 'value',
 	--fallback_application_name 'value',
@@ -393,3 +390,23 @@ insert into loc1(f2) values('bye');
 insert into rem1(f2) values('bye remote');
 select * from loc1;
 select * from rem1;
+
+-- ===================================================================
+-- test metadata functionality
+-- ===================================================================
+
+CREATE TABLE events ();
+
+INSERT INTO topsie_metadata.shards (relation_id, min_value, max_value) VALUES
+('events'::regclass, 0, 10),
+('events'::regclass, 10, 20),
+('events'::regclass, 20, 30),
+('events'::regclass, 30, 40);
+
+INSERT INTO topsie_metadata.placements (host, port, shard_id) VALUES
+('foo', 123, 1),
+('foo', 123, 2),
+('bar', 456, 3),
+('bar', 456, 4);
+
+SELECT topsie_print_metadata('events'::regclass);

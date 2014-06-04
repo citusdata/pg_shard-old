@@ -85,9 +85,6 @@ ALTER SERVER testserver1 OPTIONS (
 	service 'value',
 	connect_timeout 'value',
 	dbname 'value',
-	host 'value',
-	hostaddr 'value',
-	port 'value',
 	--client_encoding 'value',
 	application_name 'value',
 	--fallback_application_name 'value',
@@ -2514,4 +2511,61 @@ select * from rem1;
   2 | bye
  11 | bye remote
 (4 rows)
+
+-- ===================================================================
+-- test metadata functionality
+-- ===================================================================
+CREATE TABLE events ();
+INSERT INTO topsie_metadata.shards (relation_id, min_value, max_value) VALUES
+('events'::regclass, 0, 10),
+('events'::regclass, 10, 20),
+('events'::regclass, 20, 30),
+('events'::regclass, 30, 40);
+INSERT INTO topsie_metadata.placements (host, port, shard_id) VALUES
+('foo', 123, 1),
+('foo', 123, 2),
+('bar', 456, 3),
+('bar', 456, 4);
+SELECT topsie_print_metadata('events'::regclass);
+INFO:  Found 4 shards...
+INFO:  Shard #1
+INFO:  	relation:	events
+INFO:  	min value:	0
+INFO:  	max value:	10
+INFO:  	1 placements:
+INFO:  		Placement #1
+INFO:  			shard:	1
+INFO:  			host:	foo
+INFO:  			port:	123
+INFO:  Shard #2
+INFO:  	relation:	events
+INFO:  	min value:	10
+INFO:  	max value:	20
+INFO:  	1 placements:
+INFO:  		Placement #2
+INFO:  			shard:	2
+INFO:  			host:	foo
+INFO:  			port:	123
+INFO:  Shard #3
+INFO:  	relation:	events
+INFO:  	min value:	20
+INFO:  	max value:	30
+INFO:  	1 placements:
+INFO:  		Placement #3
+INFO:  			shard:	3
+INFO:  			host:	bar
+INFO:  			port:	456
+INFO:  Shard #4
+INFO:  	relation:	events
+INFO:  	min value:	30
+INFO:  	max value:	40
+INFO:  	1 placements:
+INFO:  		Placement #4
+INFO:  			shard:	4
+INFO:  			host:	bar
+INFO:  			port:	456
+ topsie_print_metadata 
+-----------------------
+ 
+(1 row)
 
