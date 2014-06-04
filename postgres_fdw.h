@@ -33,7 +33,7 @@ extern unsigned int GetPrepStmtNumber(PGconn *conn);
 extern void pgfdw_report_error(int elevel, PGresult *res, PGconn *conn,
 				   bool clear, const char *sql);
 
-/* in metadata.c */
+/* in shard_metadata.c */
 struct TopsieShard;
 
 extern List * TopsieLoadShardList(Oid relationId);

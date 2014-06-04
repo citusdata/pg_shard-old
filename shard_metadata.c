@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
- * metadata.c
+ * shard_metadata.c
  *		  Cluster metadata handling for topsie
  *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  *
  * IDENTIFICATION
- *		  metadata.c
+ *		  shard_metadata.c
  *
  *-------------------------------------------------------------------------
  */
