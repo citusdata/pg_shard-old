@@ -59,7 +59,7 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 	relationId = PG_GETARG_OID(0);
 
 	shardList = TopsieLoadShardList(relationId);
-	elog(INFO, "Found %d shards...", list_length(shardList));
+	ereport(INFO, (errmsg("Found %d shards...", list_length(shardList))));
 
 	foreach(cell, shardList)
 	{
@@ -69,13 +69,14 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 		shardId = (int64 *) lfirst(cell);
 		shard = TopsieLoadShard(*shardId);
 
-		elog(INFO, "Shard #" INT64_FORMAT, shard->id);
-		elog(INFO, "\trelation:\t%s", get_rel_name(shard->relationId));
-		elog(INFO, "\tmin value:\t%d", shard->minValue);
-		elog(INFO, "\tmax value:\t%d", shard->maxValue);
+		ereport(INFO, (errmsg("Shard #" INT64_FORMAT, shard->id)));
+		ereport(INFO,
+				(errmsg("\trelation:\t%s", get_rel_name(shard->relationId))));
+		ereport(INFO, (errmsg("\tmin value:\t%d", shard->minValue)));
+		ereport(INFO, (errmsg("\tmax value:\t%d", shard->maxValue)));
 
 		placementList = TopsieLoadPlacementList(*shardId);
-		elog(INFO, "\t%d placements:", list_length(placementList));
+		ereport(INFO, (errmsg("\t%d placements:", list_length(placementList))));
 
 		foreach(placementCell, placementList)
 
@@ -84,10 +85,12 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 
 			placement = (TopsiePlacement *) lfirst(placementCell);
 
-			elog(INFO, "\t\tPlacement #" INT64_FORMAT, placement->id);
-			elog(INFO, "\t\t\tshard:\t" INT64_FORMAT, placement->shardId);
-			elog(INFO, "\t\t\thost:\t%s", placement->host);
-			elog(INFO, "\t\t\tport:\t%u", placement->port);
+			ereport(INFO,
+					(errmsg("\t\tPlacement #" INT64_FORMAT, placement->id)));
+			ereport(INFO,
+					(errmsg("\t\t\tshard:\t" INT64_FORMAT, placement->shardId)));
+			ereport(INFO, (errmsg("\t\t\thost:\t%s", placement->host)));
+			ereport(INFO, (errmsg("\t\t\tport:\t%u", placement->port)));
 		}
 	}
 
