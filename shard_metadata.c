@@ -39,6 +39,12 @@ static TopsiePlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
 
 PG_FUNCTION_INFO_V1(topsie_print_metadata);
 
+/*
+ * Walks over all shard/placement configuration and prints it at INFO level for
+ * testing purposes.
+ *
+ * FIXME: Remove before release
+ */
 Datum
 topsie_print_metadata(PG_FUNCTION_ARGS)
 {
