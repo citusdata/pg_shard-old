@@ -48,17 +48,13 @@ PG_FUNCTION_INFO_V1(topsie_print_metadata);
 Datum
 topsie_print_metadata(PG_FUNCTION_ARGS)
 {
-	Oid relationId = InvalidOid;
+	Oid relationId = PG_GETARG_OID(0);
 
-	List *shardList = NIL;
-	TopsieShard *shard = NULL;
+	List *shardList = TopsieLoadShardList(relationId);
 	List *placementList = NIL;
 
 	ListCell   *cell = NULL;
 
-	relationId = PG_GETARG_OID(0);
-
-	shardList = TopsieLoadShardList(relationId);
 	ereport(INFO, (errmsg("Found %d shards...", list_length(shardList))));
 
 	foreach(cell, shardList)
@@ -67,7 +63,7 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 		int64 *shardId = NULL;
 
 		shardId = (int64 *) lfirst(cell);
-		shard = TopsieLoadShard(*shardId);
+		TopsieShard * shard = TopsieLoadShard(*shardId);
 
 		ereport(INFO, (errmsg("Shard #" INT64_FORMAT, shard->id)));
 		ereport(INFO,
