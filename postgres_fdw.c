@@ -916,7 +916,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 	 * Get connection to the foreign server.  Connection manager will
 	 * establish new connection if necessary.
 	 */
-	fsstate->conn = GetConnection(server, user, false);
+	fsstate->conn = GetConnection(server, user, "", 5432, false);
 
 	/* Assign a unique ID for my cursor */
 	fsstate->cursor_number = GetCursorNumber(fsstate->conn);
@@ -1299,7 +1299,7 @@ postgresBeginForeignModify(ModifyTableState *mtstate,
 	user = GetUserMapping(userid, server->serverid);
 
 	/* Open connection; report that we'll create a prepared statement. */
-	fmstate->conn = GetConnection(server, user, true);
+	fmstate->conn = GetConnection(server, user, "", 5432, true);
 	fmstate->p_name = NULL;		/* prepared statement not made yet */
 
 	/* Deconstruct fdw_private data. */
@@ -1749,7 +1749,7 @@ estimate_path_cost_size(PlannerInfo *root,
 							  (fpinfo->remote_conds == NIL), NULL);
 
 		/* Get the remote estimate */
-		conn = GetConnection(fpinfo->server, fpinfo->user, false);
+		conn = GetConnection(fpinfo->server, fpinfo->user, "", 5432, false);
 		get_remote_estimate(sql.data, conn, &rows, &width,
 							&startup_cost, &total_cost);
 		ReleaseConnection(conn);
@@ -2314,7 +2314,7 @@ postgresAnalyzeForeignTable(Relation relation,
 	table = GetForeignTable(RelationGetRelid(relation));
 	server = GetForeignServer(table->serverid);
 	user = GetUserMapping(relation->rd_rel->relowner, server->serverid);
-	conn = GetConnection(server, user, false);
+	conn = GetConnection(server, user, "", 5432, false);
 
 	/*
 	 * Construct command to get page count for relation.
@@ -2406,7 +2406,7 @@ postgresAcquireSampleRowsFunc(Relation relation, int elevel,
 	table = GetForeignTable(RelationGetRelid(relation));
 	server = GetForeignServer(table->serverid);
 	user = GetUserMapping(relation->rd_rel->relowner, server->serverid);
-	conn = GetConnection(server, user, false);
+	conn = GetConnection(server, user, "", 5432, false);
 
 	/*
 	 * Construct cursor that retrieves whole rows from remote.
