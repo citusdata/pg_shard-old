@@ -106,19 +106,14 @@ TopsieLoadShardList(Oid relationId)
 	const int scanKeyCount = 1;
 
 	List *shardList = NIL;
+
 	RangeVar *rv = NULL;
 	Relation rel = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
-	Datum shardIdDatum = 0;
-	int64 shardId = 0;
-	int64 *shardIdPointer = NULL;
-	bool shardIdIsNull = false;
-
-	ScanKeyInit(&scanKey[0], ANUM_SHARDS_RELATION_ID,
-			InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(relationId));
+	bool isNull = false;
 
 	rv = makeRangeVarFromNameList(
 			stringToQualifiedNameList(METADATA_SCHEMA "." SHARDS_TABLE));
@@ -126,13 +121,18 @@ TopsieLoadShardList(Oid relationId)
 	rel = relation_openrv(rv, AccessShareLock);
 
 	tupleDesc = RelationGetDescr(rel);
+
+	ScanKeyInit(&scanKey[0], ANUM_SHARDS_RELATION_ID,
+			InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(relationId));
+
 	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
 
 	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
-		shardIdDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc, &shardIdIsNull);
-		shardId = DatumGetInt64(shardIdDatum);
-		shardIdPointer = AllocateInt64(shardId);
+		Datum shardIdDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc, &isNull);
+
+		int64 shardId = DatumGetInt64(shardIdDatum);
+		int64 *shardIdPointer = AllocateInt64(shardId);
 
 		shardList = lappend(shardList, shardIdPointer);
 	}
@@ -217,9 +217,6 @@ TopsieLoadPlacementList(int64 shardId)
 	ScanKeyData scanKey[scanKeyCount];
 	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
-	TopsiePlacement *placement;
-	ScanKeyInit(&scanKey[0], ANUM_PLACEMENTS_SHARD_ID,
-			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
 	rv = makeRangeVarFromNameList(
 			stringToQualifiedNameList(METADATA_SCHEMA "." PLACEMENTS_TABLE));
@@ -227,16 +224,27 @@ TopsieLoadPlacementList(int64 shardId)
 	rel = relation_openrv(rv, AccessShareLock);
 
 	tupleDesc = RelationGetDescr(rel);
+
+	ScanKeyInit(&scanKey[0], ANUM_PLACEMENTS_SHARD_ID,
+			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
+
 	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
 
 	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
-		placement = TupleToPlacement(tup, tupleDesc);
+		TopsiePlacement *placement = TupleToPlacement(tup, tupleDesc);
 		placementList = lappend(placementList, placement);
 	}
 
 	heap_endscan(scanDesc);
 	relation_close(rel, AccessShareLock);
+
+	/* if no shard placements are found, warn the user */
+	if (placementList == NIL)
+	{
+		ereport(WARNING, (errmsg("could not find any placements for shardId "
+								 INT64_FORMAT, shardId)));
+	}
 
 	return placementList;
 }
@@ -255,26 +263,23 @@ static TopsiePlacement *
 TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc)
 {
 	TopsiePlacement *placement = NULL;
-	Datum fieldDatum = 0;
-	bool fieldIsNull = false;
+	bool isNull = false;
 
+	Datum idDatum = heap_getattr(tup, ANUM_PLACEMENTS_ID, tupleDesc, &isNull);
+	Datum shardIdDatum = heap_getattr(tup, ANUM_PLACEMENTS_SHARD_ID, tupleDesc,
+			&isNull);
+	Datum hostDatum = heap_getattr(tup, ANUM_PLACEMENTS_HOST, tupleDesc,
+			&isNull);
+	Datum portDatm = heap_getattr(tup, ANUM_PLACEMENTS_PORT, tupleDesc,
+			&isNull);
+
+	Assert(!HeapTupleHasNulls(tup));
 
 	placement = palloc0(sizeof(TopsiePlacement));
-
-	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_ID, tupleDesc, &fieldIsNull);
-	placement->id = DatumGetInt64(fieldDatum);
-
-	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_SHARD_ID, tupleDesc,
-			&fieldIsNull);
-	placement->shardId = DatumGetInt64(fieldDatum);
-
-	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_HOST, tupleDesc,
-			&fieldIsNull);
-	placement->host = TextDatumGetCString(fieldDatum);
-
-	fieldDatum = heap_getattr(tup, ANUM_PLACEMENTS_PORT, tupleDesc,
-			&fieldIsNull);
-	placement->port = DatumGetInt32(fieldDatum);
+	placement->id = DatumGetInt64(idDatum);
+	placement->shardId = DatumGetInt64(shardIdDatum);
+	placement->host = TextDatumGetCString(hostDatum);
+	placement->port = DatumGetInt32(portDatm);
 
 	return placement;
 }
