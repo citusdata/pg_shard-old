@@ -34,6 +34,9 @@
 /* Returns a pointer to a newly palloc'd int64 with the value from src */
 static int64 * AllocateInt64(int64 src);
 
+/* Returns a shard populated with values from a given tuple */
+static TopsieShard * TupleToShard(HeapTuple tup, TupleDesc tupleDesc);
+
 /* Returns a placement populated with values from a given tuple */
 static TopsiePlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
 
@@ -154,39 +157,26 @@ TopsieLoadShard(int64 shardId)
 	ScanKeyData scanKey[scanKeyCount];
 	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
-	Datum shardFieldDatum = 0;
-	bool shardFieldIsNull = false;
 	TopsieShard *shard = NULL;
-
-	shard = (TopsieShard *) palloc0(sizeof(TopsieShard));
-
-	ScanKeyInit(&scanKey[0], ANUM_SHARDS_ID,
-			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
 	rv = makeRangeVarFromNameList(
 			stringToQualifiedNameList(METADATA_SCHEMA "." SHARDS_TABLE));
 
 	rel = relation_openrv(rv, AccessShareLock);
+
 	tupleDesc = RelationGetDescr(rel);
+
+	ScanKeyInit(&scanKey[0], ANUM_SHARDS_ID,
+			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
+
 	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
 
-	if(HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection))) {
-		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc,
-				&shardFieldIsNull);
-		shard->id = DatumGetInt64(shardFieldDatum);
-
-		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_RELATION_ID, tupleDesc,
-				&shardFieldIsNull);
-		shard->relationId = DatumGetObjectId(shardFieldDatum);
-
-		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_MIN_VALUE, tupleDesc,
-				&shardFieldIsNull);
-		shard->minValue = DatumGetInt32(shardFieldDatum);
-
-		shardFieldDatum = heap_getattr(tup, ANUM_SHARDS_MAX_VALUE, tupleDesc,
-				&shardFieldIsNull);
-		shard->maxValue = DatumGetInt32(shardFieldDatum);
-	} else {
+	if (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
+	{
+		shard = TupleToShard(tup, tupleDesc);
+	}
+	else
+	{
 		ereport(ERROR, (errmsg("could not find entry for shard "
 							   INT64_FORMAT, shardId)));
 	}
@@ -253,6 +243,33 @@ AllocateInt64(int64 src)
 	*dest = src;
 
 	return dest;
+}
+
+static TopsieShard *
+TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
+{
+	TopsieShard *shard = NULL;
+
+	bool isNull = false;
+
+	Datum idDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc,
+			&isNull);
+	Datum relationIdDatum = heap_getattr(tup, ANUM_SHARDS_RELATION_ID, tupleDesc,
+			&isNull);
+	Datum minValueDatum = heap_getattr(tup, ANUM_SHARDS_MIN_VALUE, tupleDesc,
+			&isNull);
+	Datum maxValueDatum = heap_getattr(tup, ANUM_SHARDS_MAX_VALUE, tupleDesc,
+			&isNull);
+
+	Assert(!HeapTupleHasNulls(tup));
+
+	shard = palloc0(sizeof(TopsieShard));
+	shard->id = DatumGetInt64(idDatum);
+	shard->relationId = DatumGetObjectId(relationIdDatum);
+	shard->minValue = DatumGetInt32(minValueDatum);
+	shard->maxValue = DatumGetInt32(maxValueDatum);
+
+	return shard;
 }
 
 static TopsiePlacement *
