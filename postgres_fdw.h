@@ -20,6 +20,10 @@
 
 #include "libpq-fe.h"
 
+#define SHARD_NAME_SEPARATOR '_'
+#define list_make5(x1,x2,x3,x4,x5)		lcons(x1, list_make4(x2, x3, x4, x5))
+
+
 /* in postgres_fdw.c */
 extern int	set_transmission_modes(void);
 extern void reset_transmission_modes(int nestlevel);

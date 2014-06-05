@@ -13,6 +13,7 @@
 #include "postgres.h"
 
 #include "postgres_fdw.h"
+#include "shard_metadata.h"
 
 #include "access/htup_details.h"
 #include "access/sysattr.h"
@@ -45,6 +46,17 @@ PG_MODULE_MAGIC;
 
 /* Default CPU cost to process 1 row (above and beyond cpu_tuple_cost). */
 #define DEFAULT_FDW_TUPLE_COST		0.01
+
+typedef struct TopsieShardConnInfo {
+	int64 shardId;  /* shard to be queried using these connections */
+	int32 minValue;	/* min value contained in shard (inclusive) */
+	int32 maxValue;	/* max value contained in shard (inclusive) */
+
+	char *stmtName;	/* name of prepared statement, if created */
+
+	int numConns;		/* number of connections needed to modify shard */
+	PGconn *conns[];	/* connections to use in shard modification */
+} TopsieShardConnInfo;
 
 /*
  * FDW-specific planner information kept in RelOptInfo.fdw_private for a
@@ -106,15 +118,18 @@ enum FdwScanPrivateIndex
  * a ModifyTable node referencing a postgres_fdw foreign table.  We store:
  *
  * 1) INSERT/UPDATE/DELETE statement text to be sent to the remote server
- * 2) Integer list of target attribute numbers for INSERT/UPDATE
+ * 2) Index into above pointing to end of foreign relation name
+ * 3) Integer list of target attribute numbers for INSERT/UPDATE
  *	  (NIL for a DELETE)
- * 3) Boolean flag showing if there's a RETURNING clause
- * 4) Integer list of attribute numbers retrieved by RETURNING, if any
+ * 4) Boolean flag showing if there's a RETURNING clause
+ * 5) Integer list of attribute numbers retrieved by RETURNING, if any
  */
 enum FdwModifyPrivateIndex
 {
 	/* SQL statement to execute remotely (as a String node) */
 	FdwModifyPrivateUpdateSql,
+	 /* String position immediately after deparsed foreign relation name */
+	FdwModifyPrivateRelnameEnd,
 	/* Integer list of target attribute numbers for INSERT/UPDATE */
 	FdwModifyPrivateTargetAttnums,
 	/* has-returning flag (as an integer Value node) */
@@ -172,6 +187,7 @@ typedef struct PgFdwModifyState
 
 	/* extracted fdw_private data */
 	char	   *query;			/* text of INSERT/UPDATE/DELETE command */
+	int         relnameEnd;     /* query index pointing to end of relname */
 	List	   *target_attrs;	/* list of target attribute numbers */
 	bool		has_returning;	/* is there a RETURNING clause? */
 	List	   *retrieved_attrs;	/* attr numbers retrieved by RETURNING */
@@ -183,6 +199,9 @@ typedef struct PgFdwModifyState
 
 	/* working memory context */
 	MemoryContext temp_cxt;		/* context for per-tuple temporary data */
+
+	int numShards;				/* number of shards in distributed table */
+	TopsieShardConnInfo *shardConnInfos[]; /* info needed to use each shard */
 } PgFdwModifyState;
 
 /*
@@ -309,7 +328,14 @@ static bool ec_member_matches_foreign(PlannerInfo *root, RelOptInfo *rel,
 static void create_cursor(ForeignScanState *node);
 static void fetch_more_data(ForeignScanState *node);
 static void close_cursor(PGconn *conn, unsigned int cursor_number);
+static PgFdwModifyState * BuildModifyStateAndConnections(Relation rel,
+		ForeignServer *server, UserMapping *user, bool willPrepStmt);
+static int CompareShards(const void *v1, const void *v2);
+static void PrepareForeignShardModify(PgFdwModifyState *fmstate,
+		TopsieShardConnInfo *connInfo) __attribute__ ((unused));
 static void prepare_foreign_modify(PgFdwModifyState *fmstate);
+static void PrepareForeignStatement(PGconn *conn, char *stmtName,
+		char *stmtQuery, char *origQuery);
 static const char **convert_prep_stmt_params(PgFdwModifyState *fmstate,
 						 ItemPointer tupleid,
 						 TupleTableSlot *slot);
@@ -1244,7 +1270,8 @@ postgresPlanForeignModify(PlannerInfo *root,
 	 * Build the fdw_private list that will be available to the executor.
 	 * Items in the list must match enum FdwModifyPrivateIndex, above.
 	 */
-	return list_make4(makeString(sql.data),
+	return list_make5(makeString(sql.data),
+					  makeInteger(sql.cursor),
 					  targetAttrs,
 					  makeInteger((returningList != NIL)),
 					  retrieved_attrs);
@@ -1282,10 +1309,6 @@ postgresBeginForeignModify(ModifyTableState *mtstate,
 	if (eflags & EXEC_FLAG_EXPLAIN_ONLY)
 		return;
 
-	/* Begin constructing PgFdwModifyState. */
-	fmstate = (PgFdwModifyState *) palloc0(sizeof(PgFdwModifyState));
-	fmstate->rel = rel;
-
 	/*
 	 * Identify which user to do the remote access as.  This should match what
 	 * ExecCheckRTEPerms() does.
@@ -1298,6 +1321,10 @@ postgresBeginForeignModify(ModifyTableState *mtstate,
 	server = GetForeignServer(table->serverid);
 	user = GetUserMapping(userid, server->serverid);
 
+	/* Begin constructing PgFdwModifyState. */
+	fmstate = BuildModifyStateAndConnections(rel, server, user, true);
+	fmstate->rel = rel;
+
 	/* Open connection; report that we'll create a prepared statement. */
 	fmstate->conn = GetConnection(server, user, "", 5432, true);
 	fmstate->p_name = NULL;		/* prepared statement not made yet */
@@ -1307,6 +1334,8 @@ postgresBeginForeignModify(ModifyTableState *mtstate,
 									 FdwModifyPrivateUpdateSql));
 	fmstate->target_attrs = (List *) list_nth(fdw_private,
 											  FdwModifyPrivateTargetAttnums);
+	fmstate->relnameEnd = intVal(list_nth(fdw_private,
+                                          FdwModifyPrivateRelnameEnd));
 	fmstate->has_returning = intVal(list_nth(fdw_private,
 											 FdwModifyPrivateHasReturning));
 	fmstate->retrieved_attrs = (List *) list_nth(fdw_private,
@@ -2144,6 +2173,131 @@ close_cursor(PGconn *conn, unsigned int cursor_number)
 	PQclear(res);
 }
 
+static PgFdwModifyState *
+BuildModifyStateAndConnections(Relation rel, ForeignServer *server,
+		UserMapping *user, bool willPrepStmt)
+{
+	PgFdwModifyState *fmstate = NULL;
+
+	List *shardIds = NIL;
+	ListCell *shardIdCell = NULL;
+	int shardIdx = 0;
+
+	Oid relid = RelationGetRelid(rel);
+	shardIds = TopsieLoadShardList(relid);
+
+	fmstate = (PgFdwModifyState *) palloc0(
+			sizeof(PgFdwModifyState)
+					+ list_length(shardIds) * sizeof(TopsieShardConnInfo *));
+	fmstate->numShards = list_length(shardIds);
+
+	foreach(shardIdCell, shardIds)
+	{
+		int64 *shardId = NULL;
+
+		TopsieShard *shard = NULL;
+		List *placements = NIL;
+		TopsieShardConnInfo *shardConnInfo = NULL;
+
+		ListCell *placementCell = NULL;
+		int placementIdx = 0;
+
+		shardId = (int64 *) lfirst(shardIdCell);
+
+		shard = TopsieLoadShard(*shardId);
+		placements = TopsieLoadPlacementList(*shardId);
+
+		shardConnInfo = (TopsieShardConnInfo *) palloc0(
+				sizeof(TopsieShardConnInfo)
+						+ list_length(placements) * sizeof(PGconn *));
+		shardConnInfo->numConns = list_length(placements);
+		shardConnInfo->minValue = shard->minValue;
+		shardConnInfo->maxValue = shard->maxValue;
+
+		foreach(placementCell, placements)
+		{
+			TopsiePlacement *placement = (TopsiePlacement *) lfirst(placementCell);
+
+			shardConnInfo->conns[placementIdx++] = GetConnection(server, user,
+					placement->host, placement->port, willPrepStmt);
+		}
+
+		fmstate->shardConnInfos[shardIdx++] = shardConnInfo;
+	}
+
+	Assert(shardIdx == list_length(shardIds));
+
+	qsort(fmstate->shardConnInfos, shardIdx, sizeof(TopsieShardConnInfo *),
+			CompareShards);
+
+	return fmstate;
+}
+
+/*
+ * Sorts two shards lexicographically (ascending). Assumes shards are disjoint,
+ * but handles the case where the second shard "contains" the first, so that the
+ * function can be called by bsearch to find the appropriate shard for a value.
+ */
+static int
+CompareShards(const void *v1, const void *v2)
+{
+	TopsieShardConnInfo *sci1 = *((TopsieShardConnInfo **) v1);
+	TopsieShardConnInfo *sci2 = *((TopsieShardConnInfo **) v2);
+
+	int32 minDiff = sci1->minValue - sci2->minValue;
+	int32 maxDiff = sci1->maxValue - sci2->maxValue;
+
+	if (minDiff >= 0 && maxDiff <= 0)
+	{
+		/*
+		 * This block detects whether sci1 is contained in sci2, which is useful
+		 * for bsearch to find the shard for an incoming value.
+		 */
+		return 0;
+	}
+	else
+	{
+		/* Otherwise, we just sort lexicographically */
+		return (minDiff != 0) ? minDiff : maxDiff;
+	}
+}
+/*
+ * PrepareForeignShardModify
+ * 		Establish a prepared statement for each node involved in inserting to a
+ * 		given shard.
+ */
+static void
+PrepareForeignShardModify(PgFdwModifyState *fmstate,
+		TopsieShardConnInfo *connInfo)
+{
+	char *stmtName = NULL;
+	int queryWithIdLen = 0;
+	char *queryWithId = NULL;
+	char *querySuffix = NULL;
+
+	stmtName = palloc0(NAMEDATALEN * sizeof(char));
+	snprintf(stmtName, NAMEDATALEN, "pgsql_fdw_prep_%u",
+			 GetPrepStmtNumber(NULL));
+
+	queryWithIdLen = strlen(fmstate->query) + 20 + 1;
+	queryWithId = palloc0(queryWithIdLen * sizeof(char));
+
+	querySuffix = fmstate->query + fmstate->relnameEnd;
+
+	snprintf(queryWithId, queryWithIdLen, "%.*s%c" INT64_FORMAT "%s",
+			fmstate->relnameEnd, fmstate->query, SHARD_NAME_SEPARATOR,
+			connInfo->shardId, querySuffix);
+
+	for(int i = 0; i < connInfo->numConns; i++)
+	{
+		PrepareForeignStatement(connInfo->conns[i], stmtName, queryWithId,
+				fmstate->query);
+	}
+
+	/* This action shows that the prepare has been done. */
+	connInfo->stmtName = stmtName;
+}
+
 /*
  * prepare_foreign_modify
  *		Establish a prepared statement for execution of INSERT/UPDATE/DELETE
@@ -2153,13 +2307,30 @@ prepare_foreign_modify(PgFdwModifyState *fmstate)
 {
 	char		prep_name[NAMEDATALEN];
 	char	   *p_name;
-	PGresult   *res;
 
 	/* Construct name we'll use for the prepared statement. */
 	snprintf(prep_name, sizeof(prep_name), "pgsql_fdw_prep_%u",
 			 GetPrepStmtNumber(fmstate->conn));
 	p_name = pstrdup(prep_name);
 
+	PrepareForeignStatement(fmstate->conn, p_name, fmstate->query,
+			fmstate->query);
+
+	/* This action shows that the prepare has been done. */
+	fmstate->p_name = p_name;
+}
+
+/*
+ * PrepareForeignStatement
+ * 		Establish a prepared statement named stmtName using the connection conn.
+ * 		The query text for the statement comes from stmtQuery, but origQuery is
+ * 		used to report any errors (because the original query's table name will
+ * 		not contain shard IDs, it will be clearer to the user).
+ */
+static void
+PrepareForeignStatement(PGconn *conn, char *stmtName,
+		char *stmtQuery, char *origQuery)
+{
 	/*
 	 * We intentionally do not specify parameter types here, but leave the
 	 * remote server to derive them by default.  This avoids possible problems
@@ -2170,18 +2341,13 @@ prepare_foreign_modify(PgFdwModifyState *fmstate)
 	 * We don't use a PG_TRY block here, so be careful not to throw error
 	 * without releasing the PGresult.
 	 */
-	res = PQprepare(fmstate->conn,
-					p_name,
-					fmstate->query,
-					0,
-					NULL);
+	PGresult *res = PQprepare(conn, stmtName, stmtQuery, 0, NULL);
 
 	if (PQresultStatus(res) != PGRES_COMMAND_OK)
-		pgfdw_report_error(ERROR, res, fmstate->conn, true, fmstate->query);
+		pgfdw_report_error(ERROR, res, conn, true, origQuery);
 	PQclear(res);
 
-	/* This action shows that the prepare has been done. */
-	fmstate->p_name = p_name;
+	return;
 }
 
 /*
