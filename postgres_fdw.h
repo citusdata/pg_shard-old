@@ -80,5 +80,6 @@ extern void deparseAnalyzeSql(StringInfo buf, Relation rel,
 
 /* in topsie.c */
 extern Datum topsie_hash(PG_FUNCTION_ARGS);
+extern FunctionCallInfo TopsieHashFnCallInfo(Oid typeId);
 
 #endif   /* POSTGRES_FDW_H */

@@ -47,6 +47,31 @@ topsie_hash(PG_FUNCTION_ARGS) {
   PG_RETURN_UINT32(hashValue);
 }
 
+FunctionCallInfo
+TopsieHashFnCallInfo(Oid typeId)
+{
+	TypeCacheEntry *typeEntry = NULL;
+	FunctionCallInfo fcinfo = (FunctionCallInfo) palloc0(
+			sizeof(FunctionCallInfoData));
+
+	typeEntry = lookup_type_cache(typeId, TYPECACHE_HASH_PROC_FINFO);
+	if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_FUNCTION),
+				 errmsg("could not identify a hash function for type %s",
+				 format_type_be(typeId))));
+	}
+
+	InitFunctionCallInfoData(*fcinfo, &typeEntry->hash_proc_finfo, 1,
+			InvalidOid, NULL, NULL);
+	fcinfo->arg[0] = 0;
+	fcinfo->argnull[0] = false;
+	fcinfo->isnull = false;
+
+	return fcinfo;
+}
+
 /*
  * HashKeyForTuple determines the type of the specified attribute within the
  * given tuple and uses that type information to look up an associated hash
@@ -56,24 +81,12 @@ topsie_hash(PG_FUNCTION_ARGS) {
 static uint32
 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc) {
   Oid attType = InvalidOid;
-  TypeCacheEntry *typeEntry = NULL;
-  FunctionCallInfoData locfcinfo = { 0 };
+  FunctionCallInfo fcinfo = NULL;
 
   attType = tupDesc->attrs[attNum - 1]->atttypid;
+  fcinfo = TopsieHashFnCallInfo(attType);
 
-  typeEntry = lookup_type_cache(attType, TYPECACHE_HASH_PROC_FINFO);
-  if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
-  {
-    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
-                    errmsg("could not identify a hash function for type %s",
-                           format_type_be(attType))));
-  }
+  fcinfo->arg[0] = hashKey;
 
-  InitFunctionCallInfoData(locfcinfo, &typeEntry->hash_proc_finfo, 1,
-                           InvalidOid, NULL, NULL);
-  locfcinfo.arg[0] = hashKey;
-  locfcinfo.argnull[0] = false;
-  locfcinfo.isnull = false;
-
-  return DatumGetUInt32(FunctionCallInvoke(&locfcinfo));
+  return DatumGetUInt32(FunctionCallInvoke(fcinfo));
 }

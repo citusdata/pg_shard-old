@@ -21,14 +21,21 @@
 #include "access/htup.h"
 #include "access/skey.h"
 #include "catalog/namespace.h"
+#include "commands/defrem.h"
 #include "executor/executor.h"
+#include "foreign/foreign.h"
+#include "nodes/nodes.h"
 #include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
+#include "parser/parse_node.h"
+#include "parser/parse_relation.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
+#include "utils/relcache.h"
 #include "utils/tqual.h"
 
 /* Returns a pointer to a newly palloc'd int64 with the value from src */
@@ -95,6 +102,72 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
+
+/*
+ * Return a Var representing the column used to partition a given relation.
+ */
+Var *
+TopsiePartitionColumn(Relation rel)
+{
+	Var *partitionColumn;
+
+	/* Flags for addRangeTableEntryForRelation incovation. */
+	const bool useInheritance = false;
+	const bool inFromClause = true;
+
+	/*
+	 * Flags for addRTEtoQuery invocation. Only need to search column names, so
+	 * don't bother adding relation name to parse state.
+	 */
+	const bool addToJoins = false;
+	const bool addToNamespace = false;
+	const bool addToVarNamespace = true;
+
+	char *partitionColName = "";
+
+	ListCell   *optionCell = NULL;
+	ForeignTable *table = GetForeignTable(RelationGetRelid(rel));
+
+	foreach(optionCell, table->options)
+	{
+		DefElem    *option = (DefElem *) lfirst(optionCell);
+
+		if (strcmp(option->defname, "partition_column") == 0)
+		{
+			partitionColName = defGetString(option);
+		}
+	}
+
+	// TODO: Error early if no partition column setting is found?
+
+	ParseState *parseState = make_parsestate(NULL);
+
+	RangeTblEntry *rte = addRangeTableEntryForRelation(parseState, rel, NULL,
+			useInheritance, inFromClause);
+	addRTEtoQuery(parseState, rte, addToJoins, addToNamespace, addToVarNamespace);
+
+	partitionColumn = (Var *) scanRTEForColumn(parseState, rte,
+			partitionColName, 0);
+
+	free_parsestate(parseState);
+
+	if (partitionColumn == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_COLUMN_NAME_NOT_FOUND),
+				 errmsg("partition column \"%s\" not found", partitionColName)));
+	}
+	else if (!AttrNumberIsForUserDefinedAttr(partitionColumn->varattno))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_INVALID_COLUMN_NAME),
+				 errmsg("specified partition column \"%s\" is a system column",
+						 partitionColName)));
+	}
+
+	return partitionColumn;
+}
+
 
 /*
  * Return a List of shard identifiers related to a given relation.

@@ -58,7 +58,8 @@ CREATE FOREIGN TABLE ft1 (
 	c6 varchar(10),
 	c7 char(10) default 'ft1',
 	c8 user_enum
-) SERVER loopback;
+) SERVER loopback
+OPTIONS (partition_column 'c1');
 ALTER FOREIGN TABLE ft1 DROP COLUMN c0;
 CREATE FOREIGN TABLE ft2 (
 	c1 int NOT NULL,
@@ -70,7 +71,8 @@ CREATE FOREIGN TABLE ft2 (
 	c6 varchar(10),
 	c7 char(10) default 'ft2',
 	c8 user_enum
-) SERVER loopback;
+) SERVER loopback
+OPTIONS (partition_column 'c1');
 ALTER FOREIGN TABLE ft2 DROP COLUMN cx;
 -- ===================================================================
 -- tests for validator
@@ -110,11 +112,11 @@ ALTER FOREIGN TABLE ft2 OPTIONS (schema_name 'S 1', table_name 'T 1');
 ALTER FOREIGN TABLE ft1 ALTER COLUMN c1 OPTIONS (column_name 'C 1');
 ALTER FOREIGN TABLE ft2 ALTER COLUMN c1 OPTIONS (column_name 'C 1');
 \det+
-                             List of foreign tables
- Schema | Table |  Server  |              FDW Options              | Description 
---------+-------+----------+---------------------------------------+-------------
- public | ft1   | loopback | (schema_name 'S 1', table_name 'T 1') | 
- public | ft2   | loopback | (schema_name 'S 1', table_name 'T 1') | 
+                                         List of foreign tables
+ Schema | Table |  Server  |                         FDW Options                          | Description 
+--------+-------+----------+--------------------------------------------------------------+-------------
+ public | ft1   | loopback | (partition_column 'c1', schema_name 'S 1', table_name 'T 1') | 
+ public | ft2   | loopback | (partition_column 'c1', schema_name 'S 1', table_name 'T 1') | 
 (2 rows)
 
 -- Now we should be able to run ANALYZE.
@@ -895,9 +897,9 @@ COMMIT;
 -- ===================================================================
 -- test handling of collations
 -- ===================================================================
-create table loct3 (f1 text collate "C", f2 text);
-create foreign table ft3 (f1 text collate "C", f2 text)
-  server loopback options (table_name 'loct3');
+create table loct3 (f1 text collate "C" not null, f2 text);
+create foreign table ft3 (f1 text collate "C" not null, f2 text)
+  server loopback options (table_name 'loct3', partition_column 'f1');
 -- can be sent to remote
 explain (verbose, costs off) select * from ft3 where f1 = 'foo';
                                 QUERY PLAN                                
@@ -2483,7 +2485,7 @@ select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 -- ===================================================================
 create table loc1 (f1 serial, f2 text);
 create foreign table rem1 (f1 serial, f2 text)
-  server loopback options(table_name 'loc1');
+  server loopback options(table_name 'loc1', partition_column 'f1');
 select pg_catalog.setval('rem1_f1_seq', 10, false);
  setval 
 --------

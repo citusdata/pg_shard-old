@@ -200,6 +200,9 @@ typedef struct PgFdwModifyState
 	/* working memory context */
 	MemoryContext temp_cxt;		/* context for per-tuple temporary data */
 
+	/* info about shard distribution */
+	Var *partitionColumn;				/* column used to partition table */
+	FunctionCallInfo hashFnCallInfo;	/* use to hash values in above column */
 	int numShards;				/* number of shards in distributed table */
 	TopsieShardConnInfo *shardConnInfos[]; /* info needed to use each shard */
 } PgFdwModifyState;
@@ -1324,6 +1327,10 @@ postgresBeginForeignModify(ModifyTableState *mtstate,
 	/* Begin constructing PgFdwModifyState. */
 	fmstate = BuildModifyStateAndConnections(rel, server, user, true);
 	fmstate->rel = rel;
+
+	fmstate->partitionColumn = TopsiePartitionColumn(rel);
+	fmstate->hashFnCallInfo = TopsieHashFnCallInfo(
+			fmstate->partitionColumn->vartype);
 
 	/* Open connection; report that we'll create a prepared statement. */
 	fmstate->conn = GetConnection(server, user, "", 5432, true);

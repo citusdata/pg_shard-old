@@ -65,7 +65,8 @@ CREATE FOREIGN TABLE ft1 (
 	c6 varchar(10),
 	c7 char(10) default 'ft1',
 	c8 user_enum
-) SERVER loopback;
+) SERVER loopback
+OPTIONS (partition_column 'c1');
 ALTER FOREIGN TABLE ft1 DROP COLUMN c0;
 
 CREATE FOREIGN TABLE ft2 (
@@ -78,7 +79,8 @@ CREATE FOREIGN TABLE ft2 (
 	c6 varchar(10),
 	c7 char(10) default 'ft2',
 	c8 user_enum
-) SERVER loopback;
+) SERVER loopback
+OPTIONS (partition_column 'c1');
 ALTER FOREIGN TABLE ft2 DROP COLUMN cx;
 
 -- ===================================================================
@@ -288,9 +290,9 @@ COMMIT;
 -- ===================================================================
 -- test handling of collations
 -- ===================================================================
-create table loct3 (f1 text collate "C", f2 text);
-create foreign table ft3 (f1 text collate "C", f2 text)
-  server loopback options (table_name 'loct3');
+create table loct3 (f1 text collate "C" not null, f2 text);
+create foreign table ft3 (f1 text collate "C" not null, f2 text)
+  server loopback options (table_name 'loct3', partition_column 'f1');
 
 -- can be sent to remote
 explain (verbose, costs off) select * from ft3 where f1 = 'foo';
@@ -382,7 +384,7 @@ select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
 -- ===================================================================
 create table loc1 (f1 serial, f2 text);
 create foreign table rem1 (f1 serial, f2 text)
-  server loopback options(table_name 'loc1');
+  server loopback options(table_name 'loc1', partition_column 'f1');
 select pg_catalog.setval('rem1_f1_seq', 10, false);
 insert into loc1(f2) values('hi');
 insert into rem1(f2) values('hi remote');
