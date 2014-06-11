@@ -335,7 +335,7 @@ static PgFdwModifyState * BuildModifyStateAndConnections(Relation rel,
 		ForeignServer *server, UserMapping *user, bool willPrepStmt);
 static int CompareShards(const void *v1, const void *v2);
 static void PrepareForeignShardModify(PgFdwModifyState *fmstate,
-		TopsieShardConnInfo *connInfo) __attribute__ ((unused));
+		TopsieShardConnInfo *connInfo);
 static void prepare_foreign_modify(PgFdwModifyState *fmstate);
 static void PrepareForeignStatement(PGconn *conn, char *stmtName,
 		char *stmtQuery, char *origQuery);
@@ -357,6 +357,9 @@ static HeapTuple make_tuple_from_result_row(PGresult *res,
 						   List *retrieved_attrs,
 						   MemoryContext temp_context);
 static void conversion_error_callback(void *arg);
+static TopsieShardConnInfo * ShardConnInfoForModify(PgFdwModifyState *fmstate,
+													TupleTableSlot *slot);
+
 
 
 /*
@@ -1414,41 +1417,65 @@ postgresExecForeignInsert(EState *estate,
 	PgFdwModifyState *fmstate = (PgFdwModifyState *) resultRelInfo->ri_FdwState;
 	const char **p_values;
 	PGresult   *res;
-	int			n_rows;
+	int			n_rows = 0;
+	TopsieShardConnInfo *shardConnInfo;
+	int returnerIdx;
+
+
+	shardConnInfo = ShardConnInfoForModify(fmstate, slot);
+
+	returnerIdx = random() % shardConnInfo->numConns;
 
 	/* Set up the prepared statement on the remote server, if we didn't yet */
-	if (!fmstate->p_name)
-		prepare_foreign_modify(fmstate);
+	if (!shardConnInfo->stmtName)
+	{
+		PrepareForeignShardModify(fmstate, shardConnInfo);
+	}
 
 	/* Convert parameters needed by prepared statement to text form */
 	p_values = convert_prep_stmt_params(fmstate, NULL, slot);
 
+	if (shardConnInfo->numConns <= 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+				 errmsg("no connections for shard #" UINT64_FORMAT,
+						shardConnInfo->shardId)));
+	}
+
 	/*
-	 * Execute the prepared statement, and check for success.
+	 * Execute the prepared statement for each connection in the shard, and
+	 * check for success.
 	 *
 	 * We don't use a PG_TRY block here, so be careful not to throw error
 	 * without releasing the PGresult.
 	 */
-	res = PQexecPrepared(fmstate->conn,
-						 fmstate->p_name,
-						 fmstate->p_nums,
-						 p_values,
-						 NULL,
-						 NULL,
-						 0);
-	if (PQresultStatus(res) !=
-		(fmstate->has_returning ? PGRES_TUPLES_OK : PGRES_COMMAND_OK))
-		pgfdw_report_error(ERROR, res, fmstate->conn, true, fmstate->query);
-
-	/* Check number of rows affected, and fetch RETURNING tuple if any */
-	if (fmstate->has_returning)
+	for (int i = 0; i < shardConnInfo->numConns; i++)
 	{
-		n_rows = PQntuples(res);
-		if (n_rows > 0)
-			store_returning_result(fmstate, slot, res);
+		res = PQexecPrepared(shardConnInfo->conns[i],
+							 shardConnInfo->stmtName,
+							 fmstate->p_nums,
+							 p_values,
+							 NULL,
+							 NULL,
+							 0);
+		if (PQresultStatus(res) !=
+			(fmstate->has_returning ? PGRES_TUPLES_OK : PGRES_COMMAND_OK))
+			pgfdw_report_error(ERROR, res, shardConnInfo->conns[i], true, fmstate->query);
+
+		if (i == returnerIdx)
+		{
+			/* Check number of rows affected, and fetch RETURNING tuple if any */
+			if (fmstate->has_returning)
+			{
+				n_rows = PQntuples(res);
+				if (n_rows > 0)
+					store_returning_result(fmstate, slot, res);
+			}
+			else
+				n_rows = atoi(PQcmdTuples(res));
+		}
 	}
-	else
-		n_rows = atoi(PQcmdTuples(res));
 
 	/* And clean up */
 	PQclear(res);
@@ -2220,6 +2247,7 @@ BuildModifyStateAndConnections(Relation rel, ForeignServer *server,
 		shardConnInfo->numConns = list_length(placements);
 		shardConnInfo->minValue = shard->minValue;
 		shardConnInfo->maxValue = shard->maxValue;
+		shardConnInfo->shardId = shard->id;
 
 		foreach(placementCell, placements)
 		{
@@ -2874,4 +2902,37 @@ conversion_error_callback(void *arg)
 		errcontext("column \"%s\" of foreign table \"%s\"",
 				   NameStr(tupdesc->attrs[errpos->cur_attno - 1]->attname),
 				   RelationGetRelationName(errpos->rel));
+}
+
+static TopsieShardConnInfo *
+ShardConnInfoForModify(PgFdwModifyState *fmstate, TupleTableSlot *slot)
+{
+	int32 hashVal = 0;	/* initialize to 0, the hash for NULL values */
+	Datum value = 0;
+	bool isNull = false;
+	TopsieShardConnInfo searchKey = { 0 };
+	TopsieShardConnInfo **match = NULL, *searchKeyP = &searchKey;
+
+	value = slot_getattr(slot, fmstate->partitionColumn->varattno, &isNull);
+
+	if (!isNull)
+	{
+		fmstate->hashFnCallInfo->arg[0] = value;
+
+		hashVal = DatumGetInt32(FunctionCallInvoke(fmstate->hashFnCallInfo));
+	}
+
+	searchKey.minValue = searchKey.maxValue = hashVal;
+
+	match = bsearch(&searchKeyP, fmstate->shardConnInfos, fmstate->numShards,
+			sizeof(TopsieShardConnInfo *), CompareShards);
+
+	if (!match)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FDW_UNABLE_TO_CREATE_EXECUTION),
+				 errmsg("no suitable shard for hash value \"%d\"", hashVal)));
+	}
+
+	return *match;
 }
