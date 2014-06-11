@@ -2251,10 +2251,10 @@ CompareShards(const void *v1, const void *v2)
 	TopsieShardConnInfo *sci1 = *((TopsieShardConnInfo **) v1);
 	TopsieShardConnInfo *sci2 = *((TopsieShardConnInfo **) v2);
 
-	int32 minDiff = sci1->minValue - sci2->minValue;
-	int32 maxDiff = sci1->maxValue - sci2->maxValue;
+	int64 minDiff = (int64) sci1->minValue - (int64) sci2->minValue;
+	int64 maxDiff = (int64) sci1->maxValue - (int64) sci2->maxValue;
 
-	if (minDiff >= 0 && maxDiff <= 0)
+	if (minDiff >= (int64) 0 && maxDiff <= (int64) 0)
 	{
 		/*
 		 * This block detects whether sci1 is contained in sci2, which is useful
