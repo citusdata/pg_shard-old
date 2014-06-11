@@ -848,6 +848,12 @@ deparseInsertSql(StringInfo buf, PlannerInfo *root,
 	deparseRelation(buf, rel);
 	buf->cursor = buf->len;
 
+	/* If relation name is quoted, move cursor to right before the end quote */
+	if (buf->data[buf->cursor - 1] == '"')
+	{
+		buf->cursor--;
+	}
+
 	if (targetAttrs)
 	{
 		appendStringInfoString(buf, "(");
