@@ -13,75 +13,44 @@ CREATE USER MAPPING FOR public SERVER testserver1
 CREATE USER MAPPING FOR CURRENT_USER SERVER loopback;
 
 -- ===================================================================
--- create objects used through FDW loopback server
+-- create tables to be used as shards 
 -- ===================================================================
-CREATE TYPE user_enum AS ENUM ('foo', 'bar', 'buz');
-CREATE SCHEMA "S 1";
-CREATE TABLE "S 1"."T 1" (
-	"C 1" int NOT NULL,
-	c2 int NOT NULL,
-	c3 text,
-	c4 timestamptz,
-	c5 timestamp,
-	c6 varchar(10),
-	c7 char(10),
-	c8 user_enum,
-	CONSTRAINT t1_pkey PRIMARY KEY ("C 1")
-);
-CREATE TABLE "S 1"."T 2" (
-	c1 int NOT NULL,
-	c2 text,
-	CONSTRAINT t2_pkey PRIMARY KEY (c1)
+CREATE SCHEMA "topsie_tests";
+
+CREATE TABLE "topsie_tests"."events_1" (
+	id int primary key,
+	name text not null,
+	quantity float not null,
+	moment timestamp not null
 );
 
-INSERT INTO "S 1"."T 1"
-	SELECT id,
-	       id % 10,
-	       to_char(id, 'FM00000'),
-	       '1970-01-01'::timestamptz + ((id % 100) || ' days')::interval,
-	       '1970-01-01'::timestamp + ((id % 100) || ' days')::interval,
-	       id % 10,
-	       id % 10,
-	       'foo'::user_enum
-	FROM generate_series(1, 1000) id;
-INSERT INTO "S 1"."T 2"
-	SELECT id,
-	       'AAA' || to_char(id, 'FM000')
-	FROM generate_series(1, 100) id;
-
-ANALYZE "S 1"."T 1";
-ANALYZE "S 1"."T 2";
+CREATE TABLE "topsie_tests"."events_2" (
+	LIKE "topsie_tests"."events_1"
+);
 
 -- ===================================================================
--- create foreign tables
+-- create foreign table to write into shards
 -- ===================================================================
 CREATE FOREIGN TABLE ft1 (
-	c0 int,
-	c1 int NOT NULL,
-	c2 int NOT NULL,
-	c3 text,
-	c4 timestamptz,
-	c5 timestamp,
-	c6 varchar(10),
-	c7 char(10) default 'ft1',
-	c8 user_enum
+	id int not null,
+	name text not null,
+	quantity float not null,
+	moment timestamp not null
 ) SERVER loopback
-OPTIONS (partition_column 'c1');
-ALTER FOREIGN TABLE ft1 DROP COLUMN c0;
+OPTIONS (partition_column 'id');
 
-CREATE FOREIGN TABLE ft2 (
-	c1 int NOT NULL,
-	c2 int NOT NULL,
-	cx int,
-	c3 text,
-	c4 timestamptz,
-	c5 timestamp,
-	c6 varchar(10),
-	c7 char(10) default 'ft2',
-	c8 user_enum
-) SERVER loopback
-OPTIONS (partition_column 'c1');
-ALTER FOREIGN TABLE ft2 DROP COLUMN cx;
+-- ===================================================================
+-- add mappings for the shards
+-- ===================================================================
+
+INSERT INTO topsie_metadata.shards (relation_id, min_value, max_value)
+VALUES
+	('ft1'::regclass, -2147483648, -1),
+	('ft1'::regclass, 0, 2147483647);
+
+--- empty string results in connection to localhost
+INSERT INTO topsie_metadata.placements (shard_id, host, port)
+SELECT shards.id, '', 5432 FROM topsie_metadata.shards;
 
 -- ===================================================================
 -- tests for validator
@@ -116,283 +85,58 @@ ALTER SERVER testserver1 OPTIONS (
 );
 ALTER USER MAPPING FOR public SERVER testserver1
 	OPTIONS (DROP user, DROP password);
-ALTER FOREIGN TABLE ft1 OPTIONS (schema_name 'S 1', table_name 'T 1');
-ALTER FOREIGN TABLE ft2 OPTIONS (schema_name 'S 1', table_name 'T 1');
-ALTER FOREIGN TABLE ft1 ALTER COLUMN c1 OPTIONS (column_name 'C 1');
-ALTER FOREIGN TABLE ft2 ALTER COLUMN c1 OPTIONS (column_name 'C 1');
+ALTER FOREIGN TABLE ft1 OPTIONS (schema_name 'topsie_tests', table_name 'events');
 \det+
-
--- Now we should be able to run ANALYZE.
--- To exercise multiple code paths, we use local stats on ft1
--- and remote-estimate mode on ft2.
-ANALYZE ft1;
-ALTER FOREIGN TABLE ft2 OPTIONS (use_remote_estimate 'true');
-
--- ===================================================================
--- simple queries
--- ===================================================================
--- single table, with/without alias
-EXPLAIN (COSTS false) SELECT * FROM ft1 ORDER BY c3, c1 OFFSET 100 LIMIT 10;
-SELECT * FROM ft1 ORDER BY c3, c1 OFFSET 100 LIMIT 10;
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 ORDER BY t1.c3, t1.c1 OFFSET 100 LIMIT 10;
-SELECT * FROM ft1 t1 ORDER BY t1.c3, t1.c1 OFFSET 100 LIMIT 10;
--- whole-row reference
-EXPLAIN (VERBOSE, COSTS false) SELECT t1 FROM ft1 t1 ORDER BY t1.c3, t1.c1 OFFSET 100 LIMIT 10;
-SELECT t1 FROM ft1 t1 ORDER BY t1.c3, t1.c1 OFFSET 100 LIMIT 10;
--- empty result
-SELECT * FROM ft1 WHERE false;
--- with WHERE clause
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = 101 AND t1.c6 = '1' AND t1.c7 >= '1';
-SELECT * FROM ft1 t1 WHERE t1.c1 = 101 AND t1.c6 = '1' AND t1.c7 >= '1';
--- aggregate
-SELECT COUNT(*) FROM ft1 t1;
--- join two tables
-SELECT t1.c1 FROM ft1 t1 JOIN ft2 t2 ON (t1.c1 = t2.c1) ORDER BY t1.c3, t1.c1 OFFSET 100 LIMIT 10;
--- subquery
-SELECT * FROM ft1 t1 WHERE t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 <= 10) ORDER BY c1;
--- subquery+MAX
-SELECT * FROM ft1 t1 WHERE t1.c3 = (SELECT MAX(c3) FROM ft2 t2) ORDER BY c1;
--- used in CTE
-WITH t1 AS (SELECT * FROM ft1 WHERE c1 <= 10) SELECT t2.c1, t2.c2, t2.c3, t2.c4 FROM t1, ft2 t2 WHERE t1.c1 = t2.c1 ORDER BY t1.c1;
--- fixed values
-SELECT 'fixed', NULL FROM ft1 t1 WHERE c1 = 1;
--- user-defined operator/function
-CREATE FUNCTION postgres_fdw_abs(int) RETURNS int AS $$
-BEGIN
-RETURN abs($1);
-END
-$$ LANGUAGE plpgsql IMMUTABLE;
-CREATE OPERATOR === (
-    LEFTARG = int,
-    RIGHTARG = int,
-    PROCEDURE = int4eq,
-    COMMUTATOR = ===,
-    NEGATOR = !==
-);
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = postgres_fdw_abs(t1.c2);
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2;
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = abs(t1.c2);
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = t1.c2;
-
--- ===================================================================
--- WHERE with remotely-executable conditions
--- ===================================================================
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = 1;         -- Var, OpExpr(b), Const
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = 100 AND t1.c2 = 0; -- BoolExpr
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 IS NULL;        -- NullTest
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 IS NOT NULL;    -- NullTest
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE round(abs(c1), 0) = 1; -- FuncExpr
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 = -c1;          -- OpExpr(l)
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE 1 = c1!;           -- OpExpr(r)
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE (c1 IS NOT NULL) IS DISTINCT FROM (c1 IS NOT NULL); -- DistinctExpr
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 = ANY(ARRAY[c2, 1, c1 + 0]); -- ScalarArrayOpExpr
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c1 = (ARRAY[c1,c2,3])[1]; -- ArrayRef
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c6 = E'foo''s\\bar';  -- check special chars
-EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE c8 = 'foo';  -- can't be sent to remote
--- parameterized remote path
-EXPLAIN (VERBOSE, COSTS false)
-  SELECT * FROM ft2 a, ft2 b WHERE a.c1 = 47 AND b.c1 = a.c2;
-SELECT * FROM ft2 a, ft2 b WHERE a.c1 = 47 AND b.c1 = a.c2;
--- check both safe and unsafe join conditions
-EXPLAIN (VERBOSE, COSTS false)
-  SELECT * FROM ft2 a, ft2 b
-  WHERE a.c2 = 6 AND b.c1 = a.c1 AND a.c8 = 'foo' AND b.c7 = upper(a.c7);
-SELECT * FROM ft2 a, ft2 b
-WHERE a.c2 = 6 AND b.c1 = a.c1 AND a.c8 = 'foo' AND b.c7 = upper(a.c7);
--- bug before 9.3.5 due to sloppy handling of remote-estimate parameters
-SELECT * FROM ft1 WHERE c1 = ANY (ARRAY(SELECT c1 FROM ft2 WHERE c1 < 5));
-SELECT * FROM ft2 WHERE c1 = ANY (ARRAY(SELECT c1 FROM ft1 WHERE c1 < 5));
-
--- ===================================================================
--- parameterized queries
--- ===================================================================
--- simple join
-PREPARE st1(int, int) AS SELECT t1.c3, t2.c3 FROM ft1 t1, ft2 t2 WHERE t1.c1 = $1 AND t2.c1 = $2;
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st1(1, 2);
-EXECUTE st1(1, 1);
-EXECUTE st1(101, 101);
--- subquery using stable function (can't be sent to remote)
-PREPARE st2(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 < $2 AND t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 > $1 AND date(c4) = '1970-01-17'::date) ORDER BY c1;
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st2(10, 20);
-EXECUTE st2(10, 20);
-EXECUTE st2(101, 121);
--- subquery using immutable function (can be sent to remote)
-PREPARE st3(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 < $2 AND t1.c3 IN (SELECT c3 FROM ft2 t2 WHERE c1 > $1 AND date(c5) = '1970-01-17'::date) ORDER BY c1;
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st3(10, 20);
-EXECUTE st3(10, 20);
-EXECUTE st3(20, 30);
--- custom plan should be chosen initially
-PREPARE st4(int) AS SELECT * FROM ft1 t1 WHERE t1.c1 = $1;
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st4(1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st4(1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st4(1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st4(1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st4(1);
--- once we try it enough times, should switch to generic plan
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st4(1);
--- value of $1 should not be sent to remote
-PREPARE st5(user_enum,int) AS SELECT * FROM ft1 t1 WHERE c8 = $1 and c1 = $2;
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st5('foo', 1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st5('foo', 1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st5('foo', 1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st5('foo', 1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st5('foo', 1);
-EXPLAIN (VERBOSE, COSTS false) EXECUTE st5('foo', 1);
-EXECUTE st5('foo', 1);
-
--- cleanup
-DEALLOCATE st1;
-DEALLOCATE st2;
-DEALLOCATE st3;
-DEALLOCATE st4;
-DEALLOCATE st5;
-
--- ===================================================================
--- used in pl/pgsql function
--- ===================================================================
-CREATE OR REPLACE FUNCTION f_test(p_c1 int) RETURNS int AS $$
-DECLARE
-	v_c1 int;
-BEGIN
-    SELECT c1 INTO v_c1 FROM ft1 WHERE c1 = p_c1 LIMIT 1;
-    PERFORM c1 FROM ft1 WHERE c1 = p_c1 AND p_c1 = v_c1 LIMIT 1;
-    RETURN v_c1;
-END;
-$$ LANGUAGE plpgsql;
-SELECT f_test(100);
-DROP FUNCTION f_test(int);
-
--- ===================================================================
--- conversion error
--- ===================================================================
-ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 TYPE int;
-SELECT * FROM ft1 WHERE c1 = 1;  -- ERROR
-ALTER FOREIGN TABLE ft1 ALTER COLUMN c8 TYPE user_enum;
-
--- ===================================================================
--- subtransaction
---  + local/remote error doesn't break cursor
--- ===================================================================
-BEGIN;
-DECLARE c CURSOR FOR SELECT * FROM ft1 ORDER BY c1;
-FETCH c;
-SAVEPOINT s;
-ERROR OUT;          -- ERROR
-ROLLBACK TO s;
-FETCH c;
-SAVEPOINT s;
-SELECT * FROM ft1 WHERE 1 / (c1 - 1) > 0;  -- ERROR
-ROLLBACK TO s;
-FETCH c;
-SELECT * FROM ft1 ORDER BY c1 LIMIT 1;
-COMMIT;
-
--- ===================================================================
--- test handling of collations
--- ===================================================================
-create table loct3 (f1 text collate "C" not null, f2 text);
-create foreign table ft3 (f1 text collate "C" not null, f2 text)
-  server loopback options (table_name 'loct3', partition_column 'f1');
-
--- can be sent to remote
-explain (verbose, costs off) select * from ft3 where f1 = 'foo';
-explain (verbose, costs off) select * from ft3 where f1 COLLATE "C" = 'foo';
-explain (verbose, costs off) select * from ft3 where f2 = 'foo';
--- can't be sent to remote
-explain (verbose, costs off) select * from ft3 where f1 COLLATE "POSIX" = 'foo';
-explain (verbose, costs off) select * from ft3 where f1 = 'foo' COLLATE "C";
-explain (verbose, costs off) select * from ft3 where f2 COLLATE "C" = 'foo';
-explain (verbose, costs off) select * from ft3 where f2 = 'foo' COLLATE "C";
 
 -- ===================================================================
 -- test writable foreign table stuff
 -- ===================================================================
-EXPLAIN (verbose, costs off)
-INSERT INTO ft2 (c1,c2,c3) SELECT c1+1000,c2+100, c3 || c3 FROM ft2 LIMIT 20;
-INSERT INTO ft2 (c1,c2,c3) SELECT c1+1000,c2+100, c3 || c3 FROM ft2 LIMIT 20;
-INSERT INTO ft2 (c1,c2,c3)
-  VALUES (1101,201,'aaa'), (1102,202,'bbb'), (1103,203,'ccc') RETURNING *;
-INSERT INTO ft2 (c1,c2,c3) VALUES (1104,204,'ddd'), (1105,205,'eee');
-UPDATE ft2 SET c2 = c2 + 300, c3 = c3 || '_update3' WHERE c1 % 10 = 3;
-UPDATE ft2 SET c2 = c2 + 400, c3 = c3 || '_update7' WHERE c1 % 10 = 7 RETURNING *;
-EXPLAIN (verbose, costs off)
-UPDATE ft2 SET c2 = ft2.c2 + 500, c3 = ft2.c3 || '_update9', c7 = DEFAULT
-  FROM ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 9;
-UPDATE ft2 SET c2 = ft2.c2 + 500, c3 = ft2.c3 || '_update9', c7 = DEFAULT
-  FROM ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 9;
-EXPLAIN (verbose, costs off)
-  DELETE FROM ft2 WHERE c1 % 10 = 5 RETURNING c1, c4;
-DELETE FROM ft2 WHERE c1 % 10 = 5 RETURNING c1, c4;
-EXPLAIN (verbose, costs off)
-DELETE FROM ft2 USING ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 2;
-DELETE FROM ft2 USING ft1 WHERE ft1.c1 = ft2.c2 AND ft1.c1 % 10 = 2;
-SELECT c1,c2,c3,c4 FROM ft2 ORDER BY c1;
+INSERT INTO ft1 (id, name, quantity, moment)
+VALUES (1, 'foo', 100, '2014-04-15 17:46:52.97132-06'::timestamp);
 
--- Test that trigger on remote table works as expected
-CREATE OR REPLACE FUNCTION "S 1".F_BRTRIG() RETURNS trigger AS $$
-BEGIN
-    NEW.c3 = NEW.c3 || '_trig_update';
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER t1_br_insert BEFORE INSERT OR UPDATE
-    ON "S 1"."T 1" FOR EACH ROW EXECUTE PROCEDURE "S 1".F_BRTRIG();
+SELECT COUNT(*) FROM "topsie_tests"."events_1";
+SELECT COUNT(*) FROM "topsie_tests"."events_2";
 
-INSERT INTO ft2 (c1,c2,c3) VALUES (1208, 818, 'fff') RETURNING *;
-INSERT INTO ft2 (c1,c2,c3,c6) VALUES (1218, 818, 'ggg', '(--;') RETURNING *;
-UPDATE ft2 SET c2 = c2 + 600 WHERE c1 % 10 = 8 AND c1 < 1200 RETURNING *;
+INSERT INTO ft1 (id, name, quantity, moment)
+VALUES (2, 'bar', 100, '2014-04-15 17:47:52.97132-06'::timestamp);
 
--- Test errors thrown on remote side during update
-ALTER TABLE "S 1"."T 1" ADD CONSTRAINT c2positive CHECK (c2 >= 0);
+SELECT COUNT(*) FROM "topsie_tests"."events_1";
+SELECT COUNT(*) FROM "topsie_tests"."events_2";
 
-INSERT INTO ft1(c1, c2) VALUES(11, 12);  -- duplicate key
-INSERT INTO ft1(c1, c2) VALUES(1111, -2);  -- c2positive
-UPDATE ft1 SET c2 = -c2 WHERE c1 = 1;  -- c2positive
+-- Test multiple rows at once
+INSERT INTO ft1 (id, name, quantity, moment)
+VALUES (3, 'foo', 100, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (4, 'bar', 200, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (5, 'baz', 300, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (6, 'wat', 400, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (7, 'how', 500, '2014-04-15 17:47:52.97132-06'::timestamp);
 
--- Test savepoint/rollback behavior
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
-begin;
-update ft2 set c2 = 42 where c2 = 0;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-savepoint s1;
-update ft2 set c2 = 44 where c2 = 4;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-release savepoint s1;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-savepoint s2;
-update ft2 set c2 = 46 where c2 = 6;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-rollback to savepoint s2;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-release savepoint s2;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-savepoint s3;
-update ft2 set c2 = -2 where c2 = 42 and c1 = 10; -- fail on remote side
-rollback to savepoint s3;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-release savepoint s3;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
--- none of the above is committed yet remotely
-select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
-commit;
-select c2, count(*) from ft2 where c2 < 500 group by 1 order by 1;
-select c2, count(*) from "S 1"."T 1" where c2 < 500 group by 1 order by 1;
+SELECT COUNT(*) FROM "topsie_tests"."events_1";
+SELECT COUNT(*) FROM "topsie_tests"."events_2";
 
--- ===================================================================
--- test serial columns (ie, sequence-based defaults)
--- ===================================================================
-create table loc1 (f1 serial, f2 text);
-create foreign table rem1 (f1 serial, f2 text)
-  server loopback options(table_name 'loc1', partition_column 'f1');
-select pg_catalog.setval('rem1_f1_seq', 10, false);
-insert into loc1(f2) values('hi');
-insert into rem1(f2) values('hi remote');
-insert into loc1(f2) values('bye');
-insert into rem1(f2) values('bye remote');
-select * from loc1;
-select * from rem1;
+-- Test RETURNING
+INSERT INTO ft1 (id, name, quantity, moment)
+VALUES (8, 'foo', 100, '2014-04-15 17:47:52.97132-06'::timestamp)
+RETURNING (id, name);
 
+-- Test errors thrown on remote side
+INSERT INTO ft1(id, name, quantity, moment)
+VALUES (1, 'foo', 100, '2014-04-15 17:46:52.97132-06'::timestamp);
+
+SELECT COUNT(*) FROM "topsie_tests"."events_1";
+SELECT COUNT(*) FROM "topsie_tests"."events_2";
+
+-- Test atomicity by having last row in a batch fail
+INSERT INTO ft1 (id, name, quantity, moment)
+VALUES (9, 'foo', 100, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (10, 'bar', 200, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (11, 'baz', 300, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (12, 'wat', 400, '2014-04-15 17:47:52.97132-06'::timestamp),
+	   (13, 'how', NULL, '2014-04-15 17:47:52.97132-06'::timestamp);
+
+-- Counts should match what they were before last batch
+SELECT COUNT(*) FROM "topsie_tests"."events_1";
+SELECT COUNT(*) FROM "topsie_tests"."events_2";
 
 --
 --  Table with types commonly used in sharding.
@@ -475,9 +219,9 @@ INSERT INTO topsie_metadata.shards (relation_id, min_value, max_value) VALUES
 ('events'::regclass, 30, 40);
 
 INSERT INTO topsie_metadata.placements (host, port, shard_id) VALUES
-('foo', 123, 1),
-('foo', 123, 2),
-('bar', 456, 3),
-('bar', 456, 4);
+('foo', 123, 3),
+('foo', 123, 4),
+('bar', 456, 5),
+('bar', 456, 6);
 
 SELECT topsie_print_metadata('events'::regclass);
