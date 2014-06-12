@@ -112,15 +112,12 @@ TopsieLoadShardList(Oid relationId)
 	Relation rel = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
 	bool isNull = false;
 
 	rv = makeRangeVar(METADATA_SCHEMA, SHARDS_TABLE, -1);
 
 	rel = relation_openrv(rv, AccessShareLock);
-
-	tupleDesc = RelationGetDescr(rel);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARDS_RELATION_ID,
 			InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(relationId));
@@ -129,6 +126,7 @@ TopsieLoadShardList(Oid relationId)
 
 	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
+		TupleDesc tupleDesc = RelationGetDescr(rel);
 		Datum shardIdDatum = heap_getattr(tup, ATTR_NUM_SHARDS_ID, tupleDesc, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
@@ -159,15 +157,12 @@ TopsieLoadShard(int64 shardId)
 	Relation rel = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
 	TopsieShard *shard = NULL;
 
 	rv = makeRangeVar(METADATA_SCHEMA, SHARDS_TABLE, -1);
 
 	rel = relation_openrv(rv, AccessShareLock);
-
-	tupleDesc = RelationGetDescr(rel);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARDS_ID,
 			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
@@ -176,6 +171,7 @@ TopsieLoadShard(int64 shardId)
 
 	if (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
+		TupleDesc tupleDesc = RelationGetDescr(rel);
 		shard = TupleToShard(tup, tupleDesc);
 	}
 	else
@@ -207,14 +203,12 @@ TopsieLoadPlacementList(int64 shardId)
 	Relation rel = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
 
 	rv = makeRangeVar(METADATA_SCHEMA, PLACEMENTS_TABLE, -1);
 
 	rel = relation_openrv(rv, AccessShareLock);
 
-	tupleDesc = RelationGetDescr(rel);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PLACEMENTS_SHARD_ID,
 			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
@@ -223,6 +217,7 @@ TopsieLoadPlacementList(int64 shardId)
 
 	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
+		TupleDesc tupleDesc = RelationGetDescr(rel);
 		TopsiePlacement *placement = TupleToPlacement(tup, tupleDesc);
 		placementList = lappend(placementList, placement);
 	}
