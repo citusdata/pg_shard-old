@@ -144,7 +144,7 @@ InitTopsieOptions(void)
 	/* non-libpq FDW-specific FDW options */
 	static const TopsieOption non_libpq_options[] = {
 		/* settings related to sharding */
-		{"replication_factor", ForeignTableRelationId, false},
+		{"shard_replication_factor", ForeignTableRelationId, false},
 		{"shard_count", ForeignTableRelationId, false},
 		{"partition_column", ForeignTableRelationId, false},
 		/* schema-mapping settings */
