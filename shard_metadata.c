@@ -10,11 +10,11 @@
  *
  *-------------------------------------------------------------------------
  */
+
 #include "postgres.h"
+#include "fmgr.h"
 
 #include "shard_metadata.h"
-
-#include "fmgr.h"
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -31,16 +31,16 @@
 #include "utils/rel.h"
 #include "utils/tqual.h"
 
-/* Returns a pointer to a newly palloc'd int64 with the value from src */
+
+/* local function forward declarations */
 static int64 * AllocateInt64(int64 src);
-
-/* Returns a shard populated with values from a given tuple */
 static TopsieShard * TupleToShard(HeapTuple tup, TupleDesc tupleDesc);
-
-/* Returns a placement populated with values from a given tuple */
 static TopsiePlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
 
+
+/* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(topsie_print_metadata);
+
 
 /*
  * Walks over all shard/placement configuration and prints it at INFO level for
@@ -96,6 +96,7 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+
 /*
  * Return a List of shard identifiers related to a given relation.
  */
@@ -142,6 +143,7 @@ TopsieLoadShardList(Oid relationId)
 	return shardList;
 }
 
+
 /*
  * Retrieves the shard metadata for a specified shard identifier. If no such
  * shard exists, an error is thrown.
@@ -186,6 +188,7 @@ TopsieLoadShard(int64 shardId)
 
 	return shard;
 }
+
 
 /*
  * Return a List of placements related to a given shard.
@@ -235,6 +238,8 @@ TopsieLoadPlacementList(int64 shardId)
 	return placementList;
 }
 
+
+/* Returns a pointer to a newly palloc'd int64 with the value from src */
 static int64 *
 AllocateInt64(int64 src)
 {
@@ -245,6 +250,8 @@ AllocateInt64(int64 src)
 	return dest;
 }
 
+
+/* Returns a shard populated with values from a given tuple */
 static TopsieShard *
 TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
 {
@@ -272,6 +279,8 @@ TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
 	return shard;
 }
 
+
+/* Returns a placement populated with values from a given tuple */
 static TopsiePlacement *
 TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc)
 {
