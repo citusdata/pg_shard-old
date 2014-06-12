@@ -91,7 +91,7 @@ SELECT topsie.create_distributed_table_using('customer_reviews', 'customer_id', 
 This function does a number of things to set up your distributed table:
 
   1. `shard_count` shards are recorded in `topsie.shards`
-  2. For each shard, `replication_factor` nodes are selected. On each node, a table is created whose structure is identical to the prototype table
+  2. For each shard, `shard_replication_factor` nodes are selected. On each node, a table is created whose structure is identical to the prototype table
   3. These shard placements are recorded in `topsie.placements`
   4. The prototype table is moved into the `topsie_prototypes` schema
   5. A `FOREIGN TABLE` is created in the `public` schema whose name and structure match the prototype table
