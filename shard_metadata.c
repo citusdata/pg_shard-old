@@ -20,8 +20,8 @@
 #include "access/htup_details.h"
 #include "access/htup.h"
 #include "access/skey.h"
-#include "catalog/namespace.h"
 #include "executor/executor.h"
+#include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
@@ -115,8 +115,7 @@ TopsieLoadShardList(Oid relationId)
 	HeapTuple tup = NULL;
 	bool isNull = false;
 
-	rv = makeRangeVarFromNameList(
-			stringToQualifiedNameList(METADATA_SCHEMA "." SHARDS_TABLE));
+	rv = makeRangeVar(METADATA_SCHEMA, SHARDS_TABLE, -1);
 
 	rel = relation_openrv(rv, AccessShareLock);
 
@@ -161,8 +160,7 @@ TopsieLoadShard(int64 shardId)
 	HeapTuple tup = NULL;
 	TopsieShard *shard = NULL;
 
-	rv = makeRangeVarFromNameList(
-			stringToQualifiedNameList(METADATA_SCHEMA "." SHARDS_TABLE));
+	rv = makeRangeVar(METADATA_SCHEMA, SHARDS_TABLE, -1);
 
 	rel = relation_openrv(rv, AccessShareLock);
 
@@ -207,8 +205,7 @@ TopsieLoadPlacementList(int64 shardId)
 	TupleDesc tupleDesc = NULL;
 	HeapTuple tup = NULL;
 
-	rv = makeRangeVarFromNameList(
-			stringToQualifiedNameList(METADATA_SCHEMA "." PLACEMENTS_TABLE));
+	rv = makeRangeVar(METADATA_SCHEMA, PLACEMENTS_TABLE, -1);
 
 	rel = relation_openrv(rv, AccessShareLock);
 
