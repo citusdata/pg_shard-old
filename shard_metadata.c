@@ -33,7 +33,6 @@
 
 
 /* local function forward declarations */
-static int64 * AllocateInt64(int64 src);
 static TopsieShard * TupleToShard(HeapTuple tup, TupleDesc tupleDesc);
 static TopsiePlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
 
@@ -131,7 +130,8 @@ TopsieLoadShardList(Oid relationId)
 		Datum shardIdDatum = heap_getattr(tup, ATTR_NUM_SHARDS_ID, tupleDesc, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
-		int64 *shardIdPointer = AllocateInt64(shardId);
+		int64 *shardIdPointer = (int64 *) palloc0(sizeof(int64));
+		*shardIdPointer = shardId;
 
 		shardList = lappend(shardList, shardIdPointer);
 	}
@@ -233,18 +233,6 @@ TopsieLoadPlacementList(int64 shardId)
 	}
 
 	return placementList;
-}
-
-
-/* Returns a pointer to a newly palloc'd int64 with the value from src */
-static int64 *
-AllocateInt64(int64 src)
-{
-	int64 *dest = (int64 *) palloc0(sizeof(int64));
-
-	*dest = src;
-
-	return dest;
 }
 
 
