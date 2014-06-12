@@ -52,10 +52,10 @@ typedef struct TopsieShard
 /* In-memory representation of a tuple from topsie.placements */
 typedef struct TopsiePlacement
 {
-	uint64 id;		/* unique identifier for the placement */
-	uint64 shardId;	/* identifies shard for this placement */
+	int64 id;		/* unique identifier for the placement */
+	int64 shardId;	/* identifies shard for this placement */
 	char *host;		/* hostname of machine hosting this shard */
-	uint32 port;    /* port number for connecting to host */
+	int32 port;		/* port number for connecting to host */
 } TopsiePlacement;
 
 
