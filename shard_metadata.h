@@ -25,18 +25,18 @@
 /* Information about shards table */
 #define SHARDS_TABLE "shards"
 
-#define ANUM_SHARDS_ID 1
-#define ANUM_SHARDS_RELATION_ID 2
-#define ANUM_SHARDS_MIN_VALUE 3
-#define ANUM_SHARDS_MAX_VALUE 4
+#define ATTR_NUM_SHARDS_ID 1
+#define ATTR_NUM_SHARDS_RELATION_ID 2
+#define ATTR_NUM_SHARDS_MIN_VALUE 3
+#define ATTR_NUM_SHARDS_MAX_VALUE 4
 
 /* Information about placements table */
 #define PLACEMENTS_TABLE "placements"
 
-#define ANUM_PLACEMENTS_ID 1
-#define ANUM_PLACEMENTS_SHARD_ID 2
-#define ANUM_PLACEMENTS_HOST 3
-#define ANUM_PLACEMENTS_PORT 4
+#define ATTR_NUM_PLACEMENTS_ID 1
+#define ATTR_NUM_PLACEMENTS_SHARD_ID 2
+#define ATTR_NUM_PLACEMENTS_HOST 3
+#define ATTR_NUM_PLACEMENTS_PORT 4
 
 
 /* In-memory representation of a tuple from topsie.shards */

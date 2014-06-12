@@ -121,14 +121,14 @@ TopsieLoadShardList(Oid relationId)
 
 	tupleDesc = RelationGetDescr(rel);
 
-	ScanKeyInit(&scanKey[0], ANUM_SHARDS_RELATION_ID,
+	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARDS_RELATION_ID,
 			InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(relationId));
 
 	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
 
 	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
-		Datum shardIdDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc, &isNull);
+		Datum shardIdDatum = heap_getattr(tup, ATTR_NUM_SHARDS_ID, tupleDesc, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
 		int64 *shardIdPointer = AllocateInt64(shardId);
@@ -166,7 +166,7 @@ TopsieLoadShard(int64 shardId)
 
 	tupleDesc = RelationGetDescr(rel);
 
-	ScanKeyInit(&scanKey[0], ANUM_SHARDS_ID,
+	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARDS_ID,
 			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
 	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
@@ -211,7 +211,7 @@ TopsieLoadPlacementList(int64 shardId)
 
 	tupleDesc = RelationGetDescr(rel);
 
-	ScanKeyInit(&scanKey[0], ANUM_PLACEMENTS_SHARD_ID,
+	ScanKeyInit(&scanKey[0], ATTR_NUM_PLACEMENTS_SHARD_ID,
 			InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
 	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
@@ -256,13 +256,13 @@ TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
 
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(tup, ANUM_SHARDS_ID, tupleDesc,
+	Datum idDatum = heap_getattr(tup, ATTR_NUM_SHARDS_ID, tupleDesc,
 			&isNull);
-	Datum relationIdDatum = heap_getattr(tup, ANUM_SHARDS_RELATION_ID, tupleDesc,
+	Datum relationIdDatum = heap_getattr(tup, ATTR_NUM_SHARDS_RELATION_ID, tupleDesc,
 			&isNull);
-	Datum minValueDatum = heap_getattr(tup, ANUM_SHARDS_MIN_VALUE, tupleDesc,
+	Datum minValueDatum = heap_getattr(tup, ATTR_NUM_SHARDS_MIN_VALUE, tupleDesc,
 			&isNull);
-	Datum maxValueDatum = heap_getattr(tup, ANUM_SHARDS_MAX_VALUE, tupleDesc,
+	Datum maxValueDatum = heap_getattr(tup, ATTR_NUM_SHARDS_MAX_VALUE, tupleDesc,
 			&isNull);
 
 	Assert(!HeapTupleHasNulls(tup));
@@ -284,12 +284,12 @@ TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc)
 	TopsiePlacement *placement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(tup, ANUM_PLACEMENTS_ID, tupleDesc, &isNull);
-	Datum shardIdDatum = heap_getattr(tup, ANUM_PLACEMENTS_SHARD_ID, tupleDesc,
+	Datum idDatum = heap_getattr(tup, ATTR_NUM_PLACEMENTS_ID, tupleDesc, &isNull);
+	Datum shardIdDatum = heap_getattr(tup, ATTR_NUM_PLACEMENTS_SHARD_ID, tupleDesc,
 			&isNull);
-	Datum hostDatum = heap_getattr(tup, ANUM_PLACEMENTS_HOST, tupleDesc,
+	Datum hostDatum = heap_getattr(tup, ATTR_NUM_PLACEMENTS_HOST, tupleDesc,
 			&isNull);
-	Datum portDatm = heap_getattr(tup, ANUM_PLACEMENTS_PORT, tupleDesc,
+	Datum portDatm = heap_getattr(tup, ATTR_NUM_PLACEMENTS_PORT, tupleDesc,
 			&isNull);
 
 	Assert(!HeapTupleHasNulls(tup));
