@@ -63,7 +63,7 @@ topsie_hash(PG_FUNCTION_ARGS)
 
 	ReleaseTupleDesc(tupDesc);
 
-	PG_RETURN_UINT32(hashValue);
+	PG_RETURN_INT32(hashValue);
 }
 
 
