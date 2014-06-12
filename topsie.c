@@ -76,11 +76,9 @@ topsie_hash(PG_FUNCTION_ARGS)
 static uint32
 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc)
 {
-	Oid attType = InvalidOid;
+	Oid attType = tupDesc->attrs[attNum - 1]->atttypid;
 	TypeCacheEntry *typeEntry = NULL;
 	FunctionCallInfoData locfcinfo = { 0 };
-
-	attType = tupDesc->attrs[attNum - 1]->atttypid;
 
 	typeEntry = lookup_type_cache(attType, TYPECACHE_HASH_PROC_FINFO);
 	if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
