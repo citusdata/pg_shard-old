@@ -42,8 +42,8 @@ PG_FUNCTION_INFO_V1(topsie_print_metadata);
 
 
 /*
- * Walks over all shard/placement configuration and prints it at INFO level for
- * testing purposes.
+ * topsie_print_metadata prints all current shard and placement configuration
+ * at INFO level for testing purposes.
  *
  * FIXME: Remove before release
  */
@@ -97,7 +97,9 @@ topsie_print_metadata(PG_FUNCTION_ARGS)
 
 
 /*
- * Return a List of shard identifiers related to a given relation.
+ * TopsieLoadShardList returns a List of shard identifiers related to a given
+ * topsie foreign table. If no shards can be found for the specified relation,
+ * an empty List is returned.
  */
 List *
 TopsieLoadShardList(Oid relationId)
@@ -144,8 +146,9 @@ TopsieLoadShardList(Oid relationId)
 
 
 /*
- * Retrieves the shard metadata for a specified shard identifier. If no such
- * shard exists, an error is thrown.
+ * TopsieLoadShard collects metadata for a specified shard in a TopsieShard
+ * and returns a pointer to that structure. If no shard can be found using the
+ * provided identifier, an error is thrown.
  */
 TopsieShard *
 TopsieLoadShard(int64 shardId)
@@ -189,7 +192,9 @@ TopsieLoadShard(int64 shardId)
 
 
 /*
- * Return a List of placements related to a given shard.
+ * TopsieLoadPlacementList gathers placement metadata for every placement of a
+ * given shard and returns a List of TopsiePlacements containing that metadata.
+ * If no placements exist for the specified shard, an empty list is returned.
  */
 List *
 TopsieLoadPlacementList(int64 shardId)
@@ -236,7 +241,11 @@ TopsieLoadPlacementList(int64 shardId)
 }
 
 
-/* Returns a shard populated with values from a given tuple */
+/*
+ * TupleToShard populates a TopsieShard using values from a row of the shards
+ * configuration table and returns a pointer to that struct. The input tuple
+ * must not contain any NULLs.
+ */
 static TopsieShard *
 TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
 {
@@ -265,7 +274,11 @@ TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
 }
 
 
-/* Returns a placement populated with values from a given tuple */
+/*
+ * TupleToPlacement populates a TopsiePlacement using values from a row of the
+ * placements configuration table and returns a pointer to that struct. The
+ * input tuple must not contain any NULLs.
+ */
 static TopsiePlacement *
 TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc)
 {

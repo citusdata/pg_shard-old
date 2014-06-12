@@ -19,27 +19,36 @@
 #include "nodes/pg_list.h"
 
 
-/* Schema created for topsie metadata */
+/* Configuration for distributing tables resides in this schema. */
 #define METADATA_SCHEMA "topsie_metadata"
 
-/* Information about shards table */
+/* Shard information is stored in the shards table. */
 #define SHARDS_TABLE "shards"
 
+/* names for specific attributes within tuples from the shards table */
 #define ATTR_NUM_SHARDS_ID 1
 #define ATTR_NUM_SHARDS_RELATION_ID 2
 #define ATTR_NUM_SHARDS_MIN_VALUE 3
 #define ATTR_NUM_SHARDS_MAX_VALUE 4
 
-/* Information about placements table */
+/* Placement information is stored in the placements table. */
 #define PLACEMENTS_TABLE "placements"
 
+/* names for specific attributes within tuples from the placements table */
 #define ATTR_NUM_PLACEMENTS_ID 1
 #define ATTR_NUM_PLACEMENTS_SHARD_ID 2
 #define ATTR_NUM_PLACEMENTS_HOST 3
 #define ATTR_NUM_PLACEMENTS_PORT 4
 
 
-/* In-memory representation of a tuple from topsie.shards */
+/*
+ * TopsieShard represents information about a particular shard in a distributed
+ * table. Shards have a unique identifier, a reference back to the foreign table
+ * they distribute, and min and max values for the partition column of rows that
+ * are contained within the shard (this range is inclusive).
+ *
+ * All fields are required.
+ */
 typedef struct TopsieShard
 {
 	int64 id;			/* unique identifier for the shard */
@@ -49,7 +58,14 @@ typedef struct TopsieShard
 } TopsieShard;
 
 
-/* In-memory representation of a tuple from topsie.placements */
+/*
+ * TopsiePlacement represents information about the placement of a shard in a
+ * distributed table. Placements have a unique identifier, a reference to the
+ * shard they place, a textual hostname to identify the host on which the shard
+ * resides, and a port number to use when connecting to that host.
+ *
+ * All fields are required.
+ */
 typedef struct TopsiePlacement
 {
 	int64 id;		/* unique identifier for the placement */
