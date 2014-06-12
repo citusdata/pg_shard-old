@@ -3,7 +3,7 @@
 MODULE_big = topsie
 OBJS = postgres_fdw.o option.o deparse.o connection.o topsie.o shard_metadata.o
 
-PG_CPPFLAGS = -I$(libpq_srcdir)
+PG_CPPFLAGS = -I$(libpq_srcdir) -std=c99
 SHLIB_LINK = $(libpq)
 
 EXTENSION = topsie

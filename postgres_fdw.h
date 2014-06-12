@@ -20,13 +20,17 @@
 
 #include "libpq-fe.h"
 
+#define SHARD_NAME_SEPARATOR '_'
+#define list_make5(x1,x2,x3,x4,x5)		lcons(x1, list_make4(x2, x3, x4, x5))
+
+
 /* in postgres_fdw.c */
 extern int	set_transmission_modes(void);
 extern void reset_transmission_modes(int nestlevel);
 
 /* in connection.c */
 extern PGconn *GetConnection(ForeignServer *server, UserMapping *user,
-			  bool will_prep_stmt);
+			  char *host, int32 port, bool will_prep_stmt);
 extern void ReleaseConnection(PGconn *conn);
 extern unsigned int GetCursorNumber(PGconn *conn);
 extern unsigned int GetPrepStmtNumber(PGconn *conn);
@@ -76,5 +80,6 @@ extern void deparseAnalyzeSql(StringInfo buf, Relation rel,
 
 /* in topsie.c */
 extern Datum topsie_hash(PG_FUNCTION_ARGS);
+extern FunctionCallInfo TopsieHashFnCallInfo(Oid typeId);
 
 #endif   /* POSTGRES_FDW_H */

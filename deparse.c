@@ -830,6 +830,9 @@ appendWhereClause(StringInfo buf,
  * The statement text is appended to buf, and we also create an integer List
  * of the columns being retrieved by RETURNING (if any), which is returned
  * to *retrieved_attrs.
+ *
+ * The position immediately after the foreign table relation name is stored in
+ * buf.cursor to facilitate appending shard identifiers.
  */
 void
 deparseInsertSql(StringInfo buf, PlannerInfo *root,
@@ -843,6 +846,13 @@ deparseInsertSql(StringInfo buf, PlannerInfo *root,
 
 	appendStringInfoString(buf, "INSERT INTO ");
 	deparseRelation(buf, rel);
+	buf->cursor = buf->len;
+
+	/* If relation name is quoted, move cursor to right before the end quote */
+	if (buf->data[buf->cursor - 1] == '"')
+	{
+		buf->cursor--;
+	}
 
 	if (targetAttrs)
 	{

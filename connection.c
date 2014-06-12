@@ -20,6 +20,8 @@
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
 
+#define MAX_HOST_LEN 255
+#define MAX_PORT_LEN 11
 
 /*
  * Connection cache hash table entry
@@ -39,6 +41,8 @@ typedef struct ConnCacheKey
 {
 	Oid			serverid;		/* OID of foreign server */
 	Oid			userid;			/* OID of local user whose mapping we use */
+	char		host[MAX_HOST_LEN + 1];	/* hostname of host to connect to */
+	int32		port;					/* port of host to connect to */
 } ConnCacheKey;
 
 typedef struct ConnCacheEntry
@@ -64,7 +68,8 @@ static unsigned int prep_stmt_number = 0;
 static bool xact_got_connection = false;
 
 /* prototypes of private functions */
-static PGconn *connect_pg_server(ForeignServer *server, UserMapping *user);
+static PGconn *connect_pg_server(ForeignServer *server, UserMapping *user,
+		char *host, int32 port);
 static void check_conn_params(const char **keywords, const char **values);
 static void configure_remote_session(PGconn *conn);
 static void do_sql_command(PGconn *conn, const char *sql);
@@ -94,7 +99,7 @@ static void pgfdw_subxact_callback(SubXactEvent event,
  * mid-transaction anyway.
  */
 PGconn *
-GetConnection(ForeignServer *server, UserMapping *user,
+GetConnection(ForeignServer *server, UserMapping *user, char *host, int32 port,
 			  bool will_prep_stmt)
 {
 	bool		found;
@@ -130,6 +135,8 @@ GetConnection(ForeignServer *server, UserMapping *user,
 	/* Create hash key for the entry.  Assume no pad bytes in key struct */
 	key.serverid = server->serverid;
 	key.userid = user->userid;
+	strncpy(key.host, host, MAX_HOST_LEN);
+	key.port = port;
 
 	/*
 	 * Find or create cached entry for requested connection.
@@ -160,7 +167,7 @@ GetConnection(ForeignServer *server, UserMapping *user,
 		entry->xact_depth = 0;	/* just to be sure */
 		entry->have_prep_stmt = false;
 		entry->have_error = false;
-		entry->conn = connect_pg_server(server, user);
+		entry->conn = connect_pg_server(server, user, host, port);
 		elog(DEBUG3, "new postgres_fdw connection %p for server \"%s\"",
 			 entry->conn, server->servername);
 	}
@@ -180,7 +187,8 @@ GetConnection(ForeignServer *server, UserMapping *user,
  * Connect to remote server using specified server and user mapping properties.
  */
 static PGconn *
-connect_pg_server(ForeignServer *server, UserMapping *user)
+connect_pg_server(ForeignServer *server, UserMapping *user, char *host,
+		int32 port)
 {
 	PGconn	   *volatile conn = NULL;
 
@@ -192,14 +200,16 @@ connect_pg_server(ForeignServer *server, UserMapping *user)
 		const char **keywords;
 		const char **values;
 		int			n;
+		char 		portStr[MAX_PORT_LEN + 1];
 
 		/*
 		 * Construct connection params from generic options of ForeignServer
 		 * and UserMapping.  (Some of them might not be libpq options, in
-		 * which case we'll just waste a few array slots.)  Add 3 extra slots
-		 * for fallback_application_name, client_encoding, end marker.
+		 * which case we'll just waste a few array slots.)  Add 5 extra slots
+		 * for host, port, fallback_application_name, client_encoding, and
+		 * end marker.
 		 */
-		n = list_length(server->options) + list_length(user->options) + 3;
+		n = list_length(server->options) + list_length(user->options) + 5;
 		keywords = (const char **) palloc(n * sizeof(char *));
 		values = (const char **) palloc(n * sizeof(char *));
 
@@ -208,6 +218,17 @@ connect_pg_server(ForeignServer *server, UserMapping *user)
 									  keywords + n, values + n);
 		n += ExtractConnectionOptions(user->options,
 									  keywords + n, values + n);
+
+		/* Use host value for that setting... */
+		keywords[n] = "host";
+		values[n] = host;
+		n++;
+
+		/* ... and do the same with port. libpq requires a string. */
+		snprintf(portStr, MAX_PORT_LEN, "%d", port);
+		keywords[n] = "port";
+		values[n] = portStr;
+		n++;
 
 		/* Use "postgres_fdw" as fallback_application_name. */
 		keywords[n] = "fallback_application_name";

@@ -17,6 +17,8 @@
 #include "fmgr.h"
 
 #include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
+#include "utils/relcache.h"
 
 /* Schema created for topsie metadata */
 #define METADATA_SCHEMA "topsie_metadata"
@@ -56,6 +58,7 @@ typedef struct TopsiePlacement
 	uint32 port;    /* port number for connecting to host */
 } TopsiePlacement;
 
+extern Var * TopsiePartitionColumn(Relation rel);
 extern List * TopsieLoadShardList(Oid relationId);
 extern TopsieShard * TopsieLoadShard(int64 shardId);
 extern List * TopsieLoadPlacementList(int64 shardId);
