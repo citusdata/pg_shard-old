@@ -1,4 +1,4 @@
-# pg_shard/Makefile
+# Makefile
 
 MODULE_big = pg_shard
 OBJS = hash.o
