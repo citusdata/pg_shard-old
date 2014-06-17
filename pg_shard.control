@@ -1,5 +1,5 @@
-# topsie extension
+# pg_shard extension
 comment = 'generic hash algorithm for sharding'
 default_version = 'develop'
-module_pathname = '$libdir/topsie'
+module_pathname = '$libdir/pg_shard'
 relocatable = true

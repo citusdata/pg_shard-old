@@ -10,20 +10,20 @@ PG_MODULE_MAGIC;
 #endif
 
 
-Datum topsie_hash(PG_FUNCTION_ARGS);
+Datum pg_shard_hash(PG_FUNCTION_ARGS);
 static uint32 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc);
 
 
 /*
- * topsie_hash accepts a record and attribute number and returns
+ * pg_shard_hash accepts a record and attribute number and returns
  * the integer produced by hashing that attribute's value using the hash
  * function associated with the attribute's type. If no hash function can be
  * found for the attribute's type, an error occurs.
  */
-PG_FUNCTION_INFO_V1(topsie_hash);
+PG_FUNCTION_INFO_V1(pg_shard_hash);
 
 Datum
-topsie_hash(PG_FUNCTION_ARGS) {
+pg_shard_hash(PG_FUNCTION_ARGS) {
   HeapTupleHeader tup = PG_GETARG_HEAPTUPLEHEADER(0);
   int16 attNum = PG_GETARG_INT16(1);
 

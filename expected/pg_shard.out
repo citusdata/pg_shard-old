@@ -1,0 +1,123 @@
+--
+--  Test pg_shard extension
+--
+CREATE EXTENSION pg_shard;
+--
+--  Table with types commonly used in sharding.
+--
+CREATE TABLE many_types (
+  one   bigint,
+  two   date,
+  three float8,
+  four  integer,
+  five  numeric,
+  six   text,
+  seven time,
+  eight timestamp,
+  nine  uuid
+);
+INSERT INTO many_types (
+  one,
+  two,
+  three,
+  four,
+  five,
+  six,
+  seven,
+  eight,
+  nine
+) VALUES (
+  314159265358::bigint,
+  '2008-05-03'::date,
+  2.99792458::float8,
+  123456789::integer,
+  2.5::numeric,
+  'A long time ago'::text,
+  '03:15.50-07'::time,
+  '2014-04-15 17:46:52.97132-06'::timestamp,
+  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid
+);
+--
+--  Ensure hash values are what we expect.
+--
+SELECT pg_shard_hash(many_types, 1::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    -101877514
+(1 row)
+
+SELECT pg_shard_hash(many_types, 2::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     720019664
+(1 row)
+
+SELECT pg_shard_hash(many_types, 3::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     215964358
+(1 row)
+
+SELECT pg_shard_hash(many_types, 4::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     524883300
+(1 row)
+
+SELECT pg_shard_hash(many_types, 5::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    -978299019
+(1 row)
+
+SELECT pg_shard_hash(many_types, 6::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+   -1996288223
+(1 row)
+
+SELECT pg_shard_hash(many_types, 7::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     -16654038
+(1 row)
+
+SELECT pg_shard_hash(many_types, 8::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    1841118323
+(1 row)
+
+SELECT pg_shard_hash(many_types, 9::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    1154666245
+(1 row)
+
+--
+--  TIME ZONE should not affect hashing
+--
+SET TIME ZONE 'CST7CDT';
+SELECT pg_shard_hash(many_types, 7::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     -16654038
+(1 row)
+
+SELECT pg_shard_hash(many_types, 8::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    1841118323
+(1 row)
+
+RESET TIME ZONE;
+--
+--  NULL values should still hash
+--
+INSERT INTO many_types ( four ) VALUES ( 0 );
+SELECT pg_shard_hash(many_types, 1::smallint) FROM many_types WHERE four = 0;
+ pg_shard_hash 
+---------------
+             0
+(1 row)
+
