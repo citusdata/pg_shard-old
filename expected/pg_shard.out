@@ -1,7 +1,7 @@
 --
---  Test topsie extension
+--  Test pg_shard extension
 --
-CREATE EXTENSION topsie;
+CREATE EXTENSION pg_shard;
 --
 --  Table with types commonly used in sharding.
 --
@@ -40,74 +40,74 @@ INSERT INTO many_types (
 --
 --  Ensure hash values are what we expect.
 --
-SELECT topsie_hash(many_types, 1::smallint) FROM many_types;
- topsie_hash 
--------------
-  -101877514
+SELECT pg_shard_hash(many_types, 1::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    -101877514
 (1 row)
 
-SELECT topsie_hash(many_types, 2::smallint) FROM many_types;
- topsie_hash 
--------------
-   720019664
+SELECT pg_shard_hash(many_types, 2::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     720019664
 (1 row)
 
-SELECT topsie_hash(many_types, 3::smallint) FROM many_types;
- topsie_hash 
--------------
-   215964358
+SELECT pg_shard_hash(many_types, 3::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     215964358
 (1 row)
 
-SELECT topsie_hash(many_types, 4::smallint) FROM many_types;
- topsie_hash 
--------------
-   524883300
+SELECT pg_shard_hash(many_types, 4::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     524883300
 (1 row)
 
-SELECT topsie_hash(many_types, 5::smallint) FROM many_types;
- topsie_hash 
--------------
-  -978299019
+SELECT pg_shard_hash(many_types, 5::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    -978299019
 (1 row)
 
-SELECT topsie_hash(many_types, 6::smallint) FROM many_types;
- topsie_hash 
--------------
- -1996288223
+SELECT pg_shard_hash(many_types, 6::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+   -1996288223
 (1 row)
 
-SELECT topsie_hash(many_types, 7::smallint) FROM many_types;
- topsie_hash 
--------------
-   -16654038
+SELECT pg_shard_hash(many_types, 7::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     -16654038
 (1 row)
 
-SELECT topsie_hash(many_types, 8::smallint) FROM many_types;
- topsie_hash 
--------------
-  1841118323
+SELECT pg_shard_hash(many_types, 8::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    1841118323
 (1 row)
 
-SELECT topsie_hash(many_types, 9::smallint) FROM many_types;
- topsie_hash 
--------------
-  1154666245
+SELECT pg_shard_hash(many_types, 9::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    1154666245
 (1 row)
 
 --
 --  TIME ZONE should not affect hashing
 --
 SET TIME ZONE 'CST7CDT';
-SELECT topsie_hash(many_types, 7::smallint) FROM many_types;
- topsie_hash 
--------------
-   -16654038
+SELECT pg_shard_hash(many_types, 7::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+     -16654038
 (1 row)
 
-SELECT topsie_hash(many_types, 8::smallint) FROM many_types;
- topsie_hash 
--------------
-  1841118323
+SELECT pg_shard_hash(many_types, 8::smallint) FROM many_types;
+ pg_shard_hash 
+---------------
+    1841118323
 (1 row)
 
 RESET TIME ZONE;
@@ -115,9 +115,9 @@ RESET TIME ZONE;
 --  NULL values should still hash
 --
 INSERT INTO many_types ( four ) VALUES ( 0 );
-SELECT topsie_hash(many_types, 1::smallint) FROM many_types WHERE four = 0;
- topsie_hash 
--------------
-           0
+SELECT pg_shard_hash(many_types, 1::smallint) FROM many_types WHERE four = 0;
+ pg_shard_hash 
+---------------
+             0
 (1 row)
 

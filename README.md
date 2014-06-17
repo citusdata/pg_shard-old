@@ -1,10 +1,10 @@
-# topsie
+# pg_shard
 
-`topsie` is a sharding extension for PostgreSQL that supports executing DML statements in real-time. It enables clients to be completely agnostic to the fact that partitioning is occuring by encapsulating the logic to route data to the proper nodes.
+`pg_shard` is a sharding extension for PostgreSQL that supports executing DML statements in real-time. It enables clients to be completely agnostic to the fact that partitioning is occuring by encapsulating the logic to route data to the proper nodes.
 
 ## Features
 
-`topsie` is intentionally limited in scope during its first release, but is fully functional within that scope. By installing this extension, you will be able to:
+`pg_shard` is intentionally limited in scope during its first release, but is fully functional within that scope. By installing this extension, you will be able to:
 
   * Horizontally scale write throughput
   * Distribute incoming data using the hashed value of one column
@@ -35,17 +35,17 @@ You can find information on obtaining PostgreSQL on their [download page](http:/
 
 ## Installing
 
-Once you have PostgreSQL or CitusDB installed and have downloaded a copy of `topsie`, installing the extension is straightforward:
+Once you have PostgreSQL or CitusDB installed and have downloaded a copy of `pg_shard`, installing the extension is straightforward:
 
   1. Ensure `pg_config` is on your `PATH`
-  2. `cd` to the root of your copy of `topsie`
+  2. `cd` to the root of your copy of `pg_shard`
   3. Run `make install`
 
-`topsie` includes comprehensive regression tests. To verify your installation, just run `make installcheck`.
+`pg_shard` includes comprehensive regression tests. To verify your installation, just run `make installcheck`.
 
 ## Setup
 
-`topsie` stores configuration data in some tables within the `topsie` schema. The most interesting one for users is `nodes`, which contains the list of known worker nodes within the cluster. To get started with `topsie` you'll need to add some rows. The schema is:
+`pg_shard` stores configuration data in some tables within the `pg_shard` schema. The most interesting one for users is `nodes`, which contains the list of known worker nodes within the cluster. To get started with `pg_shard` you'll need to add some rows. The schema is:
 
 | Column     | Type      | Modifiers   |
 | ---------- | --------- | ----------- |
@@ -61,7 +61,7 @@ Assuming you have nodes named `bohr` and `einstein` running PostgreSQL on the de
 INSERT INTO nodes VALUES ('bohr', 5432), ('einstein', 5432);
 ```
 
-At this point you're ready to distribute a table. To let `topsie` know the structure of your table, define its schema as you would with a normal table:
+At this point you're ready to distribute a table. To let `pg_shard` know the structure of your table, define its schema as you would with a normal table:
 
 ```sql
 CREATE TABLE customer_reviews
@@ -81,19 +81,19 @@ CREATE TABLE customer_reviews
 );
 ```
 
-This table will not be used to store any data on the master but rather serves as a _prototype_ of what a `customer_reviews` table should look like on worker nodes. After you're happy with your schema, tell `topsie` to distribute your table:
+This table will not be used to store any data on the master but rather serves as a _prototype_ of what a `customer_reviews` table should look like on worker nodes. After you're happy with your schema, tell `pg_shard` to distribute your table:
 
 ```sql
 -- Pass table name, hash key column, shard count, and replication factor
-SELECT topsie.create_distributed_table_using('customer_reviews', 'customer_id', 16, 2);
+SELECT pg_shard.create_distributed_table_using('customer_reviews', 'customer_id', 16, 2);
 ```
 
 This function does a number of things to set up your distributed table:
 
-  1. `shard_count` shards are recorded in `topsie.shards`
+  1. `shard_count` shards are recorded in `pg_shard.shards`
   2. For each shard, `replication_factor` nodes are selected. On each node, a table is created whose structure is identical to the prototype table
-  3. These shard placements are recorded in `topsie.placements`
-  4. The prototype table is moved into the `topsie_prototypes` schema
+  3. These shard placements are recorded in `pg_shard.placements`
+  4. The prototype table is moved into the `pg_shard_prototypes` schema
   5. A `FOREIGN TABLE` is created in the `public` schema whose name and structure match the prototype table
 
 ## Usage
@@ -137,11 +137,11 @@ EXPLAIN SELECT * FROM customer_reviews WHERE customer_id=4687;
 
 ## Troubleshooting
 
-If a node is unreachable, queries to it will fail immediately. Application operators should alarm on errors to let them know when to inspect nodes. Further support is available by contacting Citus Data. Please include dumps of all tables in the `topsie` schema as well as the relevant foreign tables.
+If a node is unreachable, queries to it will fail immediately. Application operators should alarm on errors to let them know when to inspect nodes. Further support is available by contacting Citus Data. Please include dumps of all tables in the `pg_shard` schema as well as the relevant foreign tables.
 
 ## Limitations
 
-`topsie` provides a nice abstraction for sharding, but certain features will never be supported:
+`pg_shard` provides a nice abstraction for sharding, but certain features will never be supported:
 
   * Distributed `JOIN`s — Upgrade to CitusDB to unlock this feature
   * Unique constraints on columns other than the partition key

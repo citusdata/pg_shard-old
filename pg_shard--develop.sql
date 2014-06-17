@@ -1,8 +1,8 @@
-/* contrib/topsie/topsie--develop.sql */
+/* pg_shard/pg_shard--develop.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
-\echo Use "CREATE EXTENSION topsie" to load this file. \quit
+\echo Use "CREATE EXTENSION pg_shard" to load this file. \quit
 
-CREATE FUNCTION topsie_hash(record, integer)
+CREATE FUNCTION pg_shard_hash(record, integer)
 RETURNS integer
 LANGUAGE C IMMUTABLE STRICT AS 'MODULE_PATHNAME';
