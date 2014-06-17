@@ -1,11 +1,11 @@
-# contrib/topsie/Makefile
+# pg_shard/Makefile
 
-MODULES = topsie
+MODULES = pg_shard
 
-EXTENSION = topsie
-DATA = topsie--develop.sql
+EXTENSION = pg_shard
+DATA = pg_shard--develop.sql
 
-REGRESS = topsie
+REGRESS = pg_shard
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
