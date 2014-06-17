@@ -96,5 +96,5 @@ HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc)
 	locfcinfo.argnull[0] = false;
 	locfcinfo.isnull = false;
 
-	return DatumGetUInt32(FunctionCallInvoke(&locfcinfo));
+	return DatumGetInt32(FunctionCallInvoke(&locfcinfo));
 }
