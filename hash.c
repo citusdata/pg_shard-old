@@ -24,31 +24,31 @@ PG_FUNCTION_INFO_V1(pg_shard_hash);
 
 Datum
 pg_shard_hash(PG_FUNCTION_ARGS) {
-  HeapTupleHeader tup = PG_GETARG_HEAPTUPLEHEADER(0);
-  int16 attNum = PG_GETARG_INT16(1);
+	HeapTupleHeader tup = PG_GETARG_HEAPTUPLEHEADER(0);
+	int16 attNum = PG_GETARG_INT16(1);
 
-  HeapTupleData tupleData = { 0 };
-  Datum hashKey = 0;
-  bool isNull = false;
+	HeapTupleData tupleData = { 0 };
+	Datum hashKey = 0;
+	bool isNull = false;
 
-  Oid typeId = HeapTupleHeaderGetTypeId(tup);
-  int32 typMod = HeapTupleHeaderGetTypMod(tup);
-  TupleDesc tupDesc = lookup_rowtype_tupdesc(typeId, typMod);
+	Oid typeId = HeapTupleHeaderGetTypeId(tup);
+	int32 typMod = HeapTupleHeaderGetTypMod(tup);
+	TupleDesc tupDesc = lookup_rowtype_tupdesc(typeId, typMod);
 
-  /* Set struct fields: heap_getattr needs more than a bare HeapTupleHeader */
-  tupleData.t_len = HeapTupleHeaderGetDatumLength(tup);
-  ItemPointerSetInvalid(&(tupleData.t_self));
-  tupleData.t_tableOid = InvalidOid;
-  tupleData.t_data = tup;
+	/* Set struct fields: heap_getattr needs more than a bare HeapTupleHeader */
+	tupleData.t_len = HeapTupleHeaderGetDatumLength(tup);
+	ItemPointerSetInvalid(&(tupleData.t_self));
+	tupleData.t_tableOid = InvalidOid;
+	tupleData.t_data = tup;
 
-  hashKey = heap_getattr(&tupleData, attNum, tupDesc, &isNull);
+	hashKey = heap_getattr(&tupleData, attNum, tupDesc, &isNull);
 
-  /* Null values hash to zero */
-  uint32 hashValue = isNull ? 0 : HashKeyForTuple(hashKey, attNum, tupDesc);
+	/* Null values hash to zero */
+	uint32 hashValue = isNull ? 0 : HashKeyForTuple(hashKey, attNum, tupDesc);
 
-  ReleaseTupleDesc(tupDesc);
+	ReleaseTupleDesc(tupDesc);
 
-  PG_RETURN_UINT32(hashValue);
+	PG_RETURN_UINT32(hashValue);
 }
 
 /*
@@ -59,25 +59,25 @@ pg_shard_hash(PG_FUNCTION_ARGS) {
  */
 static uint32
 HashKeyForTuple(Datum hashKey, int16 attNum, TupleDesc tupDesc) {
-  Oid attType = InvalidOid;
-  TypeCacheEntry *typeEntry = NULL;
-  FunctionCallInfoData locfcinfo = { 0 };
+	Oid attType = InvalidOid;
+	TypeCacheEntry *typeEntry = NULL;
+	FunctionCallInfoData locfcinfo = { 0 };
 
-  attType = tupDesc->attrs[attNum - 1]->atttypid;
+	attType = tupDesc->attrs[attNum - 1]->atttypid;
 
-  typeEntry = lookup_type_cache(attType, TYPECACHE_HASH_PROC_FINFO);
-  if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
-  {
-    ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
-                    errmsg("could not identify a hash function for type %s",
-                           format_type_be(attType))));
-  }
+	typeEntry = lookup_type_cache(attType, TYPECACHE_HASH_PROC_FINFO);
+	if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
+	{
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
+										errmsg("could not identify a hash function for type %s",
+													 format_type_be(attType))));
+	}
 
-  InitFunctionCallInfoData(locfcinfo, &typeEntry->hash_proc_finfo, 1,
-                           InvalidOid, NULL, NULL);
-  locfcinfo.arg[0] = hashKey;
-  locfcinfo.argnull[0] = false;
-  locfcinfo.isnull = false;
+	InitFunctionCallInfoData(locfcinfo, &typeEntry->hash_proc_finfo, 1,
+													 InvalidOid, NULL, NULL);
+	locfcinfo.arg[0] = hashKey;
+	locfcinfo.argnull[0] = false;
+	locfcinfo.isnull = false;
 
-  return DatumGetUInt32(FunctionCallInvoke(&locfcinfo));
+	return DatumGetUInt32(FunctionCallInvoke(&locfcinfo));
 }

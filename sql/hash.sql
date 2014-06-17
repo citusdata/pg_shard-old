@@ -9,37 +9,37 @@ CREATE EXTENSION pg_shard;
 --
 
 CREATE TABLE many_types (
-  one   bigint,
-  two   date,
-  three float8,
-  four  integer,
-  five  numeric,
-  six   text,
-  seven time,
-  eight timestamp,
-  nine  uuid
+	one bigint,
+	two date,
+	three float8,
+	four integer,
+	five numeric,
+	six text,
+	seven time,
+	eight timestamp,
+	nine uuid
 );
 
 INSERT INTO many_types (
-  one,
-  two,
-  three,
-  four,
-  five,
-  six,
-  seven,
-  eight,
-  nine
+	one,
+	two,
+	three,
+	four,
+	five,
+	six,
+	seven,
+	eight,
+	nine
 ) VALUES (
-  314159265358::bigint,
-  '2008-05-03'::date,
-  2.99792458::float8,
-  123456789::integer,
-  2.5::numeric,
-  'A long time ago'::text,
-  '03:15.50-07'::time,
-  '2014-04-15 17:46:52.97132-06'::timestamp,
-  'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid
+	314159265358::bigint,
+	'2008-05-03'::date,
+	2.99792458::float8,
+	123456789::integer,
+	2.5::numeric,
+	'A long time ago'::text,
+	'03:15.50-07'::time,
+	'2014-04-15 17:46:52.97132-06'::timestamp,
+	'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid
 );
 
 --
