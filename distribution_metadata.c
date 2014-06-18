@@ -33,8 +33,9 @@
 
 
 /* local function forward declarations */
-static PgsShard * TupleToShard(HeapTuple tup, TupleDesc tupleDesc);
-static PgsPlacement * TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc);
+static PgsShard * TupleToShard(HeapTuple tuple, TupleDesc tupleDescriptor);
+static PgsPlacement * TupleToPlacement(HeapTuple tuple,
+									   TupleDesc tupleDescriptor);
 
 
 /* declarations for dynamic loading */
@@ -68,13 +69,14 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 		PgsShard * shard = PgsLoadShard(*shardId);
 
 		ereport(INFO, (errmsg("Shard #" INT64_FORMAT, shard->id)));
-		ereport(INFO,
-				(errmsg("\trelation:\t%s", get_rel_name(shard->relationId))));
+		ereport(INFO, (errmsg("\trelation:\t%s",
+							  get_rel_name(shard->relationId))));
 		ereport(INFO, (errmsg("\tmin value:\t%d", shard->minValue)));
 		ereport(INFO, (errmsg("\tmax value:\t%d", shard->maxValue)));
 
 		placementList = PgsLoadPlacementList(*shardId);
-		ereport(INFO, (errmsg("\t%d placements:", list_length(placementList))));
+		ereport(INFO, (errmsg("\t%d placements:",
+							  list_length(placementList))));
 
 		foreach(placementCell, placementList)
 
@@ -83,10 +85,10 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 
 			placement = (PgsPlacement *) lfirst(placementCell);
 
-			ereport(INFO,
-					(errmsg("\t\tPlacement #" INT64_FORMAT, placement->id)));
-			ereport(INFO,
-					(errmsg("\t\t\tshard:\t" INT64_FORMAT, placement->shardId)));
+			ereport(INFO, (errmsg("\t\tPlacement #" INT64_FORMAT,
+								  placement->id)));
+			ereport(INFO, (errmsg("\t\t\tshard:\t" INT64_FORMAT,
+								  placement->shardId)));
 			ereport(INFO, (errmsg("\t\t\thost:\t%s", placement->host)));
 			ereport(INFO, (errmsg("\t\t\tport:\t%u", placement->port)));
 		}
@@ -108,27 +110,27 @@ PgsLoadShardList(Oid relationId)
 
 	List *shardList = NIL;
 
-	RangeVar *rv = NULL;
-	Relation rel = NULL;
+	RangeVar *rangeVar = NULL;
+	Relation relation = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tup = NULL;
+	HeapTuple tuple = NULL;
 	bool isNull = false;
 
-	rv = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE, -1);
+	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE, -1);
 
-	rel = relation_openrv(rv, AccessShareLock);
+	relation = relation_openrv(rangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARD_RELATION_ID,
 				InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(relationId));
 
-	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
+	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
 
-	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
+	while (HeapTupleIsValid(tuple = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
-		TupleDesc tupleDesc = RelationGetDescr(rel);
-		Datum shardIdDatum = heap_getattr(tup, ATTR_NUM_SHARD_ID, tupleDesc,
-										  &isNull);
+		TupleDesc tupleDescriptor = RelationGetDescr(relation);
+		Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_ID,
+										  tupleDescriptor, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
 		int64 *shardIdPointer = (int64 *) palloc0(sizeof(int64));
@@ -138,7 +140,7 @@ PgsLoadShardList(Oid relationId)
 	}
 
 	heap_endscan(scanDesc);
-	relation_close(rel, AccessShareLock);
+	relation_close(relation, AccessShareLock);
 
 	return shardList;
 }
@@ -154,26 +156,26 @@ PgsLoadShard(int64 shardId)
 {
 	const int scanKeyCount = 1;
 
-	RangeVar *rv = NULL;
-	Relation rel = NULL;
+	RangeVar *rangeVar = NULL;
+	Relation relation = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tup = NULL;
+	HeapTuple tuple = NULL;
 	PgsShard *shard = NULL;
 
-	rv = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE, -1);
+	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE, -1);
 
-	rel = relation_openrv(rv, AccessShareLock);
+	relation = relation_openrv(rangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARD_ID,
 				InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
-	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
+	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
 
-	if (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
+	if (HeapTupleIsValid(tuple = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
-		TupleDesc tupleDesc = RelationGetDescr(rel);
-		shard = TupleToShard(tup, tupleDesc);
+		TupleDesc tupleDescriptor = RelationGetDescr(relation);
+		shard = TupleToShard(tuple, tupleDescriptor);
 	}
 	else
 	{
@@ -182,7 +184,7 @@ PgsLoadShard(int64 shardId)
 	}
 
 	heap_endscan(scanDesc);
-	relation_close(rel, AccessShareLock);
+	relation_close(relation, AccessShareLock);
 
 	return shard;
 }
@@ -200,30 +202,30 @@ PgsLoadPlacementList(int64 shardId)
 
 	List *placementList = NIL;
 
-	RangeVar *rv = NULL;
-	Relation rel = NULL;
+	RangeVar *rangeVar = NULL;
+	Relation relation = NULL;
 	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tup = NULL;
+	HeapTuple tuple = NULL;
 
-	rv = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE, -1);
+	rangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE, -1);
 
-	rel = relation_openrv(rv, AccessShareLock);
+	relation = relation_openrv(rangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PLACEMENT_SHARD_ID,
 				InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
 
-	scanDesc = heap_beginscan(rel, SnapshotNow, scanKeyCount, scanKey);
+	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
 
-	while (HeapTupleIsValid(tup = heap_getnext(scanDesc, ForwardScanDirection)))
+	while (HeapTupleIsValid(tuple = heap_getnext(scanDesc, ForwardScanDirection)))
 	{
-		TupleDesc tupleDesc = RelationGetDescr(rel);
-		PgsPlacement *placement = TupleToPlacement(tup, tupleDesc);
+		TupleDesc tupleDescriptor = RelationGetDescr(relation);
+		PgsPlacement *placement = TupleToPlacement(tuple, tupleDescriptor);
 		placementList = lappend(placementList, placement);
 	}
 
 	heap_endscan(scanDesc);
-	relation_close(rel, AccessShareLock);
+	relation_close(relation, AccessShareLock);
 
 	/* if no shard placements are found, warn the user */
 	if (placementList == NIL)
@@ -242,21 +244,22 @@ PgsLoadPlacementList(int64 shardId)
  * must not contain any NULLs.
  */
 static PgsShard *
-TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
+TupleToShard(HeapTuple tuple, TupleDesc tupleDescriptor)
 {
 	PgsShard *shard = NULL;
 
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(tup, ATTR_NUM_SHARD_ID, tupleDesc, &isNull);
-	Datum relationIdDatum = heap_getattr(tup, ATTR_NUM_SHARD_RELATION_ID,
-										 tupleDesc, &isNull);
-	Datum minValueDatum = heap_getattr(tup, ATTR_NUM_SHARD_MIN_VALUE, tupleDesc,
-									   &isNull);
-	Datum maxValueDatum = heap_getattr(tup, ATTR_NUM_SHARD_MAX_VALUE, tupleDesc,
-									   &isNull);
+	Datum idDatum = heap_getattr(tuple, ATTR_NUM_SHARD_ID, tupleDescriptor,
+								 &isNull);
+	Datum relationIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_RELATION_ID,
+										 tupleDescriptor, &isNull);
+	Datum minValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MIN_VALUE,
+									   tupleDescriptor, &isNull);
+	Datum maxValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MAX_VALUE,
+									   tupleDescriptor, &isNull);
 
-	Assert(!HeapTupleHasNulls(tup));
+	Assert(!HeapTupleHasNulls(tuple));
 
 	shard = palloc0(sizeof(PgsShard));
 	shard->id = DatumGetInt64(idDatum);
@@ -274,21 +277,21 @@ TupleToShard(HeapTuple tup, TupleDesc tupleDesc)
  * input tuple must not contain any NULLs.
  */
 static PgsPlacement *
-TupleToPlacement(HeapTuple tup, TupleDesc tupleDesc)
+TupleToPlacement(HeapTuple tuple, TupleDesc tupleDescriptor)
 {
 	PgsPlacement *placement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(tup, ATTR_NUM_PLACEMENT_ID, tupleDesc,
+	Datum idDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_ID, tupleDescriptor,
 								 &isNull);
-	Datum shardIdDatum = heap_getattr(tup, ATTR_NUM_PLACEMENT_SHARD_ID,
-									  tupleDesc, &isNull);
-	Datum hostDatum = heap_getattr(tup, ATTR_NUM_PLACEMENT_HOST, tupleDesc,
-								   &isNull);
-	Datum portDatm = heap_getattr(tup, ATTR_NUM_PLACEMENT_PORT, tupleDesc,
-								  &isNull);
+	Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_SHARD_ID,
+									  tupleDescriptor, &isNull);
+	Datum hostDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_HOST,
+								   tupleDescriptor, &isNull);
+	Datum portDatm = heap_getattr(tuple, ATTR_NUM_PLACEMENT_PORT,
+								  tupleDescriptor, &isNull);
 
-	Assert(!HeapTupleHasNulls(tup));
+	Assert(!HeapTupleHasNulls(tuple));
 
 	placement = palloc0(sizeof(PgsPlacement));
 	placement->id = DatumGetInt64(idDatum);
