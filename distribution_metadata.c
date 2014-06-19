@@ -16,6 +16,7 @@
 
 #include "distribution_metadata.h"
 
+#include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/htup.h"
@@ -112,26 +113,31 @@ PgsLoadShardList(Oid relationId)
 
 	List *shardList = NIL;
 
-	RangeVar *rangeVar = NULL;
-	Relation relation = NULL;
-	HeapScanDesc scanDesc = NULL;
+	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
+	Relation heapRelation = NULL, indexRelation = NULL;
+	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple tuple = NULL;
 	bool isNull = false;
 
-	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_RELATION_IDX, -1);
 
-	relation = relation_openrv(rangeVar, AccessShareLock);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARD_RELATION_ID,
-				InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(relationId));
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(relationId));
 
-	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
+	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+								  scanKeyCount, 0);
+	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
-	tuple = heap_getnext(scanDesc, ForwardScanDirection);
+	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
+	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	while (HeapTupleIsValid(tuple))
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(relation);
+		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_ID,
 										  tupleDescriptor, &isNull);
 
@@ -141,11 +147,12 @@ PgsLoadShardList(Oid relationId)
 
 		shardList = lappend(shardList, shardIdPointer);
 
-		tuple = heap_getnext(scanDesc, ForwardScanDirection);
+		tuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	}
 
-	heap_endscan(scanDesc);
-	relation_close(relation, AccessShareLock);
+	index_endscan(idxScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, AccessShareLock);
 
 	return shardList;
 }
@@ -161,27 +168,32 @@ PgsLoadShard(int64 shardId)
 {
 	const int scanKeyCount = 1;
 
-	RangeVar *rangeVar = NULL;
-	Relation relation = NULL;
-	HeapScanDesc scanDesc = NULL;
+	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
+	Relation heapRelation = NULL, indexRelation = NULL;
+	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple tuple = NULL;
+
 	PgsShard *shard = NULL;
 
-	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_PKEY_IDX, -1);
 
-	relation = relation_openrv(rangeVar, AccessShareLock);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_SHARD_ID,
-				InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+				Int64GetDatum(shardId));
 
-	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
+	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+								  scanKeyCount, 0);
+	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
-	tuple = heap_getnext(scanDesc, ForwardScanDirection);
-
+	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
+	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(tuple))
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(relation);
+		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		shard = TupleToShard(tuple, tupleDescriptor);
 	}
 	else
@@ -190,8 +202,9 @@ PgsLoadShard(int64 shardId)
 						shardId)));
 	}
 
-	heap_endscan(scanDesc);
-	relation_close(relation, AccessShareLock);
+	index_endscan(idxScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, AccessShareLock);
 
 	return shard;
 }
@@ -209,33 +222,39 @@ PgsLoadPlacementList(int64 shardId)
 
 	List *placementList = NIL;
 
-	RangeVar *rangeVar = NULL;
-	Relation relation = NULL;
-	HeapScanDesc scanDesc = NULL;
+	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
+	Relation heapRelation = NULL, indexRelation = NULL;
+	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple tuple = NULL;
 
-	rangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_SHARD_IDX, -1);
 
-	relation = relation_openrv(rangeVar, AccessShareLock);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PLACEMENT_SHARD_ID,
-				InvalidStrategy, F_INT8EQ, Int64GetDatum(shardId));
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+				Int64GetDatum(shardId));
 
-	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
+	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+								  scanKeyCount, 0);
+	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
-	tuple = heap_getnext(scanDesc, ForwardScanDirection);
+	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
+	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	while (HeapTupleIsValid(tuple))
 	{
-		TupleDesc tupleDescriptor = RelationGetDescr(relation);
+		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		PgsPlacement *placement = TupleToPlacement(tuple, tupleDescriptor);
 		placementList = lappend(placementList, placement);
 
-		tuple = heap_getnext(scanDesc, ForwardScanDirection);
+		tuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	}
 
-	heap_endscan(scanDesc);
-	relation_close(relation, AccessShareLock);
+	index_endscan(idxScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, AccessShareLock);
 
 	/* if no shard placements are found, warn the user */
 	if (placementList == NIL)

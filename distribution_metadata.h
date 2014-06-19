@@ -25,6 +25,12 @@
 /* Shard information is stored in the shard table. */
 #define SHARD_TABLE_NAME "shard"
 
+/* The table has a primary key index for fast lookup. */
+#define SHARD_PKEY_IDX "shard_pkey"
+
+/* The table has an index to expedite lookup by relation identifier */
+#define SHARD_RELATION_IDX "shard_idx_relation_id"
+
 /* names for specific attributes within tuples from the shard table */
 #define ATTR_NUM_SHARD_ID 1
 #define ATTR_NUM_SHARD_RELATION_ID 2
@@ -33,6 +39,9 @@
 
 /* Placement information is stored in the placement table. */
 #define PLACEMENT_TABLE_NAME "placement"
+
+/* The table has an index to expedite lookup by shard identifier */
+#define PLACEMENT_SHARD_IDX "placement_idx_shard_id"
 
 /* names for specific attributes within tuples from the placement table */
 #define ATTR_NUM_PLACEMENT_ID 1

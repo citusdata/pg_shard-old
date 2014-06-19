@@ -21,33 +21,6 @@ INSERT INTO pgs_metadata.placement (node_name, node_port, shard_id) VALUES
 	('bar', 456, 4);
 SELECT pgs_print_metadata('events'::regclass);
 INFO:  Found 4 shards...
-INFO:  Shard #1
-INFO:  	relation:	events
-INFO:  	min value:	0
-INFO:  	max value:	10
-INFO:  	1 placements:
-INFO:  		Placement #1
-INFO:  			shard:	1
-INFO:  			node name:	foo
-INFO:  			node port:	123
-INFO:  Shard #2
-INFO:  	relation:	events
-INFO:  	min value:	10
-INFO:  	max value:	20
-INFO:  	1 placements:
-INFO:  		Placement #2
-INFO:  			shard:	2
-INFO:  			node name:	foo
-INFO:  			node port:	123
-INFO:  Shard #3
-INFO:  	relation:	events
-INFO:  	min value:	20
-INFO:  	max value:	30
-INFO:  	1 placements:
-INFO:  		Placement #3
-INFO:  			shard:	3
-INFO:  			node name:	bar
-INFO:  			node port:	456
 INFO:  Shard #4
 INFO:  	relation:	events
 INFO:  	min value:	30
@@ -57,6 +30,33 @@ INFO:  		Placement #4
 INFO:  			shard:	4
 INFO:  			node name:	bar
 INFO:  			node port:	456
+INFO:  Shard #3
+INFO:  	relation:	events
+INFO:  	min value:	20
+INFO:  	max value:	30
+INFO:  	1 placements:
+INFO:  		Placement #3
+INFO:  			shard:	3
+INFO:  			node name:	bar
+INFO:  			node port:	456
+INFO:  Shard #2
+INFO:  	relation:	events
+INFO:  	min value:	10
+INFO:  	max value:	20
+INFO:  	1 placements:
+INFO:  		Placement #2
+INFO:  			shard:	2
+INFO:  			node name:	foo
+INFO:  			node port:	123
+INFO:  Shard #1
+INFO:  	relation:	events
+INFO:  	min value:	0
+INFO:  	max value:	10
+INFO:  	1 placements:
+INFO:  		Placement #1
+INFO:  			shard:	1
+INFO:  			node name:	foo
+INFO:  			node port:	123
  pgs_print_metadata 
 --------------------
  
