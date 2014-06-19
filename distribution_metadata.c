@@ -23,7 +23,11 @@
 #include "access/skey.h"
 #include "executor/executor.h"
 #include "nodes/makefuncs.h"
+#include "nodes/params.h"
 #include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
+#include "parser/parse_node.h"
+#include "parser/parse_relation.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/fmgroids.h"
@@ -34,6 +38,7 @@
 
 
 /* local function forward declarations */
+static Var * ColumnNameToVar(Relation relation, char *columnName);
 static PgsShard * TupleToShard(HeapTuple tuple, TupleDesc tupleDescriptor);
 static PgsPlacement * TupleToPlacement(HeapTuple tuple,
 									   TupleDesc tupleDescriptor);
@@ -54,10 +59,15 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 {
 	Oid relationId = PG_GETARG_OID(0);
 
+	Var *partitionColumn = PgsPartitionColumn(relationId);
 	List *shardList = PgsLoadShardList(relationId);
 	List *placementList = NIL;
 
 	ListCell *cell = NULL;
+
+	ereport(INFO, (errmsg("Table is partitioned using column #%d, "
+						  "which is of type \"%s\"", partitionColumn->varattno,
+						  format_type_be(partitionColumn->vartype))));
 
 	ereport(INFO, (errmsg("Found %d shards...", list_length(shardList))));
 
@@ -268,6 +278,69 @@ PgsLoadPlacementList(int64 shardId)
 
 
 /*
+ * PgsPartitionColumn looks up the column used to partition a given distributed
+ * table and returns a reference to a Var representing that column. If no entry
+ * can be found using the provided identifer, an error is thrown.
+ */
+Var *
+PgsPartitionColumn(Oid relationId)
+{
+	const int scanKeyCount = 1;
+
+	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
+	Relation heapRelation = NULL, indexRelation = NULL;
+	IndexScanDesc idxScanDesc = NULL;
+	ScanKeyData scanKey[scanKeyCount];
+	HeapTuple tuple = NULL;
+
+	Var *partitionColumn = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA,
+								PARTITION_STRATEGY_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA,
+								 PARTITION_STRATEGY_RELATION_IDX, -1);
+
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
+				ObjectIdGetDatum(relationId));
+
+	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+								  scanKeyCount, 0);
+	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
+
+	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
+	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(tuple))
+	{
+		bool isNull = false;
+		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+
+		Datum keyDatum = heap_getattr(tuple, ATTR_NUM_PARTITION_STRATEGY_KEY,
+									  tupleDescriptor, &isNull);
+		char *partitionColumnName = TextDatumGetCString(keyDatum);
+
+		Relation relation = relation_open(relationId, AccessShareLock);
+		partitionColumn = ColumnNameToVar(relation, partitionColumnName);
+		relation_close(relation, AccessShareLock);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find partition strategy for relation "
+							   "%u", relationId)));
+	}
+
+	index_endscan(idxScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, AccessShareLock);
+
+	return partitionColumn;
+}
+
+
+
+/*
  * TupleToShard populates a PgsShard using values from a row of the shards
  * configuration table and returns a pointer to that struct. The input tuple
  * must not contain any NULLs.
@@ -297,6 +370,58 @@ TupleToShard(HeapTuple tuple, TupleDesc tupleDescriptor)
 	shard->maxValue = DatumGetInt32(maxValueDatum);
 
 	return shard;
+}
+
+
+/*
+ * ColumnNameToVar accepts a relation and column name and returns a Var that
+ * represents that column in that relation. If the column doesn't exist or is
+ * a system column, an error is thrown.
+ */
+static Var *
+ColumnNameToVar(Relation relation, char *columnName)
+{
+	Var *partitionColumn = NULL;
+
+	/* Flags for addRangeTableEntryForRelation invocation. */
+	const bool useInheritance = false;
+	const bool inFromClause = true;
+
+	/*
+	 * Flags for addRTEtoQuery invocation. Only need to search column names, so
+	 * don't bother adding relation name to parse state.
+	 */
+	const bool addToJoins = false;
+	const bool addToNamespace = false;
+	const bool addToVarNamespace = true;
+
+	ParseState *parseState = make_parsestate(NULL);
+
+	RangeTblEntry *rte = addRangeTableEntryForRelation(parseState, relation,
+													   NULL, useInheritance,
+													   inFromClause);
+	addRTEtoQuery(parseState, rte, addToJoins, addToNamespace,
+				  addToVarNamespace);
+
+	partitionColumn = (Var *) scanRTEForColumn(parseState, rte, columnName, 0);
+
+	free_parsestate(parseState);
+
+	if (partitionColumn == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_COLUMN),
+				 errmsg("partition column \"%s\" not found", columnName)));
+	}
+	else if (!AttrNumberIsForUserDefinedAttr(partitionColumn->varattno))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+				 errmsg("specified partition column \"%s\" is a system column",
+						 columnName)));
+	}
+
+	return partitionColumn;
 }
 
 

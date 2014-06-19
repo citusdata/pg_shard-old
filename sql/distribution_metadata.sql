@@ -1,5 +1,5 @@
 -- ===================================================================
--- create test functions                                            
+-- create test functions
 -- ===================================================================
 
 CREATE FUNCTION pgs_print_metadata(oid)
@@ -13,7 +13,10 @@ CREATE FUNCTION pgs_print_metadata(oid)
 -- ===================================================================
 
 
-CREATE TABLE events ();
+CREATE TABLE events (
+	id bigserial,
+	name text
+);
 
 INSERT INTO pgs_metadata.shard (relation_id, min_value, max_value) VALUES
 	('events'::regclass, 0, 10),
@@ -26,5 +29,8 @@ INSERT INTO pgs_metadata.placement (node_name, node_port, shard_id) VALUES
 	('foo', 123, 2),
 	('bar', 456, 3),
 	('bar', 456, 4);
+
+INSERT INTO pgs_metadata.partition_strategy (relation_id, key) VALUES
+	('events'::regclass, 'name');
 
 SELECT pgs_print_metadata('events'::regclass);

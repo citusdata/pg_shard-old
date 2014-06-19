@@ -17,6 +17,7 @@
 #include "fmgr.h"
 
 #include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
 
 
 /* Configuration for distributing tables resides in this schema. */
@@ -49,6 +50,18 @@
 #define ATTR_NUM_PLACEMENT_NODE_NAME 3
 #define ATTR_NUM_PLACEMENT_NODE_PORT 4
 
+/*
+ * Partition strategies are stored in the partition_strategy table, one for each
+ * distributed table tracked by pg_shard.
+ */
+#define PARTITION_STRATEGY_TABLE_NAME "partition_strategy"
+
+/* The table has an index to expedite lookup by relation identifier */
+#define PARTITION_STRATEGY_RELATION_IDX "partition_strategy_relation_id_key"
+
+/* names for specific attributes in tuples from the partition strategy table */
+#define ATTR_NUM_PARTITION_STRATEGY_RELATION_ID 1
+#define ATTR_NUM_PARTITION_STRATEGY_KEY 2
 
 /*
  * PgsShard represents information about a particular shard in a distributed
@@ -87,6 +100,7 @@ typedef struct PgsPlacement
 extern List * PgsLoadShardList(Oid relationId);
 extern PgsShard * PgsLoadShard(int64 shardId);
 extern List * PgsLoadPlacementList(int64 shardId);
+extern Var * PgsPartitionColumn(Oid relationId);
 extern Datum PgsPrintMetadata(PG_FUNCTION_ARGS);
 
 
