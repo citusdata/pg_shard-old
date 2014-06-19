@@ -128,7 +128,8 @@ PgsLoadShardList(Oid relationId)
 
 	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
 
-	while (HeapTupleIsValid(tuple = heap_getnext(scanDesc, ForwardScanDirection)))
+	tuple = heap_getnext(scanDesc, ForwardScanDirection);
+	while (HeapTupleIsValid(tuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(relation);
 		Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_ID,
@@ -139,6 +140,8 @@ PgsLoadShardList(Oid relationId)
 		*shardIdPointer = shardId;
 
 		shardList = lappend(shardList, shardIdPointer);
+
+		tuple = heap_getnext(scanDesc, ForwardScanDirection);
 	}
 
 	heap_endscan(scanDesc);
@@ -174,7 +177,9 @@ PgsLoadShard(int64 shardId)
 
 	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
 
-	if (HeapTupleIsValid(tuple = heap_getnext(scanDesc, ForwardScanDirection)))
+	tuple = heap_getnext(scanDesc, ForwardScanDirection);
+
+	if (HeapTupleIsValid(tuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(relation);
 		shard = TupleToShard(tuple, tupleDescriptor);
@@ -219,11 +224,14 @@ PgsLoadPlacementList(int64 shardId)
 
 	scanDesc = heap_beginscan(relation, SnapshotNow, scanKeyCount, scanKey);
 
-	while (HeapTupleIsValid(tuple = heap_getnext(scanDesc, ForwardScanDirection)))
+	tuple = heap_getnext(scanDesc, ForwardScanDirection);
+	while (HeapTupleIsValid(tuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(relation);
 		PgsPlacement *placement = TupleToPlacement(tuple, tupleDescriptor);
 		placementList = lappend(placementList, placement);
+
+		tuple = heap_getnext(scanDesc, ForwardScanDirection);
 	}
 
 	heap_endscan(scanDesc);
