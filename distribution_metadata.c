@@ -117,7 +117,7 @@ PgsLoadShardList(Oid relationId)
 	HeapTuple tuple = NULL;
 	bool isNull = false;
 
-	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE, -1);
+	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
 
 	relation = relation_openrv(rangeVar, AccessShareLock);
 
@@ -163,7 +163,7 @@ PgsLoadShard(int64 shardId)
 	HeapTuple tuple = NULL;
 	PgsShard *shard = NULL;
 
-	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE, -1);
+	rangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
 
 	relation = relation_openrv(rangeVar, AccessShareLock);
 
@@ -208,7 +208,7 @@ PgsLoadPlacementList(int64 shardId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple tuple = NULL;
 
-	rangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE, -1);
+	rangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE_NAME, -1);
 
 	relation = relation_openrv(rangeVar, AccessShareLock);
 

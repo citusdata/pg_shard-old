@@ -23,7 +23,7 @@
 #define METADATA_SCHEMA "pgs_metadata"
 
 /* Shard information is stored in the shard table. */
-#define SHARD_TABLE "shard"
+#define SHARD_TABLE_NAME "shard"
 
 /* names for specific attributes within tuples from the shard table */
 #define ATTR_NUM_SHARD_ID 1
@@ -32,7 +32,7 @@
 #define ATTR_NUM_SHARD_MAX_VALUE 4
 
 /* Placement information is stored in the placement table. */
-#define PLACEMENT_TABLE "placement"
+#define PLACEMENT_TABLE_NAME "placement"
 
 /* names for specific attributes within tuples from the placement table */
 #define ATTR_NUM_PLACEMENT_ID 1
