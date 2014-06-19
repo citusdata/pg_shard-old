@@ -89,8 +89,10 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 								  placement->id)));
 			ereport(INFO, (errmsg("\t\t\tshard:\t" INT64_FORMAT,
 								  placement->shardId)));
-			ereport(INFO, (errmsg("\t\t\thost:\t%s", placement->host)));
-			ereport(INFO, (errmsg("\t\t\tport:\t%u", placement->port)));
+			ereport(INFO, (errmsg("\t\t\tnode name:\t%s",
+								  placement->nodeName)));
+			ereport(INFO, (errmsg("\t\t\tnode port:\t%u",
+								  placement->nodePort)));
 		}
 	}
 
@@ -286,9 +288,9 @@ TupleToPlacement(HeapTuple tuple, TupleDesc tupleDescriptor)
 								 &isNull);
 	Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_SHARD_ID,
 									  tupleDescriptor, &isNull);
-	Datum hostDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_HOST,
+	Datum nodeNameDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_NODE_NAME,
 								   tupleDescriptor, &isNull);
-	Datum portDatm = heap_getattr(tuple, ATTR_NUM_PLACEMENT_PORT,
+	Datum nodePortDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_NODE_PORT,
 								  tupleDescriptor, &isNull);
 
 	Assert(!HeapTupleHasNulls(tuple));
@@ -296,8 +298,8 @@ TupleToPlacement(HeapTuple tuple, TupleDesc tupleDescriptor)
 	placement = palloc0(sizeof(PgsPlacement));
 	placement->id = DatumGetInt64(idDatum);
 	placement->shardId = DatumGetInt64(shardIdDatum);
-	placement->host = TextDatumGetCString(hostDatum);
-	placement->port = DatumGetInt32(portDatm);
+	placement->nodeName = TextDatumGetCString(nodeNameDatum);
+	placement->nodePort = DatumGetInt32(nodePortDatum);
 
 	return placement;
 }

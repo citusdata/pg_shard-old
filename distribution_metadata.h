@@ -37,8 +37,8 @@
 /* names for specific attributes within tuples from the placement table */
 #define ATTR_NUM_PLACEMENT_ID 1
 #define ATTR_NUM_PLACEMENT_SHARD_ID 2
-#define ATTR_NUM_PLACEMENT_HOST 3
-#define ATTR_NUM_PLACEMENT_PORT 4
+#define ATTR_NUM_PLACEMENT_NODE_NAME 3
+#define ATTR_NUM_PLACEMENT_NODE_PORT 4
 
 
 /*
@@ -70,8 +70,8 @@ typedef struct PgsPlacement
 {
 	int64 id;		// unique identifier for the placement
 	int64 shardId;	// identifies shard for this placement
-	char *host;		// hostname of machine hosting this shard
-	int32 port;		// port number for connecting to host
+	char *nodeName;	// hostname of machine hosting this shard
+	int32 nodePort;	// port number for connecting to host
 } PgsPlacement;
 
 
