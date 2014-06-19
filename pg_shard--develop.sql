@@ -10,8 +10,8 @@ CREATE SCHEMA pgs_metadata
 	CREATE TABLE shard (
 		id bigserial primary key,
 		relation_id oid not null,
-		min_value integer not null,
-		max_value integer not null
+		min_value text not null,
+		max_value text not null
 	)
 
 	-- placement records which nodes contain which shards

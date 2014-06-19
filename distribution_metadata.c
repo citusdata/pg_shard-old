@@ -21,6 +21,7 @@
 #include "access/htup_details.h"
 #include "access/htup.h"
 #include "access/skey.h"
+#include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "nodes/makefuncs.h"
 #include "nodes/params.h"
@@ -39,7 +40,8 @@
 
 /* local function forward declarations */
 static Var * ColumnNameToVar(Relation relation, char *columnName);
-static PgsShard * TupleToShard(HeapTuple tuple, TupleDesc tupleDescriptor);
+static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
+						 char **maxValue);
 static PgsPlacement * TupleToPlacement(HeapTuple tuple,
 									   TupleDesc tupleDescriptor);
 
@@ -65,6 +67,14 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 
 	ListCell *cell = NULL;
 
+	FmgrInfo outputFunctionInfo = { };
+	Oid outputFunctionId = InvalidOid;
+	bool isVarlena = false;
+
+	/* then find min/max values' actual types */
+	getTypeOutputInfo(partitionColumn->vartype, &outputFunctionId, &isVarlena);
+	fmgr_info(outputFunctionId, &outputFunctionInfo);
+
 	ereport(INFO, (errmsg("Table is partitioned using column #%d, "
 						  "which is of type \"%s\"", partitionColumn->varattno,
 						  format_type_be(partitionColumn->vartype))));
@@ -79,11 +89,15 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 		shardId = (int64 *) lfirst(cell);
 		PgsShard * shard = PgsLoadShard(*shardId);
 
+		char *minValueStr = OutputFunctionCall(&outputFunctionInfo, shard->minValue);
+		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo, shard->maxValue);
+
 		ereport(INFO, (errmsg("Shard #" INT64_FORMAT, shard->id)));
 		ereport(INFO, (errmsg("\trelation:\t%s",
 							  get_rel_name(shard->relationId))));
-		ereport(INFO, (errmsg("\tmin value:\t%d", shard->minValue)));
-		ereport(INFO, (errmsg("\tmax value:\t%d", shard->maxValue)));
+
+		ereport(INFO, (errmsg("\tmin value:\t%s", minValueStr)));
+		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
 
 		placementList = PgsLoadPlacementList(*shardId);
 		ereport(INFO, (errmsg("\t%d placements:",
@@ -176,45 +190,37 @@ PgsLoadShardList(Oid relationId)
 PgsShard *
 PgsLoadShard(int64 shardId)
 {
-	const int scanKeyCount = 1;
-
-	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
-	Relation heapRelation = NULL, indexRelation = NULL;
-	IndexScanDesc idxScanDesc = NULL;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tuple = NULL;
-
 	PgsShard *shard = NULL;
+	Datum minValue = 0;
+	Datum maxValue = 0;
+	Var *partitionColumn = NULL;
+	Oid inputFunctionId = InvalidOid;
+	Oid typeIoParam = InvalidOid;
+	Oid relationId = InvalidOid;
+	FmgrInfo inputFunctionInfo = { };
+	char *minValueString = NULL;
+	char *maxValueString = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_PKEY_IDX, -1);
+	/* first read the related row from the shard table */
+	LoadShardRow(shardId, &relationId, &minValueString, &maxValueString);
 
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+	/* then find min/max values' actual types */
+	partitionColumn = PgsPartitionColumn(relationId);
+	getTypeInputInfo(partitionColumn->vartype, &inputFunctionId, &typeIoParam);
+	fmgr_info(inputFunctionId, &inputFunctionInfo);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-				Int64GetDatum(shardId));
+	/* finally convert min/max values to their actual types */
+	minValue = InputFunctionCall(&inputFunctionInfo, minValueString,
+								 typeIoParam, partitionColumn->vartypmod);
+	maxValue = InputFunctionCall(&inputFunctionInfo, maxValueString,
+								 typeIoParam, partitionColumn->vartypmod);
 
-	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
-								  scanKeyCount, 0);
-	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(tuple))
-	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		shard = TupleToShard(tuple, tupleDescriptor);
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("could not find entry for shard " INT64_FORMAT,
-						shardId)));
-	}
-
-	index_endscan(idxScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, AccessShareLock);
+	shard = (PgsShard *) palloc0(sizeof(PgsShard));
+	shard->id = shardId;
+	shard->relationId = relationId;
+	shard->minValue = minValue;
+	shard->maxValue = maxValue;
+	shard->valueTypeId = INT4OID;	// we only deal with hash ranges for now
 
 	return shard;
 }
@@ -339,40 +345,6 @@ PgsPartitionColumn(Oid relationId)
 }
 
 
-
-/*
- * TupleToShard populates a PgsShard using values from a row of the shards
- * configuration table and returns a pointer to that struct. The input tuple
- * must not contain any NULLs.
- */
-static PgsShard *
-TupleToShard(HeapTuple tuple, TupleDesc tupleDescriptor)
-{
-	PgsShard *shard = NULL;
-
-	bool isNull = false;
-
-	Datum idDatum = heap_getattr(tuple, ATTR_NUM_SHARD_ID, tupleDescriptor,
-								 &isNull);
-	Datum relationIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_RELATION_ID,
-										 tupleDescriptor, &isNull);
-	Datum minValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MIN_VALUE,
-									   tupleDescriptor, &isNull);
-	Datum maxValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MAX_VALUE,
-									   tupleDescriptor, &isNull);
-
-	Assert(!HeapTupleHasNulls(tuple));
-
-	shard = palloc0(sizeof(PgsShard));
-	shard->id = DatumGetInt64(idDatum);
-	shard->relationId = DatumGetObjectId(relationIdDatum);
-	shard->minValue = DatumGetInt32(minValueDatum);
-	shard->maxValue = DatumGetInt32(maxValueDatum);
-
-	return shard;
-}
-
-
 /*
  * ColumnNameToVar accepts a relation and column name and returns a Var that
  * represents that column in that relation. If the column doesn't exist or is
@@ -422,6 +394,73 @@ ColumnNameToVar(Relation relation, char *columnName)
 	}
 
 	return partitionColumn;
+}
+
+
+
+/*
+ * LoadShardRow finds the row for the specified shard identifier in the shard
+ * table and copies values from that row into the provided output parameters.
+ */
+static void
+LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
+{
+	const int scanKeyCount = 1;
+
+	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
+	Relation heapRelation = NULL, indexRelation = NULL;
+	IndexScanDesc idxScanDesc = NULL;
+	ScanKeyData scanKey[scanKeyCount];
+	HeapTuple tuple = NULL;
+
+	Datum relationIdDatum = 0;
+	Datum minValueDatum = 0;
+	Datum maxValueDatum = 0;
+	bool isNull = false;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_PKEY_IDX, -1);
+
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+				Int64GetDatum(shardId));
+
+	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+								  scanKeyCount, 0);
+	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
+
+	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
+	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(tuple))
+	{
+		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+
+		relationIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_RELATION_ID,
+									   tupleDescriptor, &isNull);
+		minValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MIN_VALUE,
+									 tupleDescriptor, &isNull);
+		maxValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MAX_VALUE,
+									 tupleDescriptor, &isNull);
+
+		/* convert and deep copy row's values */
+		(*relationId) = DatumGetObjectId(relationIdDatum);
+		(*minValue) = TextDatumGetCString(minValueDatum);
+		(*maxValue) = TextDatumGetCString(maxValueDatum);
+
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find entry for shard " INT64_FORMAT,
+						shardId)));
+	}
+
+	index_endscan(idxScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, AccessShareLock);
+
+	return;
 }
 
 

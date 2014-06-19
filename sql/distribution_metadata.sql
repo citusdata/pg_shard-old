@@ -19,10 +19,10 @@ CREATE TABLE events (
 );
 
 INSERT INTO pgs_metadata.shard (relation_id, min_value, max_value) VALUES
-	('events'::regclass, 0, 10),
-	('events'::regclass, 10, 20),
-	('events'::regclass, 20, 30),
-	('events'::regclass, 30, 40);
+	('events'::regclass, '0', '10'),
+	('events'::regclass, '10', '20'),
+	('events'::regclass, '20', '30'),
+	('events'::regclass, '30', '40');
 
 INSERT INTO pgs_metadata.placement (node_name, node_port, shard_id) VALUES
 	('foo', 123, 1),

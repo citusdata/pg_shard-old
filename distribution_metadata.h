@@ -73,10 +73,11 @@
  */
 typedef struct PgsShard
 {
-	int64 id;		// unique identifier for the shard
-	Oid relationId;	// id of the shard's foreign table
-	int32 minValue;	// a shard's typed min value datum
-	int32 maxValue;	// a shard's typed max value datum
+	int64 id;			// unique identifier for the shard
+	Oid relationId;		// id of the shard's foreign table
+	Datum minValue;		// a shard's typed min value datum
+	Datum maxValue;		// a shard's typed max value datum
+	Oid valueTypeId;	// typeId for minValue and maxValue Datums
 } PgsShard;
 
 

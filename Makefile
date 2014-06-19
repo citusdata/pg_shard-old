@@ -3,7 +3,7 @@
 MODULE_big = pg_shard
 OBJS = pg_shard.o distribution_metadata.o
 
-PG_CPPFLAGS = -std=c99 -Weverything -Wno-cast-align \
+PG_CPPFLAGS = -std=c99 -Weverything -Wno-cast-align -Wno-gnu-empty-initializer \
 			  -Wno-missing-field-initializers -Wno-padded -Wno-undef -Wno-vla
 
 EXTENSION = pg_shard
