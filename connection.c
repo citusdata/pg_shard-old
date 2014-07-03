@@ -30,6 +30,8 @@
 #include "utils/hsearch.h"
 #include "utils/palloc.h"
 
+
+/* Maximum (textual) lengths of hostnames and port numbers */
 #define MAX_HOST_LEN 255
 #define MAX_PORT_LEN 11
 
@@ -57,6 +59,7 @@ typedef struct ConnCacheEntry
  * is lazily created by the first caller to need a connection.
  */
 static HTAB *ConnectionHash = NULL;
+
 
 /* local function forward declarations */
 static void ConnectionHashInit(void);
@@ -105,6 +108,7 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 
 	PG_RETURN_VOID();
 }
+
 
 /*
  * GetConnection returns a PGconn which can be used to execute queries on a
@@ -185,7 +189,6 @@ ConnectionHashLookup(char *nodeName, int32 nodePort)
 
 	return connCacheEntry;
 }
-
 
 
 /*
@@ -272,7 +275,6 @@ EstablishConnection(ConnCacheKey *connCacheKey)
 
 	return connection;
 }
-
 
 
 /*
