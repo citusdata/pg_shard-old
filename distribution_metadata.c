@@ -46,8 +46,8 @@
 
 /* local function forward declarations */
 static Var * ColumnNameToColumn(Oid relationId, char *columnName);
-static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
-						 char **maxValue);
+static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
+								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
 
@@ -92,16 +92,17 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 		int64 *shardId = NULL;
 
 		shardId = (int64 *) lfirst(cell);
-		Shard *shard = LoadShard(*shardId);
+		ShardInterval *shardInterval = LoadShardInterval(*shardId);
 
 		char *minValueStr = OutputFunctionCall(&outputFunctionInfo,
-											   shard->minValue);
+											   shardInterval->minValue);
 		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo,
-											   shard->maxValue);
+											   shardInterval->maxValue);
 
-		ereport(INFO, (errmsg("Shard #" INT64_FORMAT, shard->id)));
+		ereport(INFO, (errmsg("Shard Interval #" INT64_FORMAT,
+							  shardInterval->id)));
 		ereport(INFO, (errmsg("\trelation:\t%s",
-							  get_rel_name(shard->relationId))));
+							  get_rel_name(shardInterval->relationId))));
 
 		ereport(INFO, (errmsg("\tmin value:\t%s", minValueStr)));
 		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
@@ -190,14 +191,14 @@ LoadShardList(Oid distributedTableId)
 
 
 /*
- * LoadShard collects metadata for a specified shard in a Shard and returns a
- * pointer to that structure. If no shard can be found using the provided
- * identifier, an error is thrown.
+ * LoadShardInterval collects metadata for a specified shard in a ShardInterval
+ * and returns a pointer to that structure. If no shard can be found using the
+ * provided identifier, an error is thrown.
  */
-Shard *
-LoadShard(int64 shardId)
+ShardInterval *
+LoadShardInterval(int64 shardId)
 {
-	Shard *shard = NULL;
+	ShardInterval *shardInterval = NULL;
 	Datum minValue = 0;
 	Datum maxValue = 0;
 	Var *partitionColumn = NULL;
@@ -208,7 +209,8 @@ LoadShard(int64 shardId)
 	char *maxValueString = NULL;
 
 	/* first read the related row from the shard table */
-	LoadShardRow(shardId, &relationId, &minValueString, &maxValueString);
+	LoadShardIntervalRow(shardId, &relationId, &minValueString,
+						 &maxValueString);
 
 	/* then find min/max values' actual types */
 	partitionColumn = PartitionColumn(relationId);
@@ -220,14 +222,14 @@ LoadShard(int64 shardId)
 	maxValue = OidInputFunctionCall(inputFunctionId, maxValueString,
 									typeIoParam, partitionColumn->vartypmod);
 
-	shard = (Shard *) palloc0(sizeof(Shard));
-	shard->id = shardId;
-	shard->relationId = relationId;
-	shard->minValue = minValue;
-	shard->maxValue = maxValue;
-	shard->valueTypeId = INT4OID;	/* we only deal with hash ranges for now */
+	shardInterval = (ShardInterval *) palloc0(sizeof(ShardInterval));
+	shardInterval->id = shardId;
+	shardInterval->relationId = relationId;
+	shardInterval->minValue = minValue;
+	shardInterval->maxValue = maxValue;
+	shardInterval->valueTypeId = INT4OID;	/* hardcoded for hash ranges */
 
-	return shard;
+	return shardInterval;
 }
 
 
@@ -386,11 +388,12 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 
 
 /*
- * LoadShardRow finds the row for the specified shard identifier in the shard
- * table and copies values from that row into the provided output parameters.
+ * LoadShardIntervalRow finds the row for the specified shard identifier in the
+ * shard table and copies values from that row into the provided output params.
  */
 static void
-LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
+LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
+					 char **maxValue)
 {
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;

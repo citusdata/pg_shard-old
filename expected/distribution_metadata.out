@@ -32,7 +32,7 @@ VALUES
 SELECT test_distribution_metadata('events'::regclass);
 INFO:  Table is partitioned using column #2, which is of type "text"
 INFO:  Found 4 shards...
-INFO:  Shard #4
+INFO:  Shard Interval #4
 INFO:  	relation:	events
 INFO:  	min value:	30
 INFO:  	max value:	40
@@ -41,7 +41,7 @@ INFO:  		ShardPlacement #4
 INFO:  			shard:	4
 INFO:  			node name:	bar
 INFO:  			node port:	456
-INFO:  Shard #3
+INFO:  Shard Interval #3
 INFO:  	relation:	events
 INFO:  	min value:	20
 INFO:  	max value:	30
@@ -50,7 +50,7 @@ INFO:  		ShardPlacement #3
 INFO:  			shard:	3
 INFO:  			node name:	bar
 INFO:  			node port:	456
-INFO:  Shard #2
+INFO:  Shard Interval #2
 INFO:  	relation:	events
 INFO:  	min value:	10
 INFO:  	max value:	20
@@ -59,7 +59,7 @@ INFO:  		ShardPlacement #2
 INFO:  			shard:	2
 INFO:  			node name:	foo
 INFO:  			node port:	123
-INFO:  Shard #1
+INFO:  Shard Interval #1
 INFO:  	relation:	events
 INFO:  	min value:	0
 INFO:  	max value:	10

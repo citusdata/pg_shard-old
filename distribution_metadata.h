@@ -26,7 +26,7 @@
 /* Configuration for distributing tables resides in this schema. */
 #define METADATA_SCHEMA_NAME "pgs_distribution_metadata"
 
-/* Shard information is stored in the shard table. */
+/* Shard interval information is stored in the shard table. */
 #define SHARD_TABLE_NAME "shard"
 
 /* The table has a primary key index for fast lookup. */
@@ -64,21 +64,21 @@
 #define ATTR_NUM_PARTITION_STRATEGY_KEY 2
 
 /*
- * Shard represents information about a particular shard in a distributed table.
- * Shards have a unique identifier, a reference back to the table they
- * distribute, and min and max values for the partition column of rows that are
- * contained within the shard (this range is inclusive).
+ * ShardInterval contains information about a particular shard in a distributed
+ * table. ShardIntervals have a unique identifier, a reference back to the table
+ * they distribute, and min and max values for the partition column of rows that
+ * are contained within the shard (this range is inclusive).
  *
  * All fields are required.
  */
-typedef struct Shard
+typedef struct ShardInterval
 {
 	int64 id;			/* unique identifier for the shard */
 	Oid relationId;		/* id of the shard's distributed table */
 	Datum minValue;		/* a shard's typed min value datum */
 	Datum maxValue;		/* a shard's typed max value datum */
 	Oid valueTypeId;	/* typeId for minValue and maxValue Datums */
-} Shard;
+} ShardInterval;
 
 
 /*
@@ -99,7 +99,7 @@ typedef struct ShardPlacement
 
 
 extern List * LoadShardList(Oid distributedTableId);
-extern Shard * LoadShard(int64 shardId);
+extern ShardInterval * LoadShardInterval(int64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
