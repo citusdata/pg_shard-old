@@ -56,9 +56,6 @@
  */
 #define PARTITION_STRATEGY_TABLE_NAME "partition_strategy"
 
-/* The table has an index to expedite lookup by relation identifier */
-#define PARTITION_STRATEGY_RELATION_IDX "partition_strategy_relation_id_key"
-
 /* names for specific attributes in tuples from the partition strategy table */
 #define ATTR_NUM_PARTITION_STRATEGY_RELATION_ID 1
 #define ATTR_NUM_PARTITION_STRATEGY_KEY 2

@@ -290,31 +290,25 @@ PartitionColumn(Oid distributedTableId)
 {
 	const int scanKeyCount = 1;
 
-	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
-	Relation heapRelation = NULL, indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
+	RangeVar *heapRangeVar = NULL;
+	Relation heapRelation = NULL;
+	HeapScanDesc scanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
 	Var *partitionColumn = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA,
-								PARTITION_STRATEGY_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA,
-								 PARTITION_STRATEGY_RELATION_IDX, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA, PARTITION_STRATEGY_TABLE_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(distributedTableId));
+	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_STRATEGY_RELATION_ID,
+			InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(distributedTableId));
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
-								  scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
+	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
+	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
 		bool isNull = false;
@@ -336,8 +330,7 @@ PartitionColumn(Oid distributedTableId)
 							   "relation %u", distributedTableId)));
 	}
 
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
+	heap_endscan(scanDesc);
 	relation_close(heapRelation, AccessShareLock);
 
 	return partitionColumn;
