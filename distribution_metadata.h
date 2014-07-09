@@ -73,11 +73,11 @@
  */
 typedef struct Shard
 {
-	int64 id;			// unique identifier for the shard
-	Oid relationId;		// id of the shard's distributed table
-	Datum minValue;		// a shard's typed min value datum
-	Datum maxValue;		// a shard's typed max value datum
-	Oid valueTypeId;	// typeId for minValue and maxValue Datums
+	int64 id;			/* unique identifier for the shard */
+	Oid relationId;		/* id of the shard's distributed table */
+	Datum minValue;		/* a shard's typed min value datum */
+	Datum maxValue;		/* a shard's typed max value datum */
+	Oid valueTypeId;	/* typeId for minValue and maxValue Datums */
 } Shard;
 
 
@@ -91,10 +91,10 @@ typedef struct Shard
  */
 typedef struct Placement
 {
-	int64 id;		// unique identifier for the placement
-	int64 shardId;	// identifies shard for this placement
-	char *nodeName;	// hostname of machine hosting this shard
-	int32 nodePort;	// port number for connecting to host
+	int64 id;		/* unique identifier for the placement */
+	int64 shardId;	/* identifies shard for this placement */
+	char *nodeName;	/* hostname of machine hosting this shard */
+	int32 nodePort;	/* port number for connecting to host */
 } Placement;
 
 

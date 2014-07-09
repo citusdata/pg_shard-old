@@ -216,7 +216,7 @@ LoadShard(int64 shardId)
 	shard->relationId = relationId;
 	shard->minValue = minValue;
 	shard->maxValue = maxValue;
-	shard->valueTypeId = INT4OID;	// we only deal with hash ranges for now
+	shard->valueTypeId = INT4OID;	/* we only deal with hash ranges for now */
 
 	return shard;
 }
