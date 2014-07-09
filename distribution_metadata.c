@@ -141,8 +141,8 @@ LoadShardList(Oid distributedTableId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_RELATION_IDX, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_RELATION_IDX, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
@@ -241,8 +241,8 @@ LoadShardPlacementList(int64 shardId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_SHARD_IDX, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PLACEMENT_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PLACEMENT_SHARD_IDX, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
@@ -299,7 +299,8 @@ PartitionColumn(Oid distributedTableId)
 
 	Var *partitionColumn = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA, PARTITION_STRATEGY_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								PARTITION_STRATEGY_TABLE_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 
@@ -394,8 +395,8 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_PKEY_IDX, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PKEY_IDX, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);

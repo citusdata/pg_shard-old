@@ -21,7 +21,7 @@
 
 
 /* Configuration for distributing tables resides in this schema. */
-#define METADATA_SCHEMA "pgs_metadata"
+#define METADATA_SCHEMA_NAME "pgs_distribution_metadata"
 
 /* Shard information is stored in the shard table. */
 #define SHARD_TABLE_NAME "shard"

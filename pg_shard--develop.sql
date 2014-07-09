@@ -3,8 +3,8 @@
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION pg_shard" to load this file. \quit
 
--- the pgs_metadata schema stores information about how data is distributed
-CREATE SCHEMA pgs_metadata
+-- the pgs_distribution_metadata schema stores data distribution information
+CREATE SCHEMA pgs_distribution_metadata
 
 	-- shard keeps track of hash value ranges for each shard
 	CREATE TABLE shard (
@@ -35,7 +35,9 @@ CREATE SCHEMA pgs_metadata
 	CREATE INDEX placement_idx_shard_id ON placement (shard_id);
 
 -- mark each of the above as config tables to have pg_dump preserve them
-SELECT pg_catalog.pg_extension_config_dump('pgs_metadata.shard', '');
-SELECT pg_catalog.pg_extension_config_dump('pgs_metadata.placement', '');
-SELECT pg_catalog.pg_extension_config_dump('pgs_metadata.partition_strategy',
-										   '');
+SELECT pg_catalog.pg_extension_config_dump(
+	'pgs_distribution_metadata.shard', '');
+SELECT pg_catalog.pg_extension_config_dump(
+	'pgs_distribution_metadata.placement', '');
+SELECT pg_catalog.pg_extension_config_dump(
+	'pgs_distribution_metadata.partition_strategy', '');
