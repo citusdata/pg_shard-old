@@ -156,7 +156,6 @@ LoadShardList(Oid distributedTableId)
 								  scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
-	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	while (HeapTupleIsValid(heapTuple))
 	{
@@ -256,7 +255,6 @@ LoadShardPlacementList(int64 shardId)
 								  scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
-	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	while (HeapTupleIsValid(heapTuple))
 	{
@@ -311,7 +309,6 @@ PartitionColumn(Oid distributedTableId)
 
 	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
 
-	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
@@ -410,7 +407,6 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 								  scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
-	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
