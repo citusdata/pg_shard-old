@@ -14,10 +14,13 @@
 #ifndef PG_SHARD_DISTRIBUTION_METADATA_H
 #define PG_SHARD_DISTRIBUTION_METADATA_H
 
+#include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
 
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
+#include "postgres_ext.h"
 
 
 /* Configuration for distributing tables resides in this schema. */

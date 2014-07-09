@@ -13,28 +13,34 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "pg_config.h"
 
 #include "distribution_metadata.h"
 
+#include <stddef.h>
+#include <string.h>
+
+#include "access/attnum.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/htup.h"
+#include "access/sdir.h"
 #include "access/skey.h"
+#include "access/tupdesc.h"
 #include "catalog/pg_type.h"
-#include "executor/executor.h"
 #include "nodes/makefuncs.h"
-#include "nodes/params.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
-#include "parser/parse_node.h"
-#include "parser/parse_relation.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
+#include "utils/errcodes.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
+#include "utils/relcache.h"
 #include "utils/tqual.h"
 
 
