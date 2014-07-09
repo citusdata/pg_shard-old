@@ -394,10 +394,6 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	Datum relationIdDatum = 0;
-	Datum minValueDatum = 0;
-	Datum maxValueDatum = 0;
-
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
 	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_PKEY_IDX, -1);
 
@@ -418,11 +414,12 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		bool isNull = false;
 
-		relationIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_RELATION_ID,
-									   tupleDescriptor, &isNull);
-		minValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MIN_VALUE,
+		Datum relationIdDatum = heap_getattr(heapTuple,
+											 ATTR_NUM_SHARD_RELATION_ID,
+											 tupleDescriptor, &isNull);
+		Datum minValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MIN_VALUE,
 									 tupleDescriptor, &isNull);
-		maxValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MAX_VALUE,
+		Datum maxValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MAX_VALUE,
 									 tupleDescriptor, &isNull);
 
 		/* convert and deep copy row's values */
