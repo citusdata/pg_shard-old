@@ -29,10 +29,10 @@ CREATE SCHEMA pgs_distribution_metadata
 	)
 
 	-- make a few more indexes for fast access
-	CREATE INDEX shard_idx_relation_id ON shard (relation_id)
-	CREATE INDEX placement_node_idx_node_name_node_port
+	CREATE INDEX shard_relation_index ON shard (relation_id)
+	CREATE INDEX shard_placement_node_name_node_port_index
 		ON shard_placement (node_name, node_port)
-	CREATE INDEX placement_idx_shard_id ON shard_placement (shard_id);
+	CREATE INDEX shard_placement_shard_index ON shard_placement (shard_id);
 
 -- mark each of the above as config tables to have pg_dump preserve them
 SELECT pg_catalog.pg_extension_config_dump(

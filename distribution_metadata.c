@@ -152,7 +152,8 @@ LoadShardList(Oid distributedTableId)
 	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_RELATION_IDX, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								 SHARD_RELATION_INDEX_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
@@ -253,7 +254,8 @@ LoadShardPlacementList(int64 shardId)
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
 								SHARD_PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PLACEMENT_SHARD_IDX, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								 SHARD_PLACEMENT_SHARD_INDEX_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
@@ -405,7 +407,8 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PKEY_IDX, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								 SHARD_PKEY_INDEX_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
