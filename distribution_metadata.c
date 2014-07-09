@@ -225,7 +225,7 @@ LoadShard(int64 shardId)
 /*
  * LoadShardPlacementList gathers metadata for every placement of a given shard
  * and returns a List of ShardPlacements containing that metadata. If the
- * specified shard has not been placed, an empty list is returned.
+ * specified shard has not been placed, an error is thrown.
  */
 List *
 LoadShardPlacementList(int64 shardId)
@@ -269,11 +269,11 @@ LoadShardPlacementList(int64 shardId)
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
-	/* if no shard placements are found, warn the user */
+	/* if no shard placements are found, error out */
 	if (placementList == NIL)
 	{
-		ereport(WARNING, (errmsg("could not find any placements for shardId "
-								 INT64_FORMAT, shardId)));
+		ereport(ERROR, (errmsg("could not find any placements for shardId "
+							   INT64_FORMAT, shardId)));
 	}
 
 	return placementList;
