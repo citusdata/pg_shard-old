@@ -133,15 +133,13 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 List *
 LoadShardList(Oid distributedTableId)
 {
-	const int scanKeyCount = 1;
-
 	List *shardList = NIL;
-
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
 	Relation heapRelation = NULL;
 	Relation indexRelation = NULL;
 	IndexScanDesc indexScanDesc = NULL;
+	const int scanKeyCount = 1;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
@@ -234,15 +232,13 @@ LoadShard(int64 shardId)
 List *
 LoadShardPlacementList(int64 shardId)
 {
-	const int scanKeyCount = 1;
-
 	List *placementList = NIL;
-
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
 	Relation heapRelation = NULL;
 	Relation indexRelation = NULL;
 	IndexScanDesc indexScanDesc = NULL;
+	const int scanKeyCount = 1;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
@@ -293,15 +289,13 @@ LoadShardPlacementList(int64 shardId)
 Var *
 PartitionColumn(Oid distributedTableId)
 {
-	const int scanKeyCount = 1;
-
+	Var *partitionColumn = NULL;
 	RangeVar *heapRangeVar = NULL;
 	Relation heapRelation = NULL;
 	HeapScanDesc scanDesc = NULL;
+	const int scanKeyCount = 1;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
-
-	Var *partitionColumn = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
 								PARTITION_STRATEGY_TABLE_NAME, -1);
@@ -390,13 +384,12 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 static void
 LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 {
-	const int scanKeyCount = 1;
-
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
 	Relation heapRelation = NULL;
 	Relation indexRelation = NULL;
 	IndexScanDesc indexScanDesc = NULL;
+	const int scanKeyCount = 1;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
