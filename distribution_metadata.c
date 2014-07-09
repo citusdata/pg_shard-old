@@ -137,8 +137,10 @@ LoadShardList(Oid distributedTableId)
 
 	List *shardList = NIL;
 
-	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
-	Relation heapRelation = NULL, indexRelation = NULL;
+	RangeVar *heapRangeVar = NULL;
+	RangeVar *indexRangeVar = NULL;
+	Relation heapRelation = NULL;
+	Relation indexRelation = NULL;
 	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
@@ -236,8 +238,10 @@ LoadShardPlacementList(int64 shardId)
 
 	List *placementList = NIL;
 
-	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
-	Relation heapRelation = NULL, indexRelation = NULL;
+	RangeVar *heapRangeVar = NULL;
+	RangeVar *indexRangeVar = NULL;
+	Relation heapRelation = NULL;
+	Relation indexRelation = NULL;
 	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
@@ -388,8 +392,10 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 {
 	const int scanKeyCount = 1;
 
-	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
-	Relation heapRelation = NULL, indexRelation = NULL;
+	RangeVar *heapRangeVar = NULL;
+	RangeVar *indexRangeVar = NULL;
+	Relation heapRelation = NULL;
+	Relation indexRelation = NULL;
 	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
