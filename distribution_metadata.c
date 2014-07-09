@@ -42,27 +42,25 @@
 static Var * ColumnNameToVar(Relation relation, char *columnName);
 static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
 						 char **maxValue);
-static PgsPlacement * TupleToPlacement(HeapTuple tuple,
-									   TupleDesc tupleDescriptor);
+static Placement * TupleToPlacement(HeapTuple tuple,
+									TupleDesc tupleDescriptor);
 
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(PgsPrintMetadata);
+PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 
 
 /*
- * pgs_print_metadata prints all current shard and placement configuration
+ * TestDistributionMetadata prints all current shard and placement configuration
  * at INFO level for testing purposes.
- *
- * FIXME: Remove before release
  */
 Datum
-PgsPrintMetadata(PG_FUNCTION_ARGS)
+TestDistributionMetadata(PG_FUNCTION_ARGS)
 {
 	Oid relationId = PG_GETARG_OID(0);
 
-	Var *partitionColumn = PgsPartitionColumn(relationId);
-	List *shardList = PgsLoadShardList(relationId);
+	Var *partitionColumn = PartitionColumn(relationId);
+	List *shardList = LoadShardList(relationId);
 	List *placementList = NIL;
 
 	ListCell *cell = NULL;
@@ -87,7 +85,7 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 		int64 *shardId = NULL;
 
 		shardId = (int64 *) lfirst(cell);
-		PgsShard * shard = PgsLoadShard(*shardId);
+		Shard * shard = LoadShard(*shardId);
 
 		char *minValueStr = OutputFunctionCall(&outputFunctionInfo, shard->minValue);
 		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo, shard->maxValue);
@@ -99,16 +97,16 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 		ereport(INFO, (errmsg("\tmin value:\t%s", minValueStr)));
 		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
 
-		placementList = PgsLoadPlacementList(*shardId);
+		placementList = LoadPlacementList(*shardId);
 		ereport(INFO, (errmsg("\t%d placements:",
 							  list_length(placementList))));
 
 		foreach(placementCell, placementList)
 
 		{
-			PgsPlacement *placement = NULL;
+			Placement *placement = NULL;
 
-			placement = (PgsPlacement *) lfirst(placementCell);
+			placement = (Placement *) lfirst(placementCell);
 
 			ereport(INFO, (errmsg("\t\tPlacement #" INT64_FORMAT,
 								  placement->id)));
@@ -126,12 +124,12 @@ PgsPrintMetadata(PG_FUNCTION_ARGS)
 
 
 /*
- * PgsLoadShardList returns a List of shard identifiers related to a given
- * distributed table. If no shards can be found for the specified relation,
- * an empty List is returned.
+ * LoadShardList returns a List of shard identifiers related to a given
+ * distributed table. If no shards can be found for the specified relation, an
+ * empty List is returned.
  */
 List *
-PgsLoadShardList(Oid relationId)
+LoadShardList(Oid relationId)
 {
 	const int scanKeyCount = 1;
 
@@ -183,14 +181,14 @@ PgsLoadShardList(Oid relationId)
 
 
 /*
- * PgsLoadShard collects metadata for a specified shard in a PgsShard
- * and returns a pointer to that structure. If no shard can be found using the
- * provided identifier, an error is thrown.
+ * LoadShard collects metadata for a specified shard in a Shard and returns a
+ * pointer to that structure. If no shard can be found using the provided
+ * identifier, an error is thrown.
  */
-PgsShard *
-PgsLoadShard(int64 shardId)
+Shard *
+LoadShard(int64 shardId)
 {
-	PgsShard *shard = NULL;
+	Shard *shard = NULL;
 	Datum minValue = 0;
 	Datum maxValue = 0;
 	Var *partitionColumn = NULL;
@@ -205,7 +203,7 @@ PgsLoadShard(int64 shardId)
 	LoadShardRow(shardId, &relationId, &minValueString, &maxValueString);
 
 	/* then find min/max values' actual types */
-	partitionColumn = PgsPartitionColumn(relationId);
+	partitionColumn = PartitionColumn(relationId);
 	getTypeInputInfo(partitionColumn->vartype, &inputFunctionId, &typeIoParam);
 	fmgr_info(inputFunctionId, &inputFunctionInfo);
 
@@ -215,7 +213,7 @@ PgsLoadShard(int64 shardId)
 	maxValue = InputFunctionCall(&inputFunctionInfo, maxValueString,
 								 typeIoParam, partitionColumn->vartypmod);
 
-	shard = (PgsShard *) palloc0(sizeof(PgsShard));
+	shard = (Shard *) palloc0(sizeof(Shard));
 	shard->id = shardId;
 	shard->relationId = relationId;
 	shard->minValue = minValue;
@@ -227,12 +225,12 @@ PgsLoadShard(int64 shardId)
 
 
 /*
- * PgsLoadPlacementList gathers placement metadata for every placement of a
- * given shard and returns a List of PgsPlacements containing that metadata.
- * If no placements exist for the specified shard, an empty list is returned.
+ * LoadPlacementList gathers placement metadata for every placement of a given
+ * shard and returns a List of Placements containing that metadata. If no
+ * placements exist for the specified shard, an empty list is returned.
  */
 List *
-PgsLoadPlacementList(int64 shardId)
+LoadPlacementList(int64 shardId)
 {
 	const int scanKeyCount = 1;
 
@@ -262,7 +260,7 @@ PgsLoadPlacementList(int64 shardId)
 	while (HeapTupleIsValid(tuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		PgsPlacement *placement = TupleToPlacement(tuple, tupleDescriptor);
+		Placement *placement = TupleToPlacement(tuple, tupleDescriptor);
 		placementList = lappend(placementList, placement);
 
 		tuple = index_getnext(idxScanDesc, ForwardScanDirection);
@@ -284,12 +282,12 @@ PgsLoadPlacementList(int64 shardId)
 
 
 /*
- * PgsPartitionColumn looks up the column used to partition a given distributed
+ * PartitionColumn looks up the column used to partition a given distributed
  * table and returns a reference to a Var representing that column. If no entry
  * can be found using the provided identifer, an error is thrown.
  */
 Var *
-PgsPartitionColumn(Oid relationId)
+PartitionColumn(Oid relationId)
 {
 	const int scanKeyCount = 1;
 
@@ -465,14 +463,14 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 
 
 /*
- * TupleToPlacement populates a PgsPlacement using values from a row of the
+ * TupleToPlacement populates a Placement using values from a row of the
  * placements configuration table and returns a pointer to that struct. The
  * input tuple must not contain any NULLs.
  */
-static PgsPlacement *
+static Placement *
 TupleToPlacement(HeapTuple tuple, TupleDesc tupleDescriptor)
 {
-	PgsPlacement *placement = NULL;
+	Placement *placement = NULL;
 	bool isNull = false;
 
 	Datum idDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_ID, tupleDescriptor,
@@ -480,13 +478,13 @@ TupleToPlacement(HeapTuple tuple, TupleDesc tupleDescriptor)
 	Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_SHARD_ID,
 									  tupleDescriptor, &isNull);
 	Datum nodeNameDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_NODE_NAME,
-								   tupleDescriptor, &isNull);
+									   tupleDescriptor, &isNull);
 	Datum nodePortDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_NODE_PORT,
-								  tupleDescriptor, &isNull);
+									   tupleDescriptor, &isNull);
 
 	Assert(!HeapTupleHasNulls(tuple));
 
-	placement = palloc0(sizeof(PgsPlacement));
+	placement = palloc0(sizeof(Placement));
 	placement->id = DatumGetInt64(idDatum);
 	placement->shardId = DatumGetInt64(shardIdDatum);
 	placement->nodeName = TextDatumGetCString(nodeNameDatum);

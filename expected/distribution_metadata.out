@@ -1,9 +1,9 @@
 -- ===================================================================
 -- create test functions
 -- ===================================================================
-CREATE FUNCTION pgs_print_metadata(oid)
+CREATE FUNCTION test_distribution_metadata(oid)
 	RETURNS void
-	AS 'pg_shard', 'PgsPrintMetadata'
+	AS 'pg_shard', 'TestDistributionMetadata'
 	LANGUAGE C STRICT;
 -- ===================================================================
 -- test distribution metadata functionality
@@ -24,7 +24,7 @@ INSERT INTO pgs_metadata.placement (node_name, node_port, shard_id) VALUES
 	('bar', 456, 4);
 INSERT INTO pgs_metadata.partition_strategy (relation_id, key) VALUES
 	('events'::regclass, 'name');
-SELECT pgs_print_metadata('events'::regclass);
+SELECT test_distribution_metadata('events'::regclass);
 INFO:  Table is partitioned using column #2, which is of type "text"
 INFO:  Found 4 shards...
 INFO:  Shard #4
@@ -63,8 +63,8 @@ INFO:  		Placement #1
 INFO:  			shard:	1
 INFO:  			node name:	foo
 INFO:  			node port:	123
- pgs_print_metadata 
---------------------
+ test_distribution_metadata 
+----------------------------
  
 (1 row)
 

@@ -2,9 +2,9 @@
 -- create test functions
 -- ===================================================================
 
-CREATE FUNCTION pgs_print_metadata(oid)
+CREATE FUNCTION test_distribution_metadata(oid)
 	RETURNS void
-	AS 'pg_shard', 'PgsPrintMetadata'
+	AS 'pg_shard', 'TestDistributionMetadata'
 	LANGUAGE C STRICT;
 
 
@@ -33,4 +33,4 @@ INSERT INTO pgs_metadata.placement (node_name, node_port, shard_id) VALUES
 INSERT INTO pgs_metadata.partition_strategy (relation_id, key) VALUES
 	('events'::regclass, 'name');
 
-SELECT pgs_print_metadata('events'::regclass);
+SELECT test_distribution_metadata('events'::regclass);
