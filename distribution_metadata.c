@@ -462,8 +462,6 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_NODE_PORT,
 									   tupleDescriptor, &isNull);
 
-	Assert(!HeapTupleHasNulls(heapTuple));
-
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
 	shardPlacement->shardId = DatumGetInt64(shardIdDatum);

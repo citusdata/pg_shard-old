@@ -17,7 +17,7 @@ CREATE SCHEMA pgs_metadata
 	-- placement records which nodes contain which shards
 	CREATE TABLE placement (
 		id bigserial primary key,
-		shard_id bigint references shard,
+		shard_id bigint not null references shard,
 		node_name text not null,
 		node_port integer not null
 	)
