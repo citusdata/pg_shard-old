@@ -82,25 +82,25 @@ typedef struct Shard
 
 
 /*
- * Placement represents information about the placement of a shard in a
- * distributed table. Placements have a unique identifier, a reference to the
- * shard they place, a textual hostname to identify the host on which the shard
- * resides, and a port number to use when connecting to that host.
+ * ShardPlacement represents information about the placement of a shard in a
+ * distributed table. ShardPlacements have a unique identifier, a reference to
+ * the shard they place, a textual hostname to identify the host on which the
+ * shard resides, and a port number to use when connecting to that host.
  *
  * All fields are required.
  */
-typedef struct Placement
+typedef struct ShardPlacement
 {
-	int64 id;		/* unique identifier for the placement */
-	int64 shardId;	/* identifies shard for this placement */
+	int64 id;		/* unique identifier for the shard placement */
+	int64 shardId;	/* identifies shard for this shard placement */
 	char *nodeName;	/* hostname of machine hosting this shard */
 	int32 nodePort;	/* port number for connecting to host */
-} Placement;
+} ShardPlacement;
 
 
 extern List * LoadShardList(Oid distributedTableId);
 extern Shard * LoadShard(int64 shardId);
-extern List * LoadPlacementList(int64 shardId);
+extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 

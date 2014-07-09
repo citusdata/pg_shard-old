@@ -42,8 +42,8 @@
 static Var * ColumnNameToVar(Relation relation, char *columnName);
 static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
 						 char **maxValue);
-static Placement * TupleToPlacement(HeapTuple heapTuple,
-									TupleDesc tupleDescriptor);
+static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
+											  TupleDesc tupleDescriptor);
 
 
 /* declarations for dynamic loading */
@@ -61,7 +61,7 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 	Var *partitionColumn = PartitionColumn(distributedTableId);
 	List *shardList = LoadShardList(distributedTableId);
-	List *placementList = NIL;
+	List *shardPlacementList = NIL;
 
 	ListCell *cell = NULL;
 
@@ -97,25 +97,25 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 		ereport(INFO, (errmsg("\tmin value:\t%s", minValueStr)));
 		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
 
-		placementList = LoadPlacementList(*shardId);
+		shardPlacementList = LoadShardPlacementList(*shardId);
 		ereport(INFO, (errmsg("\t%d placements:",
-							  list_length(placementList))));
+							  list_length(shardPlacementList))));
 
-		foreach(placementCell, placementList)
+		foreach(placementCell, shardPlacementList)
 
 		{
-			Placement *placement = NULL;
+			ShardPlacement *shardPlacement = NULL;
 
-			placement = (Placement *) lfirst(placementCell);
+			shardPlacement = (ShardPlacement *) lfirst(placementCell);
 
 			ereport(INFO, (errmsg("\t\tPlacement #" INT64_FORMAT,
-								  placement->id)));
+								  shardPlacement->id)));
 			ereport(INFO, (errmsg("\t\t\tshard:\t" INT64_FORMAT,
-								  placement->shardId)));
+								  shardPlacement->shardId)));
 			ereport(INFO, (errmsg("\t\t\tnode name:\t%s",
-								  placement->nodeName)));
+								  shardPlacement->nodeName)));
 			ereport(INFO, (errmsg("\t\t\tnode port:\t%u",
-								  placement->nodePort)));
+								  shardPlacement->nodePort)));
 		}
 	}
 
@@ -223,12 +223,12 @@ LoadShard(int64 shardId)
 
 
 /*
- * LoadPlacementList gathers placement metadata for every placement of a given
- * shard and returns a List of Placements containing that metadata. If no
- * placements exist for the specified shard, an empty list is returned.
+ * LoadShardPlacementList gathers metadata for every placement of a given shard
+ * and returns a List of ShardPlacements containing that metadata. If the
+ * specified shard has not been placed, an empty list is returned.
  */
 List *
-LoadPlacementList(int64 shardId)
+LoadShardPlacementList(int64 shardId)
 {
 	const int scanKeyCount = 1;
 
@@ -258,8 +258,9 @@ LoadPlacementList(int64 shardId)
 	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		Placement *placement = TupleToPlacement(heapTuple, tupleDescriptor);
-		placementList = lappend(placementList, placement);
+		ShardPlacement *shardPlacement =
+				TupleToShardPlacement(heapTuple, tupleDescriptor);
+		placementList = lappend(placementList, shardPlacement);
 
 		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
@@ -463,14 +464,14 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 
 
 /*
- * TupleToPlacement populates a Placement using values from a row of the
- * placements configuration table and returns a pointer to that struct. The
+ * TupleToShardPlacement populates a ShardPlacement using values from a row of
+ * the placements configuration table and returns a pointer to that struct. The
  * input tuple must not contain any NULLs.
  */
-static Placement *
-TupleToPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
+static ShardPlacement *
+TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 {
-	Placement *placement = NULL;
+	ShardPlacement *shardPlacement = NULL;
 	bool isNull = false;
 
 	Datum idDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_ID,
@@ -484,11 +485,11 @@ TupleToPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 
 	Assert(!HeapTupleHasNulls(heapTuple));
 
-	placement = palloc0(sizeof(Placement));
-	placement->id = DatumGetInt64(idDatum);
-	placement->shardId = DatumGetInt64(shardIdDatum);
-	placement->nodeName = TextDatumGetCString(nodeNameDatum);
-	placement->nodePort = DatumGetInt32(nodePortDatum);
+	shardPlacement = palloc0(sizeof(ShardPlacement));
+	shardPlacement->id = DatumGetInt64(idDatum);
+	shardPlacement->shardId = DatumGetInt64(shardIdDatum);
+	shardPlacement->nodeName = TextDatumGetCString(nodeNameDatum);
+	shardPlacement->nodePort = DatumGetInt32(nodePortDatum);
 
-	return placement;
+	return shardPlacement;
 }
