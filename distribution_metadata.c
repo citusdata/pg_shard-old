@@ -195,7 +195,6 @@ LoadShard(int64 shardId)
 	Oid inputFunctionId = InvalidOid;
 	Oid typeIoParam = InvalidOid;
 	Oid relationId = InvalidOid;
-	FmgrInfo inputFunctionInfo = { };
 	char *minValueString = NULL;
 	char *maxValueString = NULL;
 
@@ -205,13 +204,12 @@ LoadShard(int64 shardId)
 	/* then find min/max values' actual types */
 	partitionColumn = PartitionColumn(relationId);
 	getTypeInputInfo(partitionColumn->vartype, &inputFunctionId, &typeIoParam);
-	fmgr_info(inputFunctionId, &inputFunctionInfo);
 
 	/* finally convert min/max values to their actual types */
-	minValue = InputFunctionCall(&inputFunctionInfo, minValueString,
-								 typeIoParam, partitionColumn->vartypmod);
-	maxValue = InputFunctionCall(&inputFunctionInfo, maxValueString,
-								 typeIoParam, partitionColumn->vartypmod);
+	minValue = OidInputFunctionCall(inputFunctionId, minValueString,
+									typeIoParam, partitionColumn->vartypmod);
+	maxValue = OidInputFunctionCall(inputFunctionId, maxValueString,
+									typeIoParam, partitionColumn->vartypmod);
 
 	shard = (Shard *) palloc0(sizeof(Shard));
 	shard->id = shardId;
