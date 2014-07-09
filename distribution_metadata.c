@@ -140,7 +140,6 @@ LoadShardList(Oid distributedTableId)
 	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
-	bool isNull = false;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
 	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_RELATION_IDX, -1);
@@ -160,6 +159,8 @@ LoadShardList(Oid distributedTableId)
 	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+		bool isNull = false;
+
 		Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_ID,
 										  tupleDescriptor, &isNull);
 
@@ -311,8 +312,8 @@ PartitionColumn(Oid distributedTableId)
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
-		bool isNull = false;
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+		bool isNull = false;
 
 		Datum keyDatum = heap_getattr(heapTuple,
 									  ATTR_NUM_PARTITION_STRATEGY_KEY,
@@ -408,7 +409,6 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	Datum relationIdDatum = 0;
 	Datum minValueDatum = 0;
 	Datum maxValueDatum = 0;
-	bool isNull = false;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
 	indexRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_PKEY_IDX, -1);
@@ -428,6 +428,7 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	if (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+		bool isNull = false;
 
 		relationIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_RELATION_ID,
 									   tupleDescriptor, &isNull);
