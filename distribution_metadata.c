@@ -39,7 +39,7 @@
 
 
 /* local function forward declarations */
-static Var * ColumnNameToVar(Relation relation, char *columnName);
+static Var * ColumnNameToColumn(Relation relation, char *columnName);
 static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
 						 char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
@@ -322,7 +322,7 @@ PartitionColumn(Oid distributedTableId)
 
 		Relation relation = relation_open(distributedTableId,
 										  AccessShareLock);
-		partitionColumn = ColumnNameToVar(relation, partitionColumnName);
+		partitionColumn = ColumnNameToColumn(relation, partitionColumnName);
 		relation_close(relation, AccessShareLock);
 	}
 	else
@@ -339,12 +339,12 @@ PartitionColumn(Oid distributedTableId)
 
 
 /*
- * ColumnNameToVar accepts a relation and column name and returns a Var that
+ * ColumnNameToColumn accepts a relation and column name and returns a Var that
  * represents that column in that relation. If the column doesn't exist or is
  * a system column, an error is thrown.
  */
 static Var *
-ColumnNameToVar(Relation relation, char *columnName)
+ColumnNameToColumn(Relation relation, char *columnName)
 {
 	Var *partitionColumn = NULL;
 
