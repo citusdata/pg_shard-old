@@ -57,10 +57,10 @@ PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 Datum
 TestDistributionMetadata(PG_FUNCTION_ARGS)
 {
-	Oid relationId = PG_GETARG_OID(0);
+	Oid distributedTableId = PG_GETARG_OID(0);
 
-	Var *partitionColumn = PartitionColumn(relationId);
-	List *shardList = LoadShardList(relationId);
+	Var *partitionColumn = PartitionColumn(distributedTableId);
+	List *shardList = LoadShardList(distributedTableId);
 	List *placementList = NIL;
 
 	ListCell *cell = NULL;
@@ -124,12 +124,12 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 
 /*
- * LoadShardList returns a List of shard identifiers related to a given
+ * LoadShardList returns a List of shard identifiers related for a given
  * distributed table. If no shards can be found for the specified relation, an
  * empty List is returned.
  */
 List *
-LoadShardList(Oid relationId)
+LoadShardList(Oid distributedTableId)
 {
 	const int scanKeyCount = 1;
 
@@ -149,7 +149,7 @@ LoadShardList(Oid relationId)
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(relationId));
+				ObjectIdGetDatum(distributedTableId));
 
 	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
 								  scanKeyCount, 0);
@@ -287,7 +287,7 @@ LoadPlacementList(int64 shardId)
  * can be found using the provided identifer, an error is thrown.
  */
 Var *
-PartitionColumn(Oid relationId)
+PartitionColumn(Oid distributedTableId)
 {
 	const int scanKeyCount = 1;
 
@@ -308,7 +308,7 @@ PartitionColumn(Oid relationId)
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(relationId));
+				ObjectIdGetDatum(distributedTableId));
 
 	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
 								  scanKeyCount, 0);
@@ -326,14 +326,15 @@ PartitionColumn(Oid relationId)
 									  tupleDescriptor, &isNull);
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
-		Relation relation = relation_open(relationId, AccessShareLock);
+		Relation relation = relation_open(distributedTableId,
+										  AccessShareLock);
 		partitionColumn = ColumnNameToVar(relation, partitionColumnName);
 		relation_close(relation, AccessShareLock);
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find partition strategy for relation "
-							   "%u", relationId)));
+		ereport(ERROR, (errmsg("could not find partition for distributed"
+							   "relation %u", distributedTableId)));
 	}
 
 	index_endscan(indexScanDesc);

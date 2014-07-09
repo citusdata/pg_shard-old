@@ -65,7 +65,7 @@
 
 /*
  * Shard represents information about a particular shard in a distributed table.
- * Shards have a unique identifier, a reference back to the foreign table they
+ * Shards have a unique identifier, a reference back to the table they
  * distribute, and min and max values for the partition column of rows that are
  * contained within the shard (this range is inclusive).
  *
@@ -74,7 +74,7 @@
 typedef struct Shard
 {
 	int64 id;			// unique identifier for the shard
-	Oid relationId;		// id of the shard's foreign table
+	Oid relationId;		// id of the shard's distributed table
 	Datum minValue;		// a shard's typed min value datum
 	Datum maxValue;		// a shard's typed max value datum
 	Oid valueTypeId;	// typeId for minValue and maxValue Datums
@@ -98,10 +98,10 @@ typedef struct Placement
 } Placement;
 
 
-extern List * LoadShardList(Oid relationId);
+extern List * LoadShardList(Oid distributedTableId);
 extern Shard * LoadShard(int64 shardId);
 extern List * LoadPlacementList(int64 shardId);
-extern Var * PartitionColumn(Oid relationId);
+extern Var * PartitionColumn(Oid distributedTableId);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 
 
