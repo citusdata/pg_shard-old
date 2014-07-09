@@ -41,17 +41,17 @@
 #define ATTR_NUM_SHARD_MIN_VALUE 3
 #define ATTR_NUM_SHARD_MAX_VALUE 4
 
-/* Placement information is stored in the placement table. */
-#define PLACEMENT_TABLE_NAME "placement"
+/* Shard placement information is stored in the shard placement table. */
+#define SHARD_PLACEMENT_TABLE_NAME "shard_placement"
 
 /* The table has an index to expedite lookup by shard identifier */
 #define PLACEMENT_SHARD_IDX "placement_idx_shard_id"
 
-/* names for specific attributes within tuples from the placement table */
-#define ATTR_NUM_PLACEMENT_ID 1
-#define ATTR_NUM_PLACEMENT_SHARD_ID 2
-#define ATTR_NUM_PLACEMENT_NODE_NAME 3
-#define ATTR_NUM_PLACEMENT_NODE_PORT 4
+/* names for specific attributes within tuples from the shard placement table */
+#define ATTR_NUM_SHARD_PLACEMENT_ID 1
+#define ATTR_NUM_SHARD_PLACEMENT_SHARD_ID 2
+#define ATTR_NUM_SHARD_PLACEMENT_NODE_NAME 3
+#define ATTR_NUM_SHARD_PLACEMENT_NODE_PORT 4
 
 /*
  * Partition strategies are stored in the partition_strategy table, one for each

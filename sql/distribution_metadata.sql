@@ -26,7 +26,7 @@ VALUES
 	('events'::regclass, '20', '30'),
 	('events'::regclass, '30', '40');
 
-INSERT INTO pgs_distribution_metadata.placement
+INSERT INTO pgs_distribution_metadata.shard_placement
 	(node_name, node_port, shard_id)
 VALUES
 	('foo', 123, 1),

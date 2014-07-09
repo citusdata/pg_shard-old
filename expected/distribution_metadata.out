@@ -19,7 +19,7 @@ VALUES
 	('events'::regclass, '10', '20'),
 	('events'::regclass, '20', '30'),
 	('events'::regclass, '30', '40');
-INSERT INTO pgs_distribution_metadata.placement
+INSERT INTO pgs_distribution_metadata.shard_placement
 	(node_name, node_port, shard_id)
 VALUES
 	('foo', 123, 1),
@@ -36,8 +36,8 @@ INFO:  Shard #4
 INFO:  	relation:	events
 INFO:  	min value:	30
 INFO:  	max value:	40
-INFO:  	1 placements:
-INFO:  		Placement #4
+INFO:  	1 shard placements:
+INFO:  		ShardPlacement #4
 INFO:  			shard:	4
 INFO:  			node name:	bar
 INFO:  			node port:	456
@@ -45,8 +45,8 @@ INFO:  Shard #3
 INFO:  	relation:	events
 INFO:  	min value:	20
 INFO:  	max value:	30
-INFO:  	1 placements:
-INFO:  		Placement #3
+INFO:  	1 shard placements:
+INFO:  		ShardPlacement #3
 INFO:  			shard:	3
 INFO:  			node name:	bar
 INFO:  			node port:	456
@@ -54,8 +54,8 @@ INFO:  Shard #2
 INFO:  	relation:	events
 INFO:  	min value:	10
 INFO:  	max value:	20
-INFO:  	1 placements:
-INFO:  		Placement #2
+INFO:  	1 shard placements:
+INFO:  		ShardPlacement #2
 INFO:  			shard:	2
 INFO:  			node name:	foo
 INFO:  			node port:	123
@@ -63,8 +63,8 @@ INFO:  Shard #1
 INFO:  	relation:	events
 INFO:  	min value:	0
 INFO:  	max value:	10
-INFO:  	1 placements:
-INFO:  		Placement #1
+INFO:  	1 shard placements:
+INFO:  		ShardPlacement #1
 INFO:  			shard:	1
 INFO:  			node name:	foo
 INFO:  			node port:	123

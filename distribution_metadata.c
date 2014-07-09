@@ -57,8 +57,8 @@ PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 
 
 /*
- * TestDistributionMetadata prints all current shard and placement configuration
- * at INFO level for testing purposes.
+ * TestDistributionMetadata prints all current shard and shard placement
+ * configuration at INFO level for testing purposes.
  */
 Datum
 TestDistributionMetadata(PG_FUNCTION_ARGS)
@@ -88,7 +88,7 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 	foreach(cell, shardList)
 	{
-		ListCell *placementCell = NULL;
+		ListCell *shardPlacementCell = NULL;
 		int64 *shardId = NULL;
 
 		shardId = (int64 *) lfirst(cell);
@@ -107,17 +107,17 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
 
 		shardPlacementList = LoadShardPlacementList(*shardId);
-		ereport(INFO, (errmsg("\t%d placements:",
+		ereport(INFO, (errmsg("\t%d shard placements:",
 							  list_length(shardPlacementList))));
 
-		foreach(placementCell, shardPlacementList)
+		foreach(shardPlacementCell, shardPlacementList)
 
 		{
 			ShardPlacement *shardPlacement = NULL;
 
-			shardPlacement = (ShardPlacement *) lfirst(placementCell);
+			shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
 
-			ereport(INFO, (errmsg("\t\tPlacement #" INT64_FORMAT,
+			ereport(INFO, (errmsg("\t\tShardPlacement #" INT64_FORMAT,
 								  shardPlacement->id)));
 			ereport(INFO, (errmsg("\t\t\tshard:\t" INT64_FORMAT,
 								  shardPlacement->shardId)));
@@ -239,7 +239,7 @@ LoadShard(int64 shardId)
 List *
 LoadShardPlacementList(int64 shardId)
 {
-	List *placementList = NIL;
+	List *shardPlacementList = NIL;
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
 	Relation heapRelation = NULL;
@@ -249,7 +249,8 @@ LoadShardPlacementList(int64 shardId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PLACEMENT_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								SHARD_PLACEMENT_TABLE_NAME, -1);
 	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PLACEMENT_SHARD_IDX, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
@@ -268,7 +269,7 @@ LoadShardPlacementList(int64 shardId)
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		ShardPlacement *shardPlacement =
 				TupleToShardPlacement(heapTuple, tupleDescriptor);
-		placementList = lappend(placementList, shardPlacement);
+		shardPlacementList = lappend(shardPlacementList, shardPlacement);
 
 		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
@@ -278,13 +279,13 @@ LoadShardPlacementList(int64 shardId)
 	relation_close(heapRelation, AccessShareLock);
 
 	/* if no shard placements are found, error out */
-	if (placementList == NIL)
+	if (shardPlacementList == NIL)
 	{
 		ereport(ERROR, (errmsg("could not find any placements for shardId "
 							   INT64_FORMAT, shardId)));
 	}
 
-	return placementList;
+	return shardPlacementList;
 }
 
 
@@ -458,14 +459,18 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	ShardPlacement *shardPlacement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_ID,
-								 tupleDescriptor, &isNull);
-	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_SHARD_ID,
-									  tupleDescriptor, &isNull);
-	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_NODE_NAME,
-									   tupleDescriptor, &isNull);
-	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_NODE_PORT,
-									   tupleDescriptor, &isNull);
+	Datum idDatum =
+			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_ID,
+						 tupleDescriptor, &isNull);
+	Datum shardIdDatum =
+			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
+						 tupleDescriptor, &isNull);
+	Datum nodeNameDatum =
+			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
+						 tupleDescriptor, &isNull);
+	Datum nodePortDatum =
+			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
+						 tupleDescriptor, &isNull);
 
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
