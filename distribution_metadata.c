@@ -137,7 +137,7 @@ LoadShardList(Oid relationId)
 
 	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
 	Relation heapRelation = NULL, indexRelation = NULL;
-	IndexScanDesc idxScanDesc = NULL;
+	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 	bool isNull = false;
@@ -151,12 +151,12 @@ LoadShardList(Oid relationId)
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
 				ObjectIdGetDatum(relationId));
 
-	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
 								  scanKeyCount, 0);
-	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
+	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
@@ -169,10 +169,10 @@ LoadShardList(Oid relationId)
 
 		shardList = lappend(shardList, shardIdPointer);
 
-		heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
 
-	index_endscan(idxScanDesc);
+	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
@@ -238,7 +238,7 @@ LoadPlacementList(int64 shardId)
 
 	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
 	Relation heapRelation = NULL, indexRelation = NULL;
-	IndexScanDesc idxScanDesc = NULL;
+	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
@@ -251,22 +251,22 @@ LoadPlacementList(int64 shardId)
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
 				Int64GetDatum(shardId));
 
-	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
 								  scanKeyCount, 0);
-	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
+	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		Placement *placement = TupleToPlacement(heapTuple, tupleDescriptor);
 		placementList = lappend(placementList, placement);
 
-		heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
 
-	index_endscan(idxScanDesc);
+	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
@@ -293,7 +293,7 @@ PartitionColumn(Oid relationId)
 
 	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
 	Relation heapRelation = NULL, indexRelation = NULL;
-	IndexScanDesc idxScanDesc = NULL;
+	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
@@ -310,12 +310,12 @@ PartitionColumn(Oid relationId)
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
 				ObjectIdGetDatum(relationId));
 
-	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
 								  scanKeyCount, 0);
-	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
+	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
 		bool isNull = false;
@@ -336,7 +336,7 @@ PartitionColumn(Oid relationId)
 							   "%u", relationId)));
 	}
 
-	index_endscan(idxScanDesc);
+	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
@@ -408,7 +408,7 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 
 	RangeVar *heapRangeVar = NULL, *indexRangeVar = NULL;
 	Relation heapRelation = NULL, indexRelation = NULL;
-	IndexScanDesc idxScanDesc = NULL;
+	IndexScanDesc indexScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
@@ -426,12 +426,12 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
 				Int64GetDatum(shardId));
 
-	idxScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
 								  scanKeyCount, 0);
-	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
+	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
@@ -455,7 +455,7 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 						shardId)));
 	}
 
-	index_endscan(idxScanDesc);
+	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
