@@ -39,7 +39,7 @@
 
 
 /* local function forward declarations */
-static Var * ColumnNameToColumn(Relation relation, char *columnName);
+static Var * ColumnNameToColumn(Oid relationId, char *columnName);
 static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
 						 char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
@@ -320,10 +320,8 @@ PartitionColumn(Oid distributedTableId)
 									  tupleDescriptor, &isNull);
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
-		Relation relation = relation_open(distributedTableId,
-										  AccessShareLock);
-		partitionColumn = ColumnNameToColumn(relation, partitionColumnName);
-		relation_close(relation, AccessShareLock);
+		partitionColumn = ColumnNameToColumn(distributedTableId,
+											 partitionColumnName);
 	}
 	else
 	{
@@ -339,52 +337,42 @@ PartitionColumn(Oid distributedTableId)
 
 
 /*
- * ColumnNameToColumn accepts a relation and column name and returns a Var that
- * represents that column in that relation. If the column doesn't exist or is
- * a system column, an error is thrown.
+ * ColumnNameToColumn accepts a relation identifier and column name and returns
+ * a Var that represents that column in that relation. If the column doesn't
+ * exist or is a system column, an error is thrown.
  */
 static Var *
-ColumnNameToColumn(Relation relation, char *columnName)
+ColumnNameToColumn(Oid relationId, char *columnName)
 {
 	Var *partitionColumn = NULL;
 
-	/* Flags for addRangeTableEntryForRelation invocation. */
-	const bool useInheritance = false;
-	const bool inFromClause = true;
+	Oid typid = InvalidOid;
+	int32 vartypmod = -1;
+	Oid collid = InvalidOid;
 
-	/*
-	 * Flags for addRTEtoQuery invocation. Only need to search column names, so
-	 * don't bother adding relation name to parse state.
-	 */
-	const bool addToJoins = false;
-	const bool addToNamespace = false;
-	const bool addToVarNamespace = true;
+	/* dummy indexes needed by makeVar */
+	const Index varno = 1;
+	const Index varlevelsup = 0;
 
-	ParseState *parseState = make_parsestate(NULL);
+	AttrNumber attNum = get_attnum(relationId, columnName);
 
-	RangeTblEntry *rte = addRangeTableEntryForRelation(parseState, relation,
-													   NULL, useInheritance,
-													   inFromClause);
-	addRTEtoQuery(parseState, rte, addToJoins, addToNamespace,
-				  addToVarNamespace);
-
-	partitionColumn = (Var *) scanRTEForColumn(parseState, rte, columnName, 0);
-
-	free_parsestate(parseState);
-
-	if (partitionColumn == NULL)
+	if (attNum == InvalidAttrNumber)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_UNDEFINED_COLUMN),
 				 errmsg("partition column \"%s\" not found", columnName)));
 	}
-	else if (!AttrNumberIsForUserDefinedAttr(partitionColumn->varattno))
+	else if (!AttrNumberIsForUserDefinedAttr(attNum))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
 				 errmsg("specified partition column \"%s\" is a system column",
 						 columnName)));
 	}
+
+	get_atttypetypmodcoll(relationId, attNum, &typid, &vartypmod, &collid);
+	partitionColumn = makeVar(varno, attNum, typid, vartypmod, collid,
+							  varlevelsup);
 
 	return partitionColumn;
 }
