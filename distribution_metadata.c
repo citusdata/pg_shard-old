@@ -42,7 +42,7 @@
 static Var * ColumnNameToVar(Relation relation, char *columnName);
 static void LoadShardRow(int64 shardId, Oid *relationId, char **minValue,
 						 char **maxValue);
-static Placement * TupleToPlacement(HeapTuple tuple,
+static Placement * TupleToPlacement(HeapTuple heapTuple,
 									TupleDesc tupleDescriptor);
 
 
@@ -139,7 +139,7 @@ LoadShardList(Oid relationId)
 	Relation heapRelation = NULL, indexRelation = NULL;
 	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tuple = NULL;
+	HeapTuple heapTuple = NULL;
 	bool isNull = false;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA, SHARD_TABLE_NAME, -1);
@@ -156,11 +156,11 @@ LoadShardList(Oid relationId)
 	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
-	while (HeapTupleIsValid(tuple))
+	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_ID,
+		Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_ID,
 										  tupleDescriptor, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
@@ -169,7 +169,7 @@ LoadShardList(Oid relationId)
 
 		shardList = lappend(shardList, shardIdPointer);
 
-		tuple = index_getnext(idxScanDesc, ForwardScanDirection);
+		heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	}
 
 	index_endscan(idxScanDesc);
@@ -240,7 +240,7 @@ LoadPlacementList(int64 shardId)
 	Relation heapRelation = NULL, indexRelation = NULL;
 	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tuple = NULL;
+	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_TABLE_NAME, -1);
 	indexRangeVar = makeRangeVar(METADATA_SCHEMA, PLACEMENT_SHARD_IDX, -1);
@@ -256,14 +256,14 @@ LoadPlacementList(int64 shardId)
 	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
-	while (HeapTupleIsValid(tuple))
+	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		Placement *placement = TupleToPlacement(tuple, tupleDescriptor);
+		Placement *placement = TupleToPlacement(heapTuple, tupleDescriptor);
 		placementList = lappend(placementList, placement);
 
-		tuple = index_getnext(idxScanDesc, ForwardScanDirection);
+		heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
 	}
 
 	index_endscan(idxScanDesc);
@@ -295,7 +295,7 @@ PartitionColumn(Oid relationId)
 	Relation heapRelation = NULL, indexRelation = NULL;
 	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tuple = NULL;
+	HeapTuple heapTuple = NULL;
 
 	Var *partitionColumn = NULL;
 
@@ -315,13 +315,14 @@ PartitionColumn(Oid relationId)
 	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(tuple))
+	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(heapTuple))
 	{
 		bool isNull = false;
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 
-		Datum keyDatum = heap_getattr(tuple, ATTR_NUM_PARTITION_STRATEGY_KEY,
+		Datum keyDatum = heap_getattr(heapTuple,
+									  ATTR_NUM_PARTITION_STRATEGY_KEY,
 									  tupleDescriptor, &isNull);
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
@@ -409,7 +410,7 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	Relation heapRelation = NULL, indexRelation = NULL;
 	IndexScanDesc idxScanDesc = NULL;
 	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple tuple = NULL;
+	HeapTuple heapTuple = NULL;
 
 	Datum relationIdDatum = 0;
 	Datum minValueDatum = 0;
@@ -430,16 +431,16 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
 	index_rescan(idxScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	// TODO: Do I need to check scan->xs_recheck and recheck scan key?
-	tuple = index_getnext(idxScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(tuple))
+	heapTuple = index_getnext(idxScanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 
-		relationIdDatum = heap_getattr(tuple, ATTR_NUM_SHARD_RELATION_ID,
+		relationIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_RELATION_ID,
 									   tupleDescriptor, &isNull);
-		minValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MIN_VALUE,
+		minValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MIN_VALUE,
 									 tupleDescriptor, &isNull);
-		maxValueDatum = heap_getattr(tuple, ATTR_NUM_SHARD_MAX_VALUE,
+		maxValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MAX_VALUE,
 									 tupleDescriptor, &isNull);
 
 		/* convert and deep copy row's values */
@@ -468,21 +469,21 @@ LoadShardRow(int64 shardId, Oid *relationId, char **minValue, char **maxValue)
  * input tuple must not contain any NULLs.
  */
 static Placement *
-TupleToPlacement(HeapTuple tuple, TupleDesc tupleDescriptor)
+TupleToPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 {
 	Placement *placement = NULL;
 	bool isNull = false;
 
-	Datum idDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_ID, tupleDescriptor,
-								 &isNull);
-	Datum shardIdDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_SHARD_ID,
+	Datum idDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_ID,
+								 tupleDescriptor, &isNull);
+	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_SHARD_ID,
 									  tupleDescriptor, &isNull);
-	Datum nodeNameDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_NODE_NAME,
+	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_NODE_NAME,
 									   tupleDescriptor, &isNull);
-	Datum nodePortDatum = heap_getattr(tuple, ATTR_NUM_PLACEMENT_NODE_PORT,
+	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_PLACEMENT_NODE_PORT,
 									   tupleDescriptor, &isNull);
 
-	Assert(!HeapTupleHasNulls(tuple));
+	Assert(!HeapTupleHasNulls(heapTuple));
 
 	placement = palloc0(sizeof(Placement));
 	placement->id = DatumGetInt64(idDatum);
