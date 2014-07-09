@@ -85,10 +85,12 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 		int64 *shardId = NULL;
 
 		shardId = (int64 *) lfirst(cell);
-		Shard * shard = LoadShard(*shardId);
+		Shard *shard = LoadShard(*shardId);
 
-		char *minValueStr = OutputFunctionCall(&outputFunctionInfo, shard->minValue);
-		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo, shard->maxValue);
+		char *minValueStr = OutputFunctionCall(&outputFunctionInfo,
+											   shard->minValue);
+		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo,
+											   shard->maxValue);
 
 		ereport(INFO, (errmsg("Shard #" INT64_FORMAT, shard->id)));
 		ereport(INFO, (errmsg("\trelation:\t%s",
