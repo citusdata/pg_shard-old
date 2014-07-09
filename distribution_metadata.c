@@ -65,7 +65,8 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 	ListCell *cell = NULL;
 
-	FmgrInfo outputFunctionInfo = { };
+	FmgrInfo outputFunctionInfo;
+	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
 	Oid outputFunctionId = InvalidOid;
 	bool isVarlena = false;
 
