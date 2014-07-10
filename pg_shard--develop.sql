@@ -8,7 +8,7 @@ CREATE SCHEMA pgs_distribution_metadata
 
 	-- shard keeps track of hash value ranges for each shard
 	CREATE TABLE shard (
-		id bigserial primary key,
+		id bigint primary key,
 		relation_id oid not null,
 		min_value text not null,
 		max_value text not null
@@ -16,7 +16,7 @@ CREATE SCHEMA pgs_distribution_metadata
 
 	-- shard_placement records which nodes contain which shards
 	CREATE TABLE shard_placement (
-		id bigserial primary key,
+		id bigint primary key,
 		shard_id bigint not null references shard,
 		node_name text not null,
 		node_port integer not null
@@ -32,7 +32,11 @@ CREATE SCHEMA pgs_distribution_metadata
 	CREATE INDEX shard_relation_index ON shard (relation_id)
 	CREATE INDEX shard_placement_node_name_node_port_index
 		ON shard_placement (node_name, node_port)
-	CREATE INDEX shard_placement_shard_index ON shard_placement (shard_id);
+	CREATE INDEX shard_placement_shard_index ON shard_placement (shard_id)
+
+	-- make sequences for shards and placements
+	CREATE SEQUENCE shard_id_sequence
+	CREATE SEQUENCE shard_placement_id_sequence;
 
 -- mark each of the above as config tables to have pg_dump preserve them
 SELECT pg_catalog.pg_extension_config_dump(
