@@ -356,9 +356,9 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 {
 	Var *partitionColumn = NULL;
 
-	Oid typid = InvalidOid;
-	int32 vartypmod = -1;
-	Oid collid = InvalidOid;
+	Oid columnTypeOid= InvalidOid;
+	int32 columnTypeMod = -1;
+	Oid columnCollationOid = InvalidOid;
 
 	/* dummy indexes needed by makeVar */
 	const Index varno = 1;
@@ -380,9 +380,10 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 						 columnName)));
 	}
 
-	get_atttypetypmodcoll(relationId, attNum, &typid, &vartypmod, &collid);
-	partitionColumn = makeVar(varno, attNum, typid, vartypmod, collid,
-							  varlevelsup);
+	get_atttypetypmodcoll(relationId, attNum, &columnTypeOid, &columnTypeMod,
+						  &columnCollationOid);
+	partitionColumn = makeVar(varno, attNum, columnTypeOid, columnTypeMod,
+							  columnCollationOid, varlevelsup);
 
 	return partitionColumn;
 }
