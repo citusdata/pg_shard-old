@@ -14,6 +14,8 @@
 #ifndef PG_SHARD_CONNECTION_H
 #define PG_SHARD_CONNECTION_H
 
+#include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
 

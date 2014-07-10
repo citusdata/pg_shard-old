@@ -13,27 +13,28 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "libpq-fe.h"
+#include "postgres_ext.h"
 
 #include "connection.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "access/xact.h"
-#include "libpq-fe.h"
 #include "commands/dbcommands.h"
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/hsearch.h"
 #include "utils/palloc.h"
 
 
 /* Maximum (textual) lengths of hostnames and port numbers */
-#define MAX_HOST_LEN 255
-#define MAX_PORT_LEN 11
+#define MAX_NODE_LENGTH 255
+#define MAX_PORT_LENGTH 11
 
 /*
  * ConnCacheKey acts as the key to index into the (process-local) hash keeping
@@ -41,8 +42,8 @@
  */
 typedef struct ConnCacheKey
 {
-	int32 nodePort;						// port of host to connect to
-	char nodeName[MAX_HOST_LEN + 1];	// hostname of host to connect to
+	int32 nodePort;						/* port of host to connect to */
+	char nodeName[MAX_NODE_LENGTH + 1];	/* hostname of host to connect to */
 } ConnCacheKey;
 
 /*
@@ -50,8 +51,8 @@ typedef struct ConnCacheKey
  */
 typedef struct ConnCacheEntry
 {
-	ConnCacheKey cacheKey;	// hash entry key
-	PGconn *connection;		// connection to foreign server, if any
+	ConnCacheKey cacheKey;	/* hash entry key */
+	PGconn *connection;		/* connection to foreign server, if any */
 } ConnCacheEntry;
 
 /*
@@ -74,6 +75,7 @@ static void ReportRemoteSqlError(int errorLevel, PGresult *result,
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(TestPgShardConnection);
+
 
 /*
  * TestPgShardConnection accepts three arguments: a hostname, port, and error
@@ -152,7 +154,8 @@ GetConnection(char *nodeName, int32 nodePort)
 static void
 ConnectionHashInit(void)
 {
-	HASHCTL info = { 0 };
+	HASHCTL info;
+	memset(&info, 0, sizeof(info));
 	int hashFlags = 0;
 
 	info.keysize = sizeof(ConnCacheKey);
@@ -173,10 +176,11 @@ static ConnCacheEntry *
 ConnectionHashLookup(char *nodeName, int32 nodePort)
 {
 	ConnCacheEntry *connCacheEntry = NULL;
-	ConnCacheKey connCacheKey = { 0 };
+	ConnCacheKey connCacheKey;
+	memset(&connCacheKey, 0, sizeof(connCacheKey));
 	bool entryFound = false;
 
-	strncpy(connCacheKey.nodeName, nodeName, MAX_HOST_LEN);
+	strncpy(connCacheKey.nodeName, nodeName, MAX_NODE_LENGTH);
 	connCacheKey.nodePort = nodePort;
 
 	connCacheEntry = hash_search(ConnectionHash, &connCacheKey, HASH_ENTER,
@@ -212,14 +216,14 @@ EstablishConnection(ConnCacheKey *connCacheKey)
 		const char *keywords[6] = { 0 };
 		const char *values[6] = { 0 };
 		int paramIndex = 0;
-		char portStr[MAX_PORT_LEN + 1] = { 0 };
+		char portStr[MAX_PORT_LENGTH + 1] = { 0 };
 
 		keywords[paramIndex] = "host";
 		values[paramIndex] = connCacheKey->nodeName;
 		paramIndex++;
 
 		/* libpq requires string values, so format our port */
-		snprintf(portStr, MAX_PORT_LEN, "%d", connCacheKey->nodePort);
+		snprintf(portStr, MAX_PORT_LENGTH, "%d", connCacheKey->nodePort);
 		keywords[paramIndex] = "port";
 		values[paramIndex] = portStr;
 		paramIndex++;
