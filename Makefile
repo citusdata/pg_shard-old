@@ -3,7 +3,9 @@
 MODULE_big = pg_shard
 OBJS = pg_shard.o distribution_metadata.o
 
-PG_CPPFLAGS = -std=c99 -pedantic -Wall -Wextra -fstack-protector \
+PG_CPPFLAGS = -std=c99 -pedantic -fstack-protector \
+	-Wall \
+	-Wextra \
 	-Waggregate-return \
 	-Wbad-function-cast \
 	-Wcast-qual \
