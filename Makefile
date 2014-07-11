@@ -10,7 +10,6 @@ PG_CPPFLAGS = -std=c99 -pedantic -fstack-protector \
 	-Wbad-function-cast \
 	-Wcast-qual \
 	-Wconversion \
-	-Wdeclaration-after-statement \
 	-Wdisabled-optimization \
 	-Wfloat-equal \
 	-Winit-self \
@@ -20,7 +19,6 @@ PG_CPPFLAGS = -std=c99 -pedantic -fstack-protector \
 	-Wmissing-prototypes \
 	-Wnested-externs \
 	-Wold-style-definition \
-	-Wredundant-decls \
 	-Wshadow \
 	-Wstrict-overflow \
 	-Wstrict-prototypes \
