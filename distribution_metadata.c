@@ -326,7 +326,7 @@ PartitionColumn(Oid distributedTableId)
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("could not find partition for distributed"
+		ereport(ERROR, (errmsg("could not find partition for distributed "
 							   "relation %u", distributedTableId)));
 	}
 
@@ -346,39 +346,35 @@ static Var *
 ColumnNameToColumn(Oid relationId, char *columnName)
 {
 	Var *partitionColumn = NULL;
-
-	Oid columnTypeOid= InvalidOid;
+	Oid columnTypeOid = InvalidOid;
 	int32 columnTypeMod = -1;
 	Oid columnCollationOid = InvalidOid;
 
 	/* dummy indexes needed by makeVar */
-	const Index varno = 1;
-	const Index varlevelsup = 0;
+	const Index tableId = 1;
+	const Index columnLevelsUp = 0;
 
-	AttrNumber attNum = get_attnum(relationId, columnName);
-
-	if (attNum == InvalidAttrNumber)
+	AttrNumber columnId = get_attnum(relationId, columnName);
+	if (columnId == InvalidAttrNumber)
 	{
-		ereport(ERROR,
-				(errcode(ERRCODE_UNDEFINED_COLUMN),
-				 errmsg("partition column \"%s\" not found", columnName)));
+		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
+						errmsg("partition column \"%s\" not found",
+							   columnName)));
 	}
-	else if (!AttrNumberIsForUserDefinedAttr(attNum))
+	else if (!AttrNumberIsForUserDefinedAttr(columnId))
 	{
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-				 errmsg("specified partition column \"%s\" is a system column",
-						columnName)));
+		ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+						errmsg("specified partition column \"%s\" is a system "
+							   "column", columnName)));
 	}
 
-	get_atttypetypmodcoll(relationId, attNum, &columnTypeOid, &columnTypeMod,
+	get_atttypetypmodcoll(relationId, columnId, &columnTypeOid, &columnTypeMod,
 						  &columnCollationOid);
-	partitionColumn = makeVar(varno, attNum, columnTypeOid, columnTypeMod,
-							  columnCollationOid, varlevelsup);
+	partitionColumn = makeVar(tableId, columnId, columnTypeOid, columnTypeMod,
+							  columnCollationOid, columnLevelsUp);
 
 	return partitionColumn;
 }
-
 
 
 /*
