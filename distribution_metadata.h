@@ -38,8 +38,9 @@
 /* Semantic names clarify specific tuple attributes from the shard table. */
 #define ATTR_NUM_SHARD_ID 1
 #define ATTR_NUM_SHARD_RELATION_ID 2
-#define ATTR_NUM_SHARD_MIN_VALUE 3
-#define ATTR_NUM_SHARD_MAX_VALUE 4
+#define ATTR_NUM_SHARD_STORAGE 3
+#define ATTR_NUM_SHARD_MIN_VALUE 4
+#define ATTR_NUM_SHARD_MAX_VALUE 5
 
 /* Shard placement information is stored in the shard placement table. */
 #define SHARD_PLACEMENT_TABLE_NAME "shard_placement"

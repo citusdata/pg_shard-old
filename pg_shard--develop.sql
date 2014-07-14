@@ -10,6 +10,7 @@ CREATE SCHEMA pgs_distribution_metadata
 	CREATE TABLE shard (
 		id bigint primary key,
 		relation_id oid not null,
+		storage char not null,
 		min_value text not null,
 		max_value text not null
 	)
