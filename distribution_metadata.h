@@ -54,14 +54,14 @@
 #define ATTR_NUM_SHARD_PLACEMENT_NODE_PORT 4
 
 /*
- * Partition strategies are stored in the partition_strategy table, one for each
- * distributed table tracked by pg_shard.
+ * Partition schemes are stored in the partition table, one for each distributed
+ * table tracked by pg_shard.
  */
-#define PARTITION_STRATEGY_TABLE_NAME "partition_strategy"
+#define PARTITION_TABLE_NAME "partition"
 
-/* Semantic names clarify specific tuple attributes from the partition strategy table. */
-#define ATTR_NUM_PARTITION_STRATEGY_RELATION_ID 1
-#define ATTR_NUM_PARTITION_STRATEGY_KEY 2
+/* Semantic names clarify specific tuple attributes from the partition table. */
+#define ATTR_NUM_PARTITION_RELATION_ID 1
+#define ATTR_NUM_PARTITION_KEY 2
 
 /*
  * ShardInterval contains information about a particular shard in a distributed

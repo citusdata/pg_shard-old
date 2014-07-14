@@ -302,12 +302,12 @@ PartitionColumn(Oid distributedTableId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_STRATEGY_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_STRATEGY_RELATION_ID,
-				InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
+				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
 
 	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
 
@@ -317,8 +317,7 @@ PartitionColumn(Oid distributedTableId)
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		bool isNull = false;
 
-		Datum keyDatum = heap_getattr(heapTuple,
-									  ATTR_NUM_PARTITION_STRATEGY_KEY,
+		Datum keyDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_KEY,
 									  tupleDescriptor, &isNull);
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 

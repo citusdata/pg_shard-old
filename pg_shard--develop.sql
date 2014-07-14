@@ -22,8 +22,8 @@ CREATE SCHEMA pgs_distribution_metadata
 		node_port integer not null
 	)
 
-	-- partition_strategy lists a partition key for each distributed table
-	CREATE TABLE partition_strategy (
+	-- partition lists a partition key for each distributed table
+	CREATE TABLE partition (
 		relation_id oid unique not null,
 		key text not null
 	)
@@ -44,4 +44,4 @@ SELECT pg_catalog.pg_extension_config_dump(
 SELECT pg_catalog.pg_extension_config_dump(
 	'pgs_distribution_metadata.shard_placement', '');
 SELECT pg_catalog.pg_extension_config_dump(
-	'pgs_distribution_metadata.partition_strategy', '');
+	'pgs_distribution_metadata.partition', '');
