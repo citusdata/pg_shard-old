@@ -35,7 +35,7 @@
 /* The table has an index to expedite lookup by relation identifier */
 #define SHARD_RELATION_INDEX_NAME "shard_relation_index"
 
-/* names for specific attributes within tuples from the shard table */
+/* Semantic names clarify specific tuple attributes from the shard table. */
 #define ATTR_NUM_SHARD_ID 1
 #define ATTR_NUM_SHARD_RELATION_ID 2
 #define ATTR_NUM_SHARD_MIN_VALUE 3
@@ -47,7 +47,7 @@
 /* The table has an index to expedite lookup by shard identifier */
 #define SHARD_PLACEMENT_SHARD_INDEX_NAME "shard_placement_shard_index"
 
-/* names for specific attributes within tuples from the shard placement table */
+/* Semantic names explain specific tuple attributes from the shard placement table. */
 #define ATTR_NUM_SHARD_PLACEMENT_ID 1
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_ID 2
 #define ATTR_NUM_SHARD_PLACEMENT_NODE_NAME 3
@@ -59,7 +59,7 @@
  */
 #define PARTITION_STRATEGY_TABLE_NAME "partition_strategy"
 
-/* names for specific attributes in tuples from the partition strategy table */
+/* Semantic names clarify specific tuple attributes from the partition strategy table. */
 #define ATTR_NUM_PARTITION_STRATEGY_RELATION_ID 1
 #define ATTR_NUM_PARTITION_STRATEGY_KEY 2
 
