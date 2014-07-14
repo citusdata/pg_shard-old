@@ -135,8 +135,8 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 /*
  * LoadShardList returns a list of shard identifiers related for a given
- * distributed table. If no shards can be found for the specified relation, an
- * empty list is returned.
+ * distributed table. The function returns an empty list if no shards can be
+ * found for the given relation.
  */
 List *
 LoadShardList(Oid distributedTableId)
@@ -193,8 +193,8 @@ LoadShardList(Oid distributedTableId)
 
 /*
  * LoadShardInterval collects metadata for a specified shard in a ShardInterval
- * and returns a pointer to that structure. If no shard can be found using the
- * provided identifier, an error is thrown.
+ * and returns a pointer to that structure. The function throws an error if no
+ * shard can be found using the provided identifier.
  */
 ShardInterval *
 LoadShardInterval(int64 shardId)
@@ -236,8 +236,8 @@ LoadShardInterval(int64 shardId)
 
 /*
  * LoadShardPlacementList gathers metadata for every placement of a given shard
- * and returns a list of ShardPlacements containing that metadata. If the
- * specified shard has not been placed, an error is thrown.
+ * and returns a list of ShardPlacements containing that metadata. The function
+ * throws an error if the specified shard has not been placed.
  */
 List *
 LoadShardPlacementList(int64 shardId)
@@ -296,7 +296,7 @@ LoadShardPlacementList(int64 shardId)
 /*
  * PartitionColumn looks up the column used to partition a given distributed
  * table and returns a reference to a Var representing that column. If no entry
- * can be found using the provided identifer, an error is thrown.
+ * can be found using the provided identifer, this function throws an error.
  */
 Var *
 PartitionColumn(Oid distributedTableId)
@@ -348,8 +348,8 @@ PartitionColumn(Oid distributedTableId)
 
 /*
  * ColumnNameToColumn accepts a relation identifier and column name and returns
- * a Var that represents that column in that relation. If the column doesn't
- * exist or is a system column, an error is thrown.
+ * a Var that represents that column in that relation. This function throws an
+ * error if the column doesn't exist or is a system column.
  */
 static Var *
 ColumnNameToColumn(Oid relationId, char *columnName)
