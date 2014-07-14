@@ -134,9 +134,9 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 
 /*
- * LoadShardList returns a List of shard identifiers related for a given
+ * LoadShardList returns a list of shard identifiers related for a given
  * distributed table. If no shards can be found for the specified relation, an
- * empty List is returned.
+ * empty list is returned.
  */
 List *
 LoadShardList(Oid distributedTableId)
@@ -236,7 +236,7 @@ LoadShardInterval(int64 shardId)
 
 /*
  * LoadShardPlacementList gathers metadata for every placement of a given shard
- * and returns a List of ShardPlacements containing that metadata. If the
+ * and returns a list of ShardPlacements containing that metadata. If the
  * specified shard has not been placed, an error is thrown.
  */
 List *
