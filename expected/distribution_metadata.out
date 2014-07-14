@@ -30,7 +30,7 @@ INSERT INTO pgs_distribution_metadata.partition_strategy (relation_id, key)
 VALUES
 	('events'::regclass, 'name');
 SELECT test_distribution_metadata('events'::regclass);
-INFO:  Table is partitioned using column #2, which is of type "text"
+INFO:  Table partition using column #2 with type "text"
 INFO:  Found 4 shards...
 INFO:  Shard Interval #4
 INFO:  	relation:	events

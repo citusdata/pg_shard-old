@@ -80,8 +80,8 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	getTypeOutputInfo(partitionColumn->vartype, &outputFunctionId, &isVarlena);
 	fmgr_info(outputFunctionId, &outputFunctionInfo);
 
-	ereport(INFO, (errmsg("Table is partitioned using column #%d, "
-						  "which is of type \"%s\"", partitionColumn->varattno,
+	ereport(INFO, (errmsg("Table partition using column #%d with type \"%s\"",
+						  partitionColumn->varattno,
 						  format_type_be(partitionColumn->vartype))));
 
 	ereport(INFO, (errmsg("Found %d shards...", list_length(shardList))));
@@ -99,8 +99,7 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo,
 											   shardInterval->maxValue);
 
-		ereport(INFO, (errmsg("Shard Interval #" INT64_FORMAT,
-							  shardInterval->id)));
+		ereport(INFO, (errmsg("Shard Interval #" INT64_FORMAT, shardInterval->id)));
 		ereport(INFO, (errmsg("\trelation:\t%s",
 							  get_rel_name(shardInterval->relationId))));
 
@@ -122,10 +121,8 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 								  shardPlacement->id)));
 			ereport(INFO, (errmsg("\t\t\tshard:\t" INT64_FORMAT,
 								  shardPlacement->shardId)));
-			ereport(INFO, (errmsg("\t\t\tnode name:\t%s",
-								  shardPlacement->nodeName)));
-			ereport(INFO, (errmsg("\t\t\tnode port:\t%u",
-								  shardPlacement->nodePort)));
+			ereport(INFO, (errmsg("\t\t\tnode name:\t%s", shardPlacement->nodeName)));
+			ereport(INFO, (errmsg("\t\t\tnode port:\t%u", shardPlacement->nodePort)));
 		}
 	}
 
@@ -152,8 +149,7 @@ LoadShardList(Oid distributedTableId)
 	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_RELATION_INDEX_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_RELATION_INDEX_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
@@ -162,7 +158,7 @@ LoadShardList(Oid distributedTableId)
 				ObjectIdGetDatum(distributedTableId));
 
 	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
-								  scanKeyCount, 0);
+									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
@@ -210,8 +206,7 @@ LoadShardInterval(int64 shardId)
 	char *maxValueString = NULL;
 
 	/* first read the related row from the shard table */
-	LoadShardIntervalRow(shardId, &relationId, &minValueString,
-						 &maxValueString);
+	LoadShardIntervalRow(shardId, &relationId, &minValueString, &maxValueString);
 
 	/* then find min/max values' actual types */
 	partitionColumn = PartitionColumn(relationId);
@@ -252,19 +247,17 @@ LoadShardPlacementList(int64 shardId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								SHARD_PLACEMENT_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
 	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
 								 SHARD_PLACEMENT_SHARD_INDEX_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-				Int64GetDatum(shardId));
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
 
 	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
-								  scanKeyCount, 0);
+									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
@@ -309,13 +302,12 @@ PartitionColumn(Oid distributedTableId)
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
 
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								PARTITION_STRATEGY_TABLE_NAME, -1);
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_STRATEGY_TABLE_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_STRATEGY_RELATION_ID,
-			InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+				InvalidStrategy, F_OIDEQ, ObjectIdGetDatum(distributedTableId));
 
 	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
 
@@ -330,8 +322,7 @@ PartitionColumn(Oid distributedTableId)
 									  tupleDescriptor, &isNull);
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
-		partitionColumn = ColumnNameToColumn(distributedTableId,
-											 partitionColumnName);
+		partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
 	}
 	else
 	{
@@ -377,7 +368,7 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
 				 errmsg("specified partition column \"%s\" is a system column",
-						 columnName)));
+						columnName)));
 	}
 
 	get_atttypetypmodcoll(relationId, attNum, &columnTypeOid, &columnTypeMod,
@@ -408,17 +399,15 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_PKEY_INDEX_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PKEY_INDEX_NAME, -1);
 
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
 
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-				Int64GetDatum(shardId));
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
 
 	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
-								  scanKeyCount, 0);
+									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
@@ -431,9 +420,9 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 											 ATTR_NUM_SHARD_RELATION_ID,
 											 tupleDescriptor, &isNull);
 		Datum minValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MIN_VALUE,
-									 tupleDescriptor, &isNull);
+										   tupleDescriptor, &isNull);
 		Datum maxValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MAX_VALUE,
-									 tupleDescriptor, &isNull);
+										   tupleDescriptor, &isNull);
 
 		/* convert and deep copy row's values */
 		(*relationId) = DatumGetObjectId(relationIdDatum);
