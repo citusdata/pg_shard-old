@@ -17,7 +17,8 @@ CREATE SCHEMA pgs_distribution_metadata
 	-- shard_placement records which nodes contain which shards
 	CREATE TABLE shard_placement (
 		id bigint primary key,
-		shard_id bigint not null references shard,
+		shard_id bigint not null references shard(id),
+		shard_state integer not null,
 		node_name text not null,
 		node_port integer not null
 	)

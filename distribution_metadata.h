@@ -50,8 +50,9 @@
 /* Semantic names explain specific tuple attributes from the shard placement table. */
 #define ATTR_NUM_SHARD_PLACEMENT_ID 1
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_ID 2
-#define ATTR_NUM_SHARD_PLACEMENT_NODE_NAME 3
-#define ATTR_NUM_SHARD_PLACEMENT_NODE_PORT 4
+#define ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE 3
+#define ATTR_NUM_SHARD_PLACEMENT_NODE_NAME 4
+#define ATTR_NUM_SHARD_PLACEMENT_NODE_PORT 5
 
 /*
  * Partition schemes are stored in the partition table, one for each distributed
