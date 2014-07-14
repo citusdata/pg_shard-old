@@ -17,10 +17,10 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
+#include "postgres_ext.h"
 
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
-#include "postgres_ext.h"
 
 
 /* Configuration for distributing tables resides in this schema. */
