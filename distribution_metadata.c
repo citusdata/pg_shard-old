@@ -264,8 +264,8 @@ LoadShardPlacementList(int64 shardId)
 	while (HeapTupleIsValid(heapTuple))
 	{
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		ShardPlacement *shardPlacement =
-				TupleToShardPlacement(heapTuple, tupleDescriptor);
+		ShardPlacement *shardPlacement = TupleToShardPlacement(heapTuple,
+															   tupleDescriptor);
 		shardPlacementList = lappend(shardPlacementList, shardPlacement);
 
 		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
@@ -411,8 +411,7 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
 		bool isNull = false;
 
-		Datum relationIdDatum = heap_getattr(heapTuple,
-											 ATTR_NUM_SHARD_RELATION_ID,
+		Datum relationIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_RELATION_ID,
 											 tupleDescriptor, &isNull);
 		Datum minValueDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_MIN_VALUE,
 										   tupleDescriptor, &isNull);
@@ -450,18 +449,14 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	ShardPlacement *shardPlacement = NULL;
 	bool isNull = false;
 
-	Datum idDatum =
-			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_ID,
-						 tupleDescriptor, &isNull);
-	Datum shardIdDatum =
-			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
-						 tupleDescriptor, &isNull);
-	Datum nodeNameDatum =
-			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
-						 tupleDescriptor, &isNull);
-	Datum nodePortDatum =
-			heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
-						 tupleDescriptor, &isNull);
+	Datum idDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_ID,
+								 tupleDescriptor, &isNull);
+	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
+									  tupleDescriptor, &isNull);
+	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
+									   tupleDescriptor, &isNull);
+	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
+									   tupleDescriptor, &isNull);
 
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
