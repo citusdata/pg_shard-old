@@ -32,6 +32,17 @@
 #include "utils/palloc.h"
 
 
+/* Defines for libpq options */
+#define LIBPQ_HOST_KEYWORD "host"
+#define LIBPQ_PORT_KEYWORD "port"
+#define LIBPQ_FALLBACK_APPLICATION_NAME_KEYWORD "fallback_application_name"
+#define LIBPQ_CLIENT_ENCODING_KEYWORD "client_encoding"
+#define LIBPQ_DATABASE_NAME_KEYWORD "dbname"
+
+/* Name of this extension */
+/* TODO: Move to "constants.h" or something? */
+#define MODULE_NAME "pg_shard"
+
 /* Maximum (textual) lengths of hostnames and port numbers */
 #define MAX_NODE_LENGTH 255
 #define MAX_PORT_LENGTH 11
@@ -163,7 +174,7 @@ ConnectionHashInit(void)
 	info.hcxt = CurrentMemoryContext;
 	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-	NodeConnectionHash = hash_create("pg_shard connections", 32, &info, hashFlags);
+	NodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
 }
 
 
@@ -220,25 +231,25 @@ EstablishConnection(char *nodeName, int32 nodePort)
 		memset(keywordArray, (int) NULL, sizeof(keywordArray));
 		memset(valueArray, (int) NULL, sizeof(valueArray));
 
-		keywordArray[parameterIndex] = "host";
+		keywordArray[parameterIndex] = LIBPQ_HOST_KEYWORD;
 		valueArray[parameterIndex] = nodeName;
 		parameterIndex++;
 
 		/* libpq requires string values, so format our port */
 		snprintf(portString, MAX_PORT_LENGTH, "%d", nodePort);
-		keywordArray[parameterIndex] = "port";
+		keywordArray[parameterIndex] = LIBPQ_PORT_KEYWORD;
 		valueArray[parameterIndex] = portString;
 		parameterIndex++;
 
-		keywordArray[parameterIndex] = "fallback_application_name";
-		valueArray[parameterIndex] = "pg_shard";
+		keywordArray[parameterIndex] = LIBPQ_FALLBACK_APPLICATION_NAME_KEYWORD;
+		valueArray[parameterIndex] = MODULE_NAME;
 		parameterIndex++;
 
-		keywordArray[parameterIndex] = "client_encoding";
+		keywordArray[parameterIndex] = LIBPQ_CLIENT_ENCODING_KEYWORD;
 		valueArray[parameterIndex] = GetDatabaseEncodingName();
 		parameterIndex++;
 
-		keywordArray[parameterIndex] = "dbname";
+		keywordArray[parameterIndex] = LIBPQ_DATABASE_NAME_KEYWORD;
 		valueArray[parameterIndex] = get_database_name(MyDatabaseId);
 		parameterIndex++;
 
