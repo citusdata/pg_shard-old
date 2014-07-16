@@ -37,35 +37,35 @@
 #define MAX_PORT_LENGTH 11
 
 /*
- * ConnCacheKey acts as the key to index into the (process-local) hash keeping
- * track of open connections. Node name and port are sufficient.
+ * NodeConnectionKey acts as the key to index into the (process-local) hash
+ * keeping track of open connections. Node name and port are sufficient.
  */
-typedef struct ConnCacheKey
+typedef struct NodeConnectionKey
 {
-	int32 nodePort;						/* port of host to connect to */
 	char nodeName[MAX_NODE_LENGTH + 1];	/* hostname of host to connect to */
-} ConnCacheKey;
+	int32 nodePort;						/* port of host to connect to */
+} NodeConnectionKey;
 
 /*
- * ConnCacheEntry keeps track of connections themselves.
+ * NodeConnectionEntry keeps track of connections themselves.
  */
-typedef struct ConnCacheEntry
+typedef struct NodeConnectionEntry
 {
-	ConnCacheKey cacheKey;	/* hash entry key */
+	NodeConnectionKey cacheKey;	/* hash entry key */
 	PGconn *connection;		/* connection to foreign server, if any */
-} ConnCacheEntry;
+} NodeConnectionEntry;
 
 /*
  * ConnectionHash is the connection hash itself. It starts out uninitialized and
  * is lazily created by the first caller to need a connection.
  */
-static HTAB *ConnectionHash = NULL;
+static HTAB *NodeConnectionHash = NULL;
 
 
 /* local function forward declarations */
 static void ConnectionHashInit(void);
-static ConnCacheEntry * ConnectionHashLookup(char *nodeName, int32 nodePort);
-static PGconn * EstablishConnection(ConnCacheKey *connCacheKey);
+static NodeConnectionEntry * ConnectionHashLookup(char *nodeName, int32 nodePort);
+static PGconn * EstablishConnection(NodeConnectionKey *nodeConnectionKey);
 static void NormalizeConnectionSettings(PGconn *connection);
 static void ExecuteRemoteSqlCommand(PGconn *connection, const char *sqlCommand);
 static void ReportRemoteSqlError(int errorLevel, PGresult *result,
@@ -122,27 +122,27 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 PGconn *
 GetConnection(char *nodeName, int32 nodePort)
 {
-	ConnCacheEntry *connCacheEntry = NULL;
+	NodeConnectionEntry *nodeConnectionEntry = NULL;
 
-	if (ConnectionHash == NULL)
+	if (NodeConnectionHash == NULL)
 	{
 		ConnectionHashInit();
 	}
 
-	connCacheEntry = ConnectionHashLookup(nodeName, nodePort);
+	nodeConnectionEntry = ConnectionHashLookup(nodeName, nodePort);
 
-	if (connCacheEntry->connection == NULL)
+	if (nodeConnectionEntry->connection == NULL)
 	{
 		/*
 		 * A NULL connection usually means no connection yet exists for the node
 		 * in question, but also arises if a previous operation found the node's
 		 * connection to be in a bad state. So this clears out all other fields.
 		 */
-		connCacheEntry->connection =
-				EstablishConnection(&connCacheEntry->cacheKey);
+		nodeConnectionEntry->connection =
+				EstablishConnection(&nodeConnectionEntry->cacheKey);
 	}
 
-	return connCacheEntry->connection;
+	return nodeConnectionEntry->connection;
 }
 
 
@@ -158,13 +158,13 @@ ConnectionHashInit(void)
 	memset(&info, 0, sizeof(info));
 	int hashFlags = 0;
 
-	info.keysize = sizeof(ConnCacheKey);
-	info.entrysize = sizeof(ConnCacheEntry);
+	info.keysize = sizeof(NodeConnectionKey);
+	info.entrysize = sizeof(NodeConnectionEntry);
 	info.hash = tag_hash;
 	info.hcxt = CurrentMemoryContext;
 	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-	ConnectionHash = hash_create("pg_shard connections", 32, &info, hashFlags);
+	NodeConnectionHash = hash_create("pg_shard connections", 32, &info, hashFlags);
 }
 
 
@@ -172,26 +172,26 @@ ConnectionHashInit(void)
  * ConnectionHashLookup returns the ConnectionHash entry for the specified node
  * and port, creating an empty entry if non yet exists.
  */
-static ConnCacheEntry *
+static NodeConnectionEntry *
 ConnectionHashLookup(char *nodeName, int32 nodePort)
 {
-	ConnCacheEntry *connCacheEntry = NULL;
-	ConnCacheKey connCacheKey;
-	memset(&connCacheKey, 0, sizeof(connCacheKey));
+	NodeConnectionEntry *NodeConnectionEntry = NULL;
+	NodeConnectionKey nodeConnectionKey;
+	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
 	bool entryFound = false;
 
-	strncpy(connCacheKey.nodeName, nodeName, MAX_NODE_LENGTH);
-	connCacheKey.nodePort = nodePort;
+	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
+	nodeConnectionKey.nodePort = nodePort;
 
-	connCacheEntry = hash_search(ConnectionHash, &connCacheKey, HASH_ENTER,
+	NodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey, HASH_ENTER,
 								 &entryFound);
 
 	if (!entryFound)
 	{
-		connCacheEntry->connection = NULL;
+		NodeConnectionEntry->connection = NULL;
 	}
 
-	return connCacheEntry;
+	return NodeConnectionEntry;
 }
 
 
@@ -206,7 +206,7 @@ ConnectionHashLookup(char *nodeName, int32 nodePort)
  * returning.
  */
 static PGconn *
-EstablishConnection(ConnCacheKey *connCacheKey)
+EstablishConnection(NodeConnectionKey *nodeConnectionKey)
 {
 	/* volatile because we're using PG_TRY, etc. */
 	PGconn *volatile connection = NULL;
@@ -219,11 +219,11 @@ EstablishConnection(ConnCacheKey *connCacheKey)
 		char portStr[MAX_PORT_LENGTH + 1] = { 0 };
 
 		keywords[paramIndex] = "host";
-		values[paramIndex] = connCacheKey->nodeName;
+		values[paramIndex] = nodeConnectionKey->nodeName;
 		paramIndex++;
 
 		/* libpq requires string values, so format our port */
-		snprintf(portStr, MAX_PORT_LENGTH, "%d", connCacheKey->nodePort);
+		snprintf(portStr, MAX_PORT_LENGTH, "%d", nodeConnectionKey->nodePort);
 		keywords[paramIndex] = "port";
 		values[paramIndex] = portStr;
 		paramIndex++;
@@ -260,7 +260,7 @@ EstablishConnection(ConnCacheKey *connCacheKey)
 			ereport(ERROR, (
 				errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
 				errmsg("could not connect to node \"%s\"",
-					   connCacheKey->nodeName),
+					   nodeConnectionKey->nodeName),
 				errdetail_internal("%s", connectionMessage)));
 		}
 
