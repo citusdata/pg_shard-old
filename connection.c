@@ -66,7 +66,7 @@ static HTAB *NodeConnectionHash = NULL;
 /* local function forward declarations */
 static void ConnectionHashInit(void);
 static NodeConnectionEntry * ConnectionHashLookup(char *nodeName, int32 nodePort);
-static PGconn * EstablishConnection(NodeConnectionKey *nodeConnectionKey);
+static PGconn * EstablishConnection(char *nodeName, int32 nodePort);
 static void NormalizeConnectionSettings(PGconn *connection);
 static void ExecuteRemoteSqlCommand(PGconn *connection, const char *sqlCommand);
 static void ReportRemoteSqlError(int errorLevel, PGresult *result,
@@ -130,13 +130,15 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (nodeConnectionEntry->connection == NULL)
 	{
+		/* node names are truncated when stored in the cache */
+		char *safeNodeName = nodeConnectionEntry->cacheKey.nodeName;
+
 		/*
 		 * A NULL connection usually means no connection yet exists for the node
 		 * in question, but also arises if a previous operation found the node's
 		 * connection to be in a bad state. So this clears out all other fields.
 		 */
-		nodeConnectionEntry->connection =
-				EstablishConnection(&nodeConnectionEntry->cacheKey);
+		nodeConnectionEntry->connection = EstablishConnection(safeNodeName, nodePort);
 	}
 
 	return nodeConnectionEntry->connection;
@@ -194,8 +196,7 @@ ConnectionHashLookup(char *nodeName, int32 nodePort)
 
 /*
  * EstablishConnection actually creates the connection to a remote PostgreSQL
- * server. The hostname and port are retrieved from the provided ConnectionHash
- * entry. The fallback application name is set to 'pg_shard' and the remote
+ * server. The fallback application name is set to 'pg_shard' and the remote
  * encoding is set to match the local one.
  *
  * After the connection has been established, certain session-level settings are
@@ -203,7 +204,7 @@ ConnectionHashLookup(char *nodeName, int32 nodePort)
  * returning.
  */
 static PGconn *
-EstablishConnection(NodeConnectionKey *nodeConnectionKey)
+EstablishConnection(char *nodeName, int32 nodePort)
 {
 	/* volatile because we're using PG_TRY, etc. */
 	PGconn *volatile connection = NULL;
@@ -216,11 +217,11 @@ EstablishConnection(NodeConnectionKey *nodeConnectionKey)
 		char portStr[MAX_PORT_LENGTH + 1] = { 0 };
 
 		keywords[paramIndex] = "host";
-		values[paramIndex] = nodeConnectionKey->nodeName;
+		values[paramIndex] = nodeName;
 		paramIndex++;
 
 		/* libpq requires string values, so format our port */
-		snprintf(portStr, MAX_PORT_LENGTH, "%d", nodeConnectionKey->nodePort);
+		snprintf(portStr, MAX_PORT_LENGTH, "%d", nodePort);
 		keywords[paramIndex] = "port";
 		values[paramIndex] = portStr;
 		paramIndex++;
@@ -256,8 +257,7 @@ EstablishConnection(NodeConnectionKey *nodeConnectionKey)
 
 			ereport(ERROR, (
 				errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
-				errmsg("could not connect to node \"%s\"",
-					   nodeConnectionKey->nodeName),
+				errmsg("could not connect to node \"%s\"", nodeName),
 				errdetail_internal("%s", connectionMessage)));
 		}
 
