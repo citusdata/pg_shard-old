@@ -212,10 +212,13 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	/* wrap in case NormalizeConnectionSettings errors or connection is bad */
 	PG_TRY();
 	{
-		const char *keywords[6] = { 0 };
-		const char *values[6] = { 0 };
+		const char *keywords[6];
+		const char *values[6];
 		int paramIndex = 0;
-		char portStr[MAX_PORT_LENGTH + 1] = { 0 };
+		char portStr[MAX_PORT_LENGTH + 1] = "";
+
+		memset(keywords, (int) NULL, sizeof(keywords));
+		memset(values, (int) NULL, sizeof(values));
 
 		keywords[paramIndex] = "host";
 		values[paramIndex] = nodeName;
