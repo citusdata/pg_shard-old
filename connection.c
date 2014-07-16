@@ -212,39 +212,40 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	/* wrap in case NormalizeConnectionSettings errors or connection is bad */
 	PG_TRY();
 	{
-		const char *keywords[6];
-		const char *values[6];
-		int paramIndex = 0;
-		char portStr[MAX_PORT_LENGTH + 1] = "";
+		const char *keywordArray[6];
+		const char *valueArray[6];
+		int parameterIndex = 0;
+		char portString[MAX_PORT_LENGTH + 1] = "";
 
-		memset(keywords, (int) NULL, sizeof(keywords));
-		memset(values, (int) NULL, sizeof(values));
+		memset(keywordArray, (int) NULL, sizeof(keywordArray));
+		memset(valueArray, (int) NULL, sizeof(valueArray));
 
-		keywords[paramIndex] = "host";
-		values[paramIndex] = nodeName;
-		paramIndex++;
+		keywordArray[parameterIndex] = "host";
+		valueArray[parameterIndex] = nodeName;
+		parameterIndex++;
 
 		/* libpq requires string values, so format our port */
-		snprintf(portStr, MAX_PORT_LENGTH, "%d", nodePort);
-		keywords[paramIndex] = "port";
-		values[paramIndex] = portStr;
-		paramIndex++;
+		snprintf(portString, MAX_PORT_LENGTH, "%d", nodePort);
+		keywordArray[parameterIndex] = "port";
+		valueArray[parameterIndex] = portString;
+		parameterIndex++;
 
-		keywords[paramIndex] = "fallback_application_name";
-		values[paramIndex] = "pg_shard";
-		paramIndex++;
+		keywordArray[parameterIndex] = "fallback_application_name";
+		valueArray[parameterIndex] = "pg_shard";
+		parameterIndex++;
 
-		keywords[paramIndex] = "client_encoding";
-		values[paramIndex] = GetDatabaseEncodingName();
-		paramIndex++;
+		keywordArray[parameterIndex] = "client_encoding";
+		valueArray[parameterIndex] = GetDatabaseEncodingName();
+		parameterIndex++;
 
-		keywords[paramIndex] = "dbname";
-		values[paramIndex] = get_database_name(MyDatabaseId);
-		paramIndex++;
+		keywordArray[parameterIndex] = "dbname";
+		valueArray[parameterIndex] = get_database_name(MyDatabaseId);
+		parameterIndex++;
 
-		keywords[paramIndex] = values[paramIndex] = NULL;
+		keywordArray[parameterIndex] = NULL;
+		valueArray[parameterIndex] = NULL;
 
-		connection = PQconnectdbParams(keywords, values, false);
+		connection = PQconnectdbParams(keywordArray, valueArray, false);
 
 		if (connection == NULL || PQstatus(connection) != CONNECTION_OK)
 		{
