@@ -209,6 +209,7 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	/* volatile because we're using PG_TRY, etc. */
 	PGconn *volatile connection = NULL;
 
+	/* wrap in case NormalizeConnectionSettings errors or connection is bad */
 	PG_TRY();
 	{
 		const char *keywords[6] = { 0 };
