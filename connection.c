@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+
 #include "commands/dbcommands.h"
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
@@ -62,25 +63,23 @@ typedef struct NodeConnectionKey
 	int32 nodePort;						/* port of host to connect to */
 } NodeConnectionKey;
 
-/*
- * NodeConnectionEntry keeps track of connections themselves.
- */
+/* NodeConnectionEntry keeps track of connections themselves. */
 typedef struct NodeConnectionEntry
 {
 	NodeConnectionKey cacheKey;	/* hash entry key */
-	PGconn *connection;		/* connection to foreign server, if any */
+	PGconn *connection;			/* connection to remote server, if any */
 } NodeConnectionEntry;
 
 /*
- * ConnectionHash is the connection hash itself. It starts out uninitialized and
- * is lazily created by the first caller to need a connection.
+ * NodeConnectionHash is the connection hash itself. It starts out uninitialized
+ * and is lazily created by the first caller to need a connection.
  */
 static HTAB *NodeConnectionHash = NULL;
 
 
 /* local function forward declarations */
-static void ConnectionHashInit(void);
-static NodeConnectionEntry * ConnectionHashLookup(char *nodeName, int32 nodePort);
+static void NodeConnectionHashInit(void);
+static NodeConnectionEntry * NodeConnectionHashLookup(char *nodeName, int32 nodePort);
 static PGconn * EstablishConnection(char *nodeName, int32 nodePort);
 static void NormalizeConnectionSettings(PGconn *connection);
 static void ExecuteRemoteSqlCommand(PGconn *connection, const char *sqlCommand);
@@ -138,10 +137,10 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (NodeConnectionHash == NULL)
 	{
-		ConnectionHashInit();
+		NodeConnectionHashInit();
 	}
 
-	nodeConnectionEntry = ConnectionHashLookup(nodeName, nodePort);
+	nodeConnectionEntry = NodeConnectionHashLookup(nodeName, nodePort);
 
 	if (nodeConnectionEntry->connection == NULL)
 	{
@@ -161,12 +160,12 @@ GetConnection(char *nodeName, int32 nodePort)
 
 
 /*
- * ConnectionHashInit creates a hash table suitable for storing an unlimited
- * number of connections indexed by node name and port and sets ConnectionHash
- * to point to this hash table.
+ * NodeConnectionHashInit creates a hash table suitable for storing an unlimited
+ * number of connections indexed by node name and port before setting the static
+ * NodeConnectionHash variable to point to this hash table.
  */
 static void
-ConnectionHashInit(void)
+NodeConnectionHashInit(void)
 {
 	HASHCTL info;
 	memset(&info, 0, sizeof(info));
@@ -183,13 +182,13 @@ ConnectionHashInit(void)
 
 
 /*
- * ConnectionHashLookup returns the ConnectionHash entry for the specified node
- * and port, creating an empty entry if non yet exists.
+ * NodeConnectionHashLookup returns the NodeConnectionHash entry for the
+ * specified node and port, creating an empty entry if non yet exists.
  */
 static NodeConnectionEntry *
-ConnectionHashLookup(char *nodeName, int32 nodePort)
+NodeConnectionHashLookup(char *nodeName, int32 nodePort)
 {
-	NodeConnectionEntry *NodeConnectionEntry = NULL;
+	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	NodeConnectionKey nodeConnectionKey;
 	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
 	bool entryFound = false;
@@ -197,15 +196,14 @@ ConnectionHashLookup(char *nodeName, int32 nodePort)
 	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
 	nodeConnectionKey.nodePort = nodePort;
 
-	NodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey, HASH_ENTER,
-								 &entryFound);
-
+	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
+									  HASH_ENTER, &entryFound);
 	if (!entryFound)
 	{
-		NodeConnectionEntry->connection = NULL;
+		nodeConnectionEntry->connection = NULL;
 	}
 
-	return NodeConnectionEntry;
+	return nodeConnectionEntry;
 }
 
 
@@ -279,10 +277,9 @@ EstablishConnection(char *nodeName, int32 nodePort)
 				*newline = '\0';
 			}
 
-			ereport(ERROR, (
-				errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
-				errmsg("could not connect to node \"%s\"", nodeName),
-				errdetail_internal("%s", connectionMessage)));
+			ereport(ERROR, (errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
+							errmsg("could not connect to node \"%s\"", nodeName),
+							errdetail_internal("%s", connectionMessage)));
 		}
 
 		NormalizeConnectionSettings(connection);
@@ -366,10 +363,8 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 	PG_TRY();
 	{
 		char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-		char *primaryMessage = PQresultErrorField(result,
-												  PG_DIAG_MESSAGE_PRIMARY);
-		char *messageDetail = PQresultErrorField(result,
-												 PG_DIAG_MESSAGE_DETAIL);
+		char *primaryMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
+		char *messageDetail = PQresultErrorField(result, PG_DIAG_MESSAGE_DETAIL);
 		char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
 		char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
 		int sqlState = ERRCODE_CONNECTION_FAILURE;
@@ -390,8 +385,7 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 			primaryMessage = PQerrorMessage(connection);
 		}
 
-		ereport(errorLevel,
-				(errcode(sqlState),
+		ereport(errorLevel, (errcode(sqlState),
 					(primaryMessage ? errmsg_internal("%s", primaryMessage) :
 									  errmsg("unknown error")),
 					(messageDetail ? errdetail_internal("%s", messageDetail) :
@@ -401,7 +395,6 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 					(sqlCommand ? errcontext("Remote SQL command: %s",
 											 sqlCommand) : 0))
 			   );
-
 	}
 	PG_CATCH();
 	{
@@ -420,4 +413,3 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 		PQclear(result);
 	}
 }
-
