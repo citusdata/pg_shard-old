@@ -37,11 +37,15 @@
 #define LIBPQ_PORT_KEYWORD "port"
 #define LIBPQ_FALLBACK_APPLICATION_NAME_KEYWORD "fallback_application_name"
 #define LIBPQ_CLIENT_ENCODING_KEYWORD "client_encoding"
+#define LIBPQ_CONNECT_TIMEOUT_KEYWORD "connect_timeout"
 #define LIBPQ_DATABASE_NAME_KEYWORD "dbname"
 
 /* Name of this extension */
 /* TODO: Move to "constants.h" or something? */
 #define MODULE_NAME "pg_shard"
+
+/* Maximum duration to wait for connection */
+#define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
 
 /* Maximum (textual) lengths of hostnames and port numbers */
 #define MAX_NODE_LENGTH 255
@@ -223,8 +227,8 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	/* wrap in case NormalizeConnectionSettings errors or connection is bad */
 	PG_TRY();
 	{
-		const char *keywordArray[6];
-		const char *valueArray[6];
+		const char *keywordArray[7];
+		const char *valueArray[7];
 		int parameterIndex = 0;
 		char portString[MAX_PORT_LENGTH + 1] = "";
 
@@ -247,6 +251,10 @@ EstablishConnection(char *nodeName, int32 nodePort)
 
 		keywordArray[parameterIndex] = LIBPQ_CLIENT_ENCODING_KEYWORD;
 		valueArray[parameterIndex] = GetDatabaseEncodingName();
+		parameterIndex++;
+
+		keywordArray[parameterIndex] = LIBPQ_CONNECT_TIMEOUT_KEYWORD;
+		valueArray[parameterIndex] = CLIENT_CONNECT_TIMEOUT_SECONDS;
 		parameterIndex++;
 
 		keywordArray[parameterIndex] = LIBPQ_DATABASE_NAME_KEYWORD;
