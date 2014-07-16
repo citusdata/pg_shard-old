@@ -23,45 +23,42 @@
 #include "nodes/primnodes.h"
 
 
-/* Configuration for distributing tables resides in this schema. */
+/* schema for configuration related to distributed tables */
 #define METADATA_SCHEMA_NAME "pgs_distribution_metadata"
 
-/* Shard interval information is stored in the shard table. */
+/* table containing shard interval information */
 #define SHARD_TABLE_NAME "shard"
 
-/* The table has a primary key index for fast lookup. */
+/* table has primary key for fast lookup */
 #define SHARD_PKEY_INDEX_NAME "shard_pkey"
 
-/* The table has an index to expedite lookup by relation identifier */
+/* index to expedite lookup by distributed relation identifier */
 #define SHARD_RELATION_INDEX_NAME "shard_relation_index"
 
-/* Semantic names clarify specific tuple attributes from the shard table. */
+/* human-readable names for addressing columns of shard table */
 #define ATTR_NUM_SHARD_ID 1
 #define ATTR_NUM_SHARD_RELATION_ID 2
 #define ATTR_NUM_SHARD_STORAGE 3
 #define ATTR_NUM_SHARD_MIN_VALUE 4
 #define ATTR_NUM_SHARD_MAX_VALUE 5
 
-/* Shard placement information is stored in the shard placement table. */
+/* table containing shard placement information */
 #define SHARD_PLACEMENT_TABLE_NAME "shard_placement"
 
-/* The table has an index to expedite lookup by shard identifier */
+/* index to expedite lookup by shard identifier */
 #define SHARD_PLACEMENT_SHARD_INDEX_NAME "shard_placement_shard_index"
 
-/* Semantic names explain specific tuple attributes from the shard placement table. */
+/* human-readable names for addressing columns of shard placement table */
 #define ATTR_NUM_SHARD_PLACEMENT_ID 1
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_ID 2
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE 3
 #define ATTR_NUM_SHARD_PLACEMENT_NODE_NAME 4
 #define ATTR_NUM_SHARD_PLACEMENT_NODE_PORT 5
 
-/*
- * Partition schemes are stored in the partition table, one for each distributed
- * table tracked by pg_shard.
- */
+/* table containing information about how to partition distributed tables */
 #define PARTITION_TABLE_NAME "partition"
 
-/* Semantic names clarify specific tuple attributes from the partition table. */
+/* human-readable names for addressing columns of partition table */
 #define ATTR_NUM_PARTITION_RELATION_ID 1
 #define ATTR_NUM_PARTITION_KEY 2
 
