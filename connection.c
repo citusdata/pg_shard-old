@@ -35,6 +35,7 @@
 /* Maximum (textual) lengths of hostnames and port numbers */
 #define MAX_NODE_LENGTH 255
 #define MAX_PORT_LENGTH 11
+#define TEST_SQL "DO $$ BEGIN RAISE %s 'Raised remotely!'; END $$"
 
 /*
  * NodeConnectionKey acts as the key to index into the (process-local) hash
@@ -87,6 +88,7 @@ PG_FUNCTION_INFO_V1(TestPgShardConnection);
 Datum
 TestPgShardConnection(PG_FUNCTION_ARGS)
 {
+	PGconn *connection = NULL;
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
 	text *elevelText = PG_GETARG_TEXT_P(2);
@@ -97,14 +99,9 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 	StringInfoData sqlCommand;
 	initStringInfo(&sqlCommand);
 
-	appendStringInfo(&sqlCommand,
-			"DO $$"
-			"BEGIN "
-			"  RAISE %s 'Raised remotely!';"
-			"END"
-			"$$", elevel);
+	appendStringInfo(&sqlCommand, TEST_SQL, elevel);
 
-	PGconn *connection = GetConnection(nodeName, nodePort);
+	connection = GetConnection(nodeName, nodePort);
 
 	ExecuteRemoteSqlCommand(connection, sqlCommand.data);
 
