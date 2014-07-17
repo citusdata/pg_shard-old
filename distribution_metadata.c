@@ -72,9 +72,10 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	ListCell *cell = NULL;
 
 	FmgrInfo outputFunctionInfo;
-	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
 	Oid outputFunctionId = InvalidOid;
 	bool isVarlena = false;
+
+	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
 
 	/* then find min/max values' actual types */
 	getTypeOutputInfo(partitionColumn->vartype, &outputFunctionId, &isVarlena);
@@ -89,9 +90,8 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	foreach(cell, shardList)
 	{
 		ListCell *shardPlacementCell = NULL;
-		int64 *shardId = NULL;
+		int64 *shardId = (int64 *) lfirst(cell);
 
-		shardId = (int64 *) lfirst(cell);
 		ShardInterval *shardInterval = LoadShardInterval(*shardId);
 
 		char *minValueStr = OutputFunctionCall(&outputFunctionInfo,

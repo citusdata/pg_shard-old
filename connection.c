@@ -168,8 +168,9 @@ static void
 NodeConnectionHashInit(void)
 {
 	HASHCTL info;
-	memset(&info, 0, sizeof(info));
 	int hashFlags = 0;
+
+	memset(&info, 0, sizeof(info));
 
 	info.keysize = sizeof(NodeConnectionKey);
 	info.entrysize = sizeof(NodeConnectionEntry);
@@ -188,10 +189,11 @@ NodeConnectionHashInit(void)
 static NodeConnectionEntry *
 NodeConnectionHashLookup(char *nodeName, int32 nodePort)
 {
-	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	NodeConnectionKey nodeConnectionKey;
-	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
+	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
+
+	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
 
 	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
 	nodeConnectionKey.nodePort = nodePort;
@@ -230,8 +232,8 @@ EstablishConnection(char *nodeName, int32 nodePort)
 		int parameterIndex = 0;
 		char portString[MAX_PORT_LENGTH + 1] = "";
 
-		memset(keywordArray, (int) NULL, sizeof(keywordArray));
-		memset(valueArray, (int) NULL, sizeof(valueArray));
+		memset(keywordArray, 0, sizeof(keywordArray));
+		memset(valueArray, 0, sizeof(valueArray));
 
 		keywordArray[parameterIndex] = LIBPQ_HOST_KEYWORD;
 		valueArray[parameterIndex] = nodeName;
