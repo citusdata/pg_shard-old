@@ -95,6 +95,16 @@ GetTableDDLEvents(Oid relationId)
 	int scanKeyCount = 1;
 	HeapTuple heapTuple = NULL;
 
+	/*
+	 * Force the namespace search path to be pg_catalog. This forces schema
+	 * qualification of the relation name as it is required by the connection
+	 * library when replaying these commands on the worker nodes.
+	 */
+	OverrideSearchPath *overridePath = GetOverrideSearchPath(CurrentMemoryContext);
+	overridePath->schemas = NIL;
+	overridePath->addCatalog = true;
+	PushOverrideSearchPath(overridePath);
+
 	/* if foreign table, fetch extension and server definitions */
 	tableType = get_rel_relkind(relationId);
 	if (tableType == RELKIND_FOREIGN_TABLE)
@@ -184,6 +194,9 @@ GetTableDDLEvents(Oid relationId)
 
 		heapTuple = systable_getnext(scanDescriptor);
 	}
+
+	/* reset our overridden namespace search path */
+	PopOverrideSearchPath();
 
 	/* clean up scan and close system catalog */
 	systable_endscan(scanDescriptor);
