@@ -318,6 +318,8 @@ InsertShardRow(Oid relationId, uint64 shardId, char shardStorage,
 	Datum values[SHARD_ATTRIBUTE_COUNT];
 	bool isNulls[SHARD_ATTRIBUTE_COUNT];
 
+	StringInfo shardStorageString = makeStringInfo();
+	text *shardStorageText = NULL;
 	StringInfo shardTableString = makeStringInfo();
 	text *shardTableName = NULL;
 	Oid shardRelationId = InvalidOid;
@@ -327,14 +329,17 @@ InsertShardRow(Oid relationId, uint64 shardId, char shardStorage,
 	shardTableName = cstring_to_text(shardTableString->data);
 	shardRelationId = ResolveRelationId(shardTableName);
 
+	/* convert the shard storage char into a text type */
+	appendStringInfoChar(shardStorageString, shardStorage);
+	shardStorageText = cstring_to_text(shardStorageString->data);
+
 	/* form new shard tuple */
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[ATTR_NUM_SHARD_ID - 1] = Int64GetDatum(shardId);
 	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(relationId);
-	//XXX values[ATTR_NUM_SHARD_STORAGE - 1] = CStringGetDatum(shardStorageString->data);
-	isNulls[ATTR_NUM_SHARD_STORAGE - 1] = true;
+	values[ATTR_NUM_SHARD_STORAGE - 1] = PointerGetDatum(shardStorageText);
 
 	/* check if shard min/max values are null */
 	if (shardMinValue != NULL && shardMaxValue != NULL)
