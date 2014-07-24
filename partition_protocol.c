@@ -174,6 +174,14 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 		}
 	}
 
+	if (QueryCancelPending)
+	{
+		ereport(WARNING, (errmsg("cancel requests are ignored during shard creation")));
+		QueryCancelPending = false;
+	}
+
+	RESUME_INTERRUPTS();
+
 	PG_RETURN_VOID();
 }
 
@@ -191,6 +199,14 @@ GetCandidateNodes(List *workerNodeList, uint32 beginningOffset, uint32 requiredN
 	uint32 workerNodeCount = (uint32) list_length(workerNodeList);
 	uint32 candidateNodeCount = 0;
 	uint32 attemptableNodeCount = requiredNodeCount;
+
+	if (requiredNodeCount > workerNodeCount)
+	{
+		ereport(ERROR, (errmsg("could not retrieve candidate nodes for shard"),
+						(errdetail("required node count: %d is higher than worker"
+								   " node count: %d", requiredNodeCount,
+								   workerNodeCount))));
+	}
 
 	/* if we have enough nodes, add an extra candidate node as backup */
 	if (workerNodeCount > requiredNodeCount)
