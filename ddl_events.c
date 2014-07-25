@@ -1690,7 +1690,7 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid originalRelationId)
 			char *collationName = NULL;
 			char *schemaName = NULL;
 			DeconstructQualifiedName(indexElem->collation, &schemaName, &collationName);
-			appendStringInfo(buffer, " COLLATE %s", collationName);
+			appendStringInfo(buffer, " COLLATE %s", quote_identifier(collationName));
 		}
 
 		/* add opclass if present */
