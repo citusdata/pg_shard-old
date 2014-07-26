@@ -79,6 +79,11 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	Oid outputFunctionId = InvalidOid;
 	bool isVarlena = false;
 
+	if (partitionColumn == NULL)
+	{
+		PG_RETURN_VOID();
+	}
+
 	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
 
 	/* then find min/max values' actual types */
@@ -293,7 +298,7 @@ LoadShardPlacementList(int64 shardId)
 /*
  * PartitionColumn looks up the column used to partition a given distributed
  * table and returns a reference to a Var representing that column. If no entry
- * can be found using the provided identifer, this function throws an error.
+ * can be found using the provided identifer, NULL is returned.
  */
 Var *
 PartitionColumn(Oid distributedTableId)
@@ -325,11 +330,6 @@ PartitionColumn(Oid distributedTableId)
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
 		partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("could not find partition for distributed "
-							   "relation %u", distributedTableId)));
 	}
 
 	heap_endscan(scanDesc);
