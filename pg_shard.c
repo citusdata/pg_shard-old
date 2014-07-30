@@ -18,6 +18,7 @@
 
 #include "pg_shard.h"
 #include "distribution_metadata.h"
+#include "ruleutils.h"
 
 #include <stddef.h>
 
@@ -52,7 +53,7 @@ static DistributedModifyTable * PlanDistributedInsert(Query *query,
 													  ModifyTable *ModifyTable);
 static void VerifyInsertIsLegal(Query *query, Oid distributedTableId);
 static DistributedModifyTable * TransformModifyTable(ModifyTable *modifyTable,
-													 Oid distributedTableId,
+													 Query *query, Oid distributedTableId,
 													 Var *partitionColumn);
 static List * ExtractPartitionValues(Plan *sourcePlan, Var *partitionColumn);
 static ShardInterval * FindTargetShardInterval(List *shardList, List *partitionValues,
@@ -154,7 +155,7 @@ PlanDistributedInsert(Query *query, ModifyTable *modifyTable)
 	{
 		VerifyInsertIsLegal(query, resultRangeTableEntry->relid);
 
-		distributedModifyTable = TransformModifyTable(modifyTable,
+		distributedModifyTable = TransformModifyTable(modifyTable, query,
 													  resultRangeTableEntry->relid,
 													  partitionColumn);
 	}
@@ -205,8 +206,8 @@ VerifyInsertIsLegal(Query *query, Oid distributedTableId)
  * by the executor to perform an INSERT to a distributed table.
  */
 static DistributedModifyTable *
-TransformModifyTable(ModifyTable *modifyTable, Oid distributedTableId,
-					 Var *partitionColumn)
+TransformModifyTable(ModifyTable *modifyTable, Query *query,
+					 Oid distributedTableId, Var *partitionColumn)
 {
 	DistributedModifyTable *distributedModifyTable = NULL;
 	Plan *sourcePlan = NULL;
@@ -241,6 +242,10 @@ TransformModifyTable(ModifyTable *modifyTable, Oid distributedTableId,
 
 	shardPlacements = LoadShardPlacementList(targetShardInterval->id);
 	distributedModifyTable->shardPlacements = shardPlacements;
+
+	distributedModifyTable->sql = deparse_shard_query(query, targetShardInterval->id);
+
+	ereport(INFO, (errmsg("Distributed SQL: %s", distributedModifyTable->sql)));
 
 	return distributedModifyTable;
 }
