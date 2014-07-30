@@ -95,6 +95,8 @@
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wswitch"
 
+#define SHARD_SUFFIX_SEPARATOR '_'
+
 /* ----------
  * Pretty formatting constants
  * ----------
@@ -135,6 +137,7 @@ typedef struct
 	int			wrapColumn;		/* max line length, or -1 for no limit */
 	int			indentLevel;	/* current indent level for prettyprint */
 	bool		varprefix;		/* TRUE to print prefixes on Vars */
+	int64		shardid;		/* a distributed table's shardid, if positive */
 } deparse_context;
 
 /*
@@ -378,6 +381,9 @@ static void make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc,
 static void get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 			  TupleDesc resultDesc,
 			  int prettyFlags, int wrapColumn, int startIndent);
+static void get_shard_query_def(Query *query, StringInfo buf,
+					List *parentnamespace, int64 shardid, TupleDesc resultDesc,
+					int prettyFlags, int wrapColumn, int startIndent);
 static void get_values_def(List *values_lists, deparse_context *context);
 static void get_with_clause(Query *query, deparse_context *context);
 static void get_select_query_def(Query *query, deparse_context *context,
@@ -441,6 +447,7 @@ static Node *processIndirection(Node *node, deparse_context *context,
 				   bool printit);
 static void printSubscripts(ArrayRef *aref, deparse_context *context);
 static char *get_relation_name(Oid relid);
+static char *generate_shard_name(Oid relid, int64 shardid, List *namespaces);
 static char *generate_relation_name(Oid relid, List *namespaces);
 static char *generate_function_name(Oid funcid, int nargs,
 					   List *argnames, Oid *argtypes,
@@ -4069,6 +4076,23 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 			  TupleDesc resultDesc,
 			  int prettyFlags, int wrapColumn, int startIndent)
 {
+	get_shard_query_def(query, buf, parentnamespace, 0, resultDesc, prettyFlags,
+						wrapColumn, startIndent);
+}
+
+
+/* ----------
+ * get_shard_query_def		- Parse back one query parsetree for a given shard
+ *
+ * If shardid is positive, it is appended to the query's "main" relation name so
+ * that the query may be executed on a placement for the given shard.
+ * ----------
+ */
+static void
+get_shard_query_def(Query *query, StringInfo buf, List *parentnamespace,
+					int64 shardid, TupleDesc resultDesc,
+					int prettyFlags, int wrapColumn, int startIndent)
+{
 	deparse_context context;
 	deparse_namespace dpns;
 
@@ -4096,6 +4120,7 @@ get_query_def(Query *query, StringInfo buf, List *parentnamespace,
 	context.prettyFlags = prettyFlags;
 	context.wrapColumn = wrapColumn;
 	context.indentLevel = startIndent;
+	context.shardid = shardid;
 
 	set_deparse_for_query(&dpns, query, parentnamespace);
 
@@ -5036,7 +5061,7 @@ get_insert_query_def(Query *query, deparse_context *context)
 		appendStringInfoChar(buf, ' ');
 	}
 	appendStringInfo(buf, "INSERT INTO %s ",
-					 generate_relation_name(rte->relid, NIL));
+					 generate_shard_name(rte->relid, context->shardid, NIL));
 
 	/*
 	 * Add the insert-column-names list.  To handle indirection properly, we
@@ -8667,6 +8692,44 @@ get_relation_name(Oid relid)
 	if (!relname)
 		elog(ERROR, "cache lookup failed for relation %u", relid);
 	return relname;
+}
+
+/*
+ * generate_shard_name
+ *		Compute the name to display for a particular shard of a given relation
+ *
+ * The function calls generate_relation_name to produce the standard name for
+ * the relation and operates on that result to append a shard suffix. If the
+ * provided shardid is non-positive, no suffix is appended.
+ */
+static char *
+generate_shard_name(Oid relid, int64 shardid, List *namespaces)
+{
+	char		   *relname;
+	int				len;
+	bool			quoted;
+	StringInfoData	buf;
+
+	initStringInfo(&buf);
+
+	relname = generate_relation_name(relid, namespaces);
+
+	if (shardid <= 0)
+		return relname;
+
+	len = strlen(relname);
+	quoted = (relname[len - 1] == '"');
+
+	if (quoted)
+		relname[len - 1] = '\0';
+
+	appendStringInfo(&buf, "%s%c"INT64_FORMAT, relname, SHARD_SUFFIX_SEPARATOR,
+					 shardid);
+
+	if (quoted)
+		appendStringInfoChar(&buf, '"');
+
+	return buf.data;
 }
 
 /*
