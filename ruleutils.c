@@ -59,6 +59,10 @@
 #include "utils/typcache.h"
 #include "utils/xml.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wgnu-statement-expression"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#pragma GCC diagnostic ignored "-Wswitch"
 
 /* ----------
  * Pretty formatting constants
@@ -8956,3 +8960,5 @@ flatten_reloptions(Oid relid)
 
 	return result;
 }
+
+#pragma GCC diagnostic pop
