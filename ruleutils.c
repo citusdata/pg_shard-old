@@ -4,6 +4,7 @@
  *	  Functions to convert stored expressions/querytrees back to
  *	  source text
  *
+ * Portions Copyright (c) 2014, Citus Data, Inc.
  * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -22,6 +23,8 @@
 #include "pg_config_manual.h"
 #include "port.h"
 #include "postgres_ext.h"
+
+#include "ruleutils.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -4062,6 +4065,25 @@ make_viewdef(StringInfo buf, HeapTuple ruletup, TupleDesc rulettc,
 	appendStringInfo(buf, ";");
 
 	heap_close(ev_relation, AccessShareLock);
+}
+
+
+/* ----------
+ * deparse_shard_query		- Parse back a query for execution on a shard
+ *
+ * Builds and returns the an SQL string to perform the provided query on a
+ * specific shard.
+ * ----------
+ */
+char *
+deparse_shard_query(Query *query, int64 shardid)
+{
+	StringInfoData buf;
+	initStringInfo(&buf);
+
+	get_shard_query_def(query, &buf, NIL, shardid, NULL, 0, WRAP_COLUMN_DEFAULT, 0);
+
+	return buf.data;
 }
 
 
