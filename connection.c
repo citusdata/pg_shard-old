@@ -79,7 +79,7 @@ static HTAB *NodeConnectionHash = NULL;
 
 
 /* local function forward declarations */
-static void NodeConnectionHashInit(void);
+static HTAB * CreateNodeConnectionHash(void);
 static NodeConnectionEntry * NodeConnectionHashLookup(char *nodeName, int32 nodePort);
 static PGconn * EstablishConnection(char *nodeName, int32 nodePort);
 static void NormalizeConnectionSettings(PGconn *connection);
@@ -138,7 +138,7 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (NodeConnectionHash == NULL)
 	{
-		NodeConnectionHashInit();
+		NodeConnectionHash = CreateNodeConnectionHash();
 	}
 
 	nodeConnectionEntry = NodeConnectionHashLookup(nodeName, nodePort);
@@ -161,13 +161,13 @@ GetConnection(char *nodeName, int32 nodePort)
 
 
 /*
- * NodeConnectionHashInit creates a hash table suitable for storing an unlimited
- * number of connections indexed by node name and port before setting the static
- * NodeConnectionHash variable to point to this hash table.
+ * CreateNodeConnectionHash returns a newly created hash table suitable for
+ * storing unlimited connections indexed by node name and port.
  */
-static void
-NodeConnectionHashInit(void)
+static HTAB *
+CreateNodeConnectionHash(void)
 {
+	HTAB *nodeConnectionHash = NULL;
 	HASHCTL info;
 	int hashFlags = 0;
 
@@ -179,7 +179,9 @@ NodeConnectionHashInit(void)
 	info.hcxt = CacheMemoryContext;
 	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-	NodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
+	nodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
+
+	return nodeConnectionHash;
 }
 
 
