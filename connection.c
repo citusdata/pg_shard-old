@@ -320,16 +320,22 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 			primaryMessage = PQerrorMessage(connection);
 		}
 
-		ereport(errorLevel, (errcode(sqlState),
-					(primaryMessage ? errmsg_internal("%s", primaryMessage) :
-									  errmsg("unknown error")),
-					(messageDetail ? errdetail_internal("%s", messageDetail) :
-									 0),
-					(messageHint ? errhint("%s", messageHint) : 0),
-					(errorContext ? errcontext("%s", errorContext) : 0),
-					(sqlCommand ? errcontext("Remote SQL command: %s",
-											 sqlCommand) : 0))
-			   );
+		/* If it's still null, use a default message */
+		if (primaryMessage == NULL)
+		{
+			primaryMessage = "unknown error";
+		}
+
+		ereport(errorLevel,
+			(
+				errcode(sqlState),
+				errmsg_internal("%s", primaryMessage),
+				(messageDetail ? errdetail_internal("%s", messageDetail)          : 0),
+				(messageHint   ? errhint("%s", messageHint)                       : 0),
+				(errorContext  ? errcontext("%s", errorContext)                   : 0),
+				(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
+			)
+		);
 	}
 	PG_CATCH();
 	{
