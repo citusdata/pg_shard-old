@@ -30,6 +30,7 @@
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/hsearch.h"
+#include "utils/memutils.h"
 #include "utils/palloc.h"
 
 
@@ -175,7 +176,7 @@ NodeConnectionHashInit(void)
 	info.keysize = sizeof(NodeConnectionKey);
 	info.entrysize = sizeof(NodeConnectionEntry);
 	info.hash = tag_hash;
-	info.hcxt = CurrentMemoryContext;
+	info.hcxt = CacheMemoryContext;
 	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
 	NodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
