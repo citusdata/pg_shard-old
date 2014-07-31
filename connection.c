@@ -34,14 +34,6 @@
 #include "utils/palloc.h"
 
 
-/* Defines for libpq options */
-#define LIBPQ_HOST_KEYWORD "host"
-#define LIBPQ_PORT_KEYWORD "port"
-#define LIBPQ_FALLBACK_APPLICATION_NAME_KEYWORD "fallback_application_name"
-#define LIBPQ_CLIENT_ENCODING_KEYWORD "client_encoding"
-#define LIBPQ_CONNECT_TIMEOUT_KEYWORD "connect_timeout"
-#define LIBPQ_DATABASE_NAME_KEYWORD "dbname"
-
 /* Name of this extension */
 /* TODO: Move to "constants.h" or something? */
 #define MODULE_NAME "pg_shard"
@@ -49,9 +41,10 @@
 /* Maximum duration to wait for connection */
 #define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
 
-/* Maximum (textual) lengths of hostnames and port numbers */
+/* Maximum (textual) lengths of hostname */
 #define MAX_NODE_LENGTH 255
-#define MAX_PORT_LENGTH 11
+
+/* SQL statement for testing */
 #define TEST_SQL "DO $$ BEGIN RAISE %s 'Raised remotely!'; END $$"
 
 /*
@@ -226,47 +219,33 @@ EstablishConnection(char *nodeName, int32 nodePort)
 {
 	/* volatile because we're using PG_TRY, etc. */
 	PGconn *volatile connection = NULL;
+	StringInfoData nodePortString;
+	initStringInfo(&nodePortString);
+	appendStringInfo(&nodePortString, "%d", nodePort);
 
 	/* wrap in case NormalizeConnectionSettings errors or connection is bad */
 	PG_TRY();
 	{
-		const char *keywordArray[7];
-		const char *valueArray[7];
-		int parameterIndex = 0;
-		char portString[MAX_PORT_LENGTH + 1] = "";
+		const char *keywordArray[] = {
+				"host",
+				"port",
+				"fallback_application_name",
+				"client_encoding",
+				"connect_timeout",
+				"dbname",
+				NULL
+		};
+		const char *valueArray[] = {
+				nodeName,
+				nodePortString.data,
+				"pg_shard",
+				GetDatabaseEncodingName(),
+				CLIENT_CONNECT_TIMEOUT_SECONDS,
+				get_database_name(MyDatabaseId),
+				NULL
+		};
 
-		memset(keywordArray, 0, sizeof(keywordArray));
-		memset(valueArray, 0, sizeof(valueArray));
-
-		keywordArray[parameterIndex] = LIBPQ_HOST_KEYWORD;
-		valueArray[parameterIndex] = nodeName;
-		parameterIndex++;
-
-		/* libpq requires string values, so format our port */
-		snprintf(portString, MAX_PORT_LENGTH, "%d", nodePort);
-		keywordArray[parameterIndex] = LIBPQ_PORT_KEYWORD;
-		valueArray[parameterIndex] = portString;
-		parameterIndex++;
-
-		keywordArray[parameterIndex] = LIBPQ_FALLBACK_APPLICATION_NAME_KEYWORD;
-		valueArray[parameterIndex] = MODULE_NAME;
-		parameterIndex++;
-
-		keywordArray[parameterIndex] = LIBPQ_CLIENT_ENCODING_KEYWORD;
-		valueArray[parameterIndex] = GetDatabaseEncodingName();
-		parameterIndex++;
-
-		keywordArray[parameterIndex] = LIBPQ_CONNECT_TIMEOUT_KEYWORD;
-		valueArray[parameterIndex] = CLIENT_CONNECT_TIMEOUT_SECONDS;
-		parameterIndex++;
-
-		keywordArray[parameterIndex] = LIBPQ_DATABASE_NAME_KEYWORD;
-		valueArray[parameterIndex] = get_database_name(MyDatabaseId);
-		parameterIndex++;
-
-		keywordArray[parameterIndex] = NULL;
-		valueArray[parameterIndex] = NULL;
-
+		Assert(sizeof(keywordArray) == sizeof(keywordArray));
 		connection = PQconnectdbParams(keywordArray, valueArray, false);
 
 		if (connection == NULL || PQstatus(connection) != CONNECTION_OK)
