@@ -264,7 +264,8 @@ EstablishConnection(char *nodeName, int32 nodePort)
 			}
 
 			ereport(ERROR, (errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
-							errmsg("could not connect to node \"%s\"", nodeName),
+							errmsg("could not connect to node \"%s\" (on port "
+								   "%d)", nodeName, nodePort),
 							errdetail_internal("%s", connectionMessage)));
 		}
 	}

@@ -21,5 +21,5 @@ ERROR:  Raised remotely!
 CONTEXT:  Remote SQL command: DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$
 -- test connection to non-existant machine
 SELECT test_pg_shard_connection('dummyhost', 5432, 'INFO');
-ERROR:  could not connect to node "dummyhost"
+ERROR:  could not connect to node "dummyhost" (on port 5432)
 DETAIL:  could not translate host name "dummyhost" to address: nodename nor servname provided, or not known
