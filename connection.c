@@ -75,8 +75,6 @@ static HTAB *NodeConnectionHash = NULL;
 static HTAB * CreateNodeConnectionHash(void);
 static NodeConnectionEntry * NodeConnectionHashLookup(char *nodeName, int32 nodePort);
 static PGconn * EstablishConnection(char *nodeName, int32 nodePort);
-static void NormalizeConnectionSettings(PGconn *connection);
-static void ExecuteRemoteSqlCommand(PGconn *connection, const char *sqlCommand);
 static void ReportRemoteSqlError(int errorLevel, PGresult *result,
 								 PGconn *connection, bool clearResult,
 								 const char *sql);
@@ -100,6 +98,7 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
 	text *elevelText = PG_GETARG_TEXT_P(2);
+	PGresult *result;
 
 	char *nodeName = text_to_cstring(nodeText);
 	char *elevel = text_to_cstring(elevelText);
@@ -111,7 +110,14 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 
 	connection = GetConnection(nodeName, nodePort);
 
-	ExecuteRemoteSqlCommand(connection, sqlCommand.data);
+	result = PQexec(connection, sqlCommand.data);
+
+	if (PQresultStatus(result) != PGRES_COMMAND_OK)
+	{
+		ReportRemoteSqlError(ERROR, result, connection, true, sqlCommand.data);
+	}
+
+	PQclear(result);
 
 	PG_RETURN_VOID();
 }
@@ -209,10 +215,6 @@ NodeConnectionHashLookup(char *nodeName, int32 nodePort)
  * EstablishConnection actually creates the connection to a remote PostgreSQL
  * server. The fallback application name is set to 'pg_shard' and the remote
  * encoding is set to match the local one.
- *
- * After the connection has been established, certain session-level settings are
- * configured by passing the connection to NormalizeConnectionSettings before
- * returning.
  */
 static PGconn *
 EstablishConnection(char *nodeName, int32 nodePort)
@@ -223,7 +225,7 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	initStringInfo(&nodePortString);
 	appendStringInfo(&nodePortString, "%d", nodePort);
 
-	/* wrap in case NormalizeConnectionSettings errors or connection is bad */
+	/* wrap to allow PQfinish call before errors are rethrown */
 	PG_TRY();
 	{
 		const char *keywordArray[] = {
@@ -265,8 +267,6 @@ EstablishConnection(char *nodeName, int32 nodePort)
 							errmsg("could not connect to node \"%s\"", nodeName),
 							errdetail_internal("%s", connectionMessage)));
 		}
-
-		NormalizeConnectionSettings(connection);
 	}
 	PG_CATCH();
 	{
@@ -280,56 +280,6 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	PG_END_TRY();
 
 	return connection;
-}
-
-
-/*
- * NormalizeConnectionSettings issues certain SET commands on the provided
- * connection to remove any ambiguities in data representation between the
- * local and remote system.
- */
-static void
-NormalizeConnectionSettings(PGconn *connection)
-{
-	/* force the search path to contain only pg_catalog */
-	ExecuteRemoteSqlCommand(connection, "SET search_path = pg_catalog");
-
-	/*
-	 * Set remote timezone. All sent/received timestamptzs should contain a zone
-	 * anyways, but this helps regression tests have more repeatable output.
-	 */
-	ExecuteRemoteSqlCommand(connection, "SET timezone = 'UTC'");
-
-	/*
-	 * Taken from postgres_fdw, but without support for older versions of
-	 * PostgreSQL. These settins ensure unambiguous output from the remote.
-	 */
-	ExecuteRemoteSqlCommand(connection, "SET datestyle = ISO");
-	ExecuteRemoteSqlCommand(connection, "SET intervalstyle = postgres");
-	ExecuteRemoteSqlCommand(connection, "SET extra_float_digits = 3");
-}
-
-
-/*
- * ExecuteRemoteSqlCommand executes a SQL string remotely but does not evaluate
- * the response. Handy when the caller doesn't care about the return value.
- *
- * If the execution does not finish successfully, an error is thrown using the
- * ReportRemoteSqlError function in this file.
- */
-static void
-ExecuteRemoteSqlCommand(PGconn *connection, const char *sqlCommand)
-{
-	PGresult *result;
-
-	result = PQexec(connection, sqlCommand);
-
-	if (PQresultStatus(result) != PGRES_COMMAND_OK)
-	{
-		ReportRemoteSqlError(ERROR, result, connection, true, sqlCommand);
-	}
-
-	PQclear(result);
 }
 
 
