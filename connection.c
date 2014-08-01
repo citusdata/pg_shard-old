@@ -34,10 +34,6 @@
 #include "utils/palloc.h"
 
 
-/* Name of this extension */
-/* TODO: Move to "constants.h" or something? */
-#define MODULE_NAME "pg_shard"
-
 /* Maximum duration to wait for connection */
 #define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
 
@@ -65,15 +61,15 @@ typedef struct NodeConnectionEntry
 } NodeConnectionEntry;
 
 /*
- * NodeConnectionHash is the connection hash itself. It starts out uninitialized
- * and is lazily created by the first caller to need a connection.
+ * NodeConnectionHash is the connection hash itself. It begins uninitialized.
+ * The first call to GetConnection triggers hash creation.
  */
 static HTAB *NodeConnectionHash = NULL;
 
 
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
-static PGconn * EstablishConnection(char *nodeName, int32 nodePort);
+static PGconn * ConnectToNode(char *nodeName, int32 nodePort);
 static void ReportRemoteSqlError(int errorLevel, PGresult *result,
 								 PGconn *connection, bool clearResult,
 								 const char *sql);
@@ -125,7 +121,8 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 /*
  * GetConnection returns a PGconn which can be used to execute queries on a
  * remote PostgreSQL server. If no suitable connection to the specified node on
- * the specified port yet exists, a new connection is established and returned.
+ * the specified port yet exists, the function establishes a new connection and
+ * returns that.
  *
  * Hostnames may not be longer than 255 characters.
  */
@@ -154,7 +151,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	}
 	else
 	{
-		connection = EstablishConnection(nodeConnectionKey.nodeName, nodePort);
+		connection = ConnectToNode(nodeConnectionKey.nodeName, nodePort);
 
 		nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 										  HASH_ENTER, &entryFound);
@@ -184,77 +181,67 @@ CreateNodeConnectionHash(void)
 	info.hcxt = CacheMemoryContext;
 	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
-	nodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
+	nodeConnectionHash = hash_create("pg_shard connections", 32, &info, hashFlags);
 
 	return nodeConnectionHash;
 }
 
 
 /*
- * EstablishConnection actually creates the connection to a remote PostgreSQL
- * server. The fallback application name is set to 'pg_shard' and the remote
- * encoding is set to match the local one.
+ * ConnectToNode opens a connection to a remote PostgreSQL server. The function
+ * configures the connection's fallback application name to 'pg_shard' and sets
+ * the remote encoding to match the local one.
  */
 static PGconn *
-EstablishConnection(char *nodeName, int32 nodePort)
+ConnectToNode(char *nodeName, int32 nodePort)
 {
-	/* volatile because we're using PG_TRY, etc. */
-	PGconn *volatile connection = NULL;
+	PGconn *connection = NULL;
 	StringInfoData nodePortString;
 	initStringInfo(&nodePortString);
 	appendStringInfo(&nodePortString, "%d", nodePort);
 
-	/* wrap to allow PQfinish call before errors are rethrown */
-	PG_TRY();
+	const char *keywordArray[] = {
+			"host",
+			"port",
+			"fallback_application_name",
+			"client_encoding",
+			"connect_timeout",
+			"dbname",
+			NULL
+	};
+	const char *valueArray[] = {
+			nodeName,
+			nodePortString.data,
+			"pg_shard",
+			GetDatabaseEncodingName(),
+			CLIENT_CONNECT_TIMEOUT_SECONDS,
+			get_database_name(MyDatabaseId),
+			NULL
+	};
+
+	Assert(sizeof(keywordArray) == sizeof(keywordArray));
+	connection = PQconnectdbParams(keywordArray, valueArray, false);
+
+	if (PQstatus(connection) != CONNECTION_OK)
 	{
-		const char *keywordArray[] = {
-				"host",
-				"port",
-				"fallback_application_name",
-				"client_encoding",
-				"connect_timeout",
-				"dbname",
-				NULL
-		};
-		const char *valueArray[] = {
-				nodeName,
-				nodePortString.data,
-				"pg_shard",
-				GetDatabaseEncodingName(),
-				CLIENT_CONNECT_TIMEOUT_SECONDS,
-				get_database_name(MyDatabaseId),
-				NULL
-		};
+		char *connectionMessage;
+		char *newline;
 
-		Assert(sizeof(keywordArray) == sizeof(keywordArray));
-		connection = PQconnectdbParams(keywordArray, valueArray, false);
-
-		if (PQstatus(connection) != CONNECTION_OK)
+		/* strip libpq-appended newline, if any */
+		connectionMessage = pstrdup(PQerrorMessage(connection));
+		newline = strrchr(connectionMessage, '\n');
+		if (newline != NULL)
 		{
-			char *connectionMessage;
-			char *newline;
-
-			/* strip libpq-appended newline, if any */
-			connectionMessage = pstrdup(PQerrorMessage(connection));
-			newline = strrchr(connectionMessage, '\n');
-			if (newline != NULL)
-			{
-				*newline = '\0';
-			}
-
-			ereport(ERROR, (errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
-							errmsg("could not connect to node \"%s\" (on port "
-								   "%d)", nodeName, nodePort),
-							errdetail_internal("%s", connectionMessage)));
+			*newline = '\0';
 		}
-	}
-	PG_CATCH();
-	{
-		/* release connection if one was created before an error was thrown */
+
 		PQfinish(connection);
-		PG_RE_THROW();
+
+		ereport(ERROR, (errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
+						errmsg("could not connect to node \"%s\" (on port "
+							   "%d)", nodeName, nodePort),
+						errdetail_internal("%s", connectionMessage)));
 	}
-	PG_END_TRY();
 
 	return connection;
 }
@@ -263,70 +250,55 @@ EstablishConnection(char *nodeName, int32 nodePort)
 /*
  * ReportRemoteSqlError retrieves various error fields from the a remote result
  * and reports an error at the specified level. Callers should provide this
- * function with the actual SQL command sent to the remote to have it included
- * in the user-facing error context.
+ * function with the actual SQL command previously sent to the remote server in
+ * order to have it included in the user-facing error context string.
  */
 static void
 ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 					 bool clearResult, const char *sqlCommand)
 {
-	/* if clearResult is set, clear PGresult before returning */
-	PG_TRY();
+	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+	char *primaryMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
+	char *messageDetail = PQresultErrorField(result, PG_DIAG_MESSAGE_DETAIL);
+	char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
+	char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
+	int sqlState = ERRCODE_CONNECTION_FAILURE;
+
+	if (sqlStateString != NULL)
 	{
-		char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-		char *primaryMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
-		char *messageDetail = PQresultErrorField(result, PG_DIAG_MESSAGE_DETAIL);
-		char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
-		char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
-		int sqlState = ERRCODE_CONNECTION_FAILURE;
-
-		if (sqlStateString != NULL)
-		{
-			sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1],
-									 sqlStateString[2], sqlStateString[3],
-									 sqlStateString[4]);
-		}
-
-		/*
-		 * If no messages is present in the PGresult, the PGconn may provide a
-		 * suitable connect-level failure message.
-		 */
-		if (primaryMessage == NULL)
-		{
-			primaryMessage = PQerrorMessage(connection);
-		}
-
-		/* If it's still null, use a default message */
-		if (primaryMessage == NULL)
-		{
-			primaryMessage = "unknown error";
-		}
-
-		ereport(errorLevel,
-			(
-				errcode(sqlState),
-				errmsg_internal("%s", primaryMessage),
-				(messageDetail ? errdetail_internal("%s", messageDetail)          : 0),
-				(messageHint   ? errhint("%s", messageHint)                       : 0),
-				(errorContext  ? errcontext("%s", errorContext)                   : 0),
-				(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
-			)
-		);
+		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1],
+								 sqlStateString[2], sqlStateString[3],
+								 sqlStateString[4]);
 	}
-	PG_CATCH();
+
+	/*
+	 * If the PGresult did not contain a message, the connection may provide a
+	 * suitable top level one.
+	 */
+	if (primaryMessage == NULL)
 	{
-		/* my kingdom for a finally statement */
-		if (clearResult)
-		{
-			PQclear(result);
-		}
-
-		PG_RE_THROW();
+		primaryMessage = PQerrorMessage(connection);
 	}
-	PG_END_TRY();
+
+	/* Fall back to a default */
+	if (primaryMessage == NULL)
+	{
+		primaryMessage = "unknown error";
+	}
 
 	if (clearResult)
 	{
 		PQclear(result);
 	}
+
+	ereport(errorLevel,
+		(
+			errcode(sqlState),
+			errmsg_internal("%s", primaryMessage),
+			(messageDetail ? errdetail_internal("%s", messageDetail)          : 0),
+			(messageHint   ? errhint("%s", messageHint)                       : 0),
+			(errorContext  ? errcontext("%s", errorContext)                   : 0),
+			(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
+		)
+	);
 }
