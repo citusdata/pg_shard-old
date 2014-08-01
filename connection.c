@@ -80,9 +80,6 @@ static List *InUseNodeConnectionEntryList = NIL;
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
 static PGconn * ConnectToNode(char *nodeName, int32 nodePort);
-static void ReportRemoteSqlError(int errorLevel, PGresult *result,
-								 PGconn *connection, bool clearResult,
-								 const char *sql);
 static void PruneBadConnections(XactEvent xactEvent, void *arg);
 
 
@@ -190,6 +187,63 @@ GetConnection(char *nodeName, int32 nodePort)
 
 
 /*
+ * ReportRemoteSqlError retrieves various error fields from the a remote result
+ * and reports an error at the specified level. Callers should provide this
+ * function with the actual SQL command previously sent to the remote server in
+ * order to have it included in the user-facing error context string.
+ */
+void
+ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
+					 bool clearResult, const char *sqlCommand)
+{
+	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+	char *primaryMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
+	char *messageDetail = PQresultErrorField(result, PG_DIAG_MESSAGE_DETAIL);
+	char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
+	char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
+	int sqlState = ERRCODE_CONNECTION_FAILURE;
+
+	if (sqlStateString != NULL)
+	{
+		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1],
+								 sqlStateString[2], sqlStateString[3],
+								 sqlStateString[4]);
+	}
+
+	/*
+	 * If the PGresult did not contain a message, the connection may provide a
+	 * suitable top level one.
+	 */
+	if (primaryMessage == NULL)
+	{
+		primaryMessage = PQerrorMessage(connection);
+	}
+
+	/* Fall back to a default */
+	if (primaryMessage == NULL)
+	{
+		primaryMessage = "unknown error";
+	}
+
+	if (clearResult)
+	{
+		PQclear(result);
+	}
+
+	ereport(errorLevel,
+		(
+			errcode(sqlState),
+			errmsg_internal("%s", primaryMessage),
+			(messageDetail ? errdetail_internal("%s", messageDetail)          : 0),
+			(messageHint   ? errhint("%s", messageHint)                       : 0),
+			(errorContext  ? errcontext("%s", errorContext)                   : 0),
+			(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
+		)
+	);
+}
+
+
+/*
  * CreateNodeConnectionHash returns a newly created hash table suitable for
  * storing unlimited connections indexed by node name and port.
  */
@@ -271,63 +325,6 @@ ConnectToNode(char *nodeName, int32 nodePort)
 	}
 
 	return connection;
-}
-
-
-/*
- * ReportRemoteSqlError retrieves various error fields from the a remote result
- * and reports an error at the specified level. Callers should provide this
- * function with the actual SQL command previously sent to the remote server in
- * order to have it included in the user-facing error context string.
- */
-static void
-ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
-					 bool clearResult, const char *sqlCommand)
-{
-	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-	char *primaryMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
-	char *messageDetail = PQresultErrorField(result, PG_DIAG_MESSAGE_DETAIL);
-	char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
-	char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
-	int sqlState = ERRCODE_CONNECTION_FAILURE;
-
-	if (sqlStateString != NULL)
-	{
-		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1],
-								 sqlStateString[2], sqlStateString[3],
-								 sqlStateString[4]);
-	}
-
-	/*
-	 * If the PGresult did not contain a message, the connection may provide a
-	 * suitable top level one.
-	 */
-	if (primaryMessage == NULL)
-	{
-		primaryMessage = PQerrorMessage(connection);
-	}
-
-	/* Fall back to a default */
-	if (primaryMessage == NULL)
-	{
-		primaryMessage = "unknown error";
-	}
-
-	if (clearResult)
-	{
-		PQclear(result);
-	}
-
-	ereport(errorLevel,
-		(
-			errcode(sqlState),
-			errmsg_internal("%s", primaryMessage),
-			(messageDetail ? errdetail_internal("%s", messageDetail)          : 0),
-			(messageHint   ? errhint("%s", messageHint)                       : 0),
-			(errorContext  ? errcontext("%s", errorContext)                   : 0),
-			(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
-		)
-	);
 }
 
 
