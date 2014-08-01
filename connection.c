@@ -229,7 +229,7 @@ EstablishConnection(char *nodeName, int32 nodePort)
 		Assert(sizeof(keywordArray) == sizeof(keywordArray));
 		connection = PQconnectdbParams(keywordArray, valueArray, false);
 
-		if (connection == NULL || PQstatus(connection) != CONNECTION_OK)
+		if (PQstatus(connection) != CONNECTION_OK)
 		{
 			char *connectionMessage;
 			char *newline;
@@ -251,10 +251,7 @@ EstablishConnection(char *nodeName, int32 nodePort)
 	PG_CATCH();
 	{
 		/* release connection if one was created before an error was thrown */
-		if (connection != NULL)
-		{
-			PQfinish(connection);
-		}
+		PQfinish(connection);
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
