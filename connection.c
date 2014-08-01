@@ -205,9 +205,8 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 
 	if (sqlStateString != NULL)
 	{
-		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1],
-								 sqlStateString[2], sqlStateString[3],
-								 sqlStateString[4]);
+		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1], sqlStateString[2],
+								 sqlStateString[3], sqlStateString[4]);
 	}
 
 	/*
