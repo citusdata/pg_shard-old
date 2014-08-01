@@ -14,6 +14,7 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
+#include "miscadmin.h"
 #include "postgres_ext.h"
 
 #include "connection.h"
@@ -22,10 +23,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "access/xact.h"
 #include "commands/dbcommands.h"
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
-#include "miscadmin.h"
+#include "nodes/memnodes.h"
+#include "nodes/pg_list.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
@@ -58,6 +61,7 @@ typedef struct NodeConnectionEntry
 {
 	NodeConnectionKey cacheKey;	/* hash entry key */
 	PGconn *connection;			/* connection to remote server, if any */
+	bool inUse;					/* whether the connection is in use */
 } NodeConnectionEntry;
 
 /*
@@ -66,6 +70,12 @@ typedef struct NodeConnectionEntry
  */
 static HTAB *NodeConnectionHash = NULL;
 
+/*
+ * InUseNodeConnectionEntryList contains hash entries for any connections given
+ * to callers of GetConnection.
+ */
+static List *InUseNodeConnectionEntryList = NIL;
+
 
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
@@ -73,6 +83,7 @@ static PGconn * ConnectToNode(char *nodeName, int32 nodePort);
 static void ReportRemoteSqlError(int errorLevel, PGresult *result,
 								 PGconn *connection, bool clearResult,
 								 const char *sql);
+static void PruneBadConnections(XactEvent xactEvent, void *arg);
 
 
 /* declarations for dynamic loading */
@@ -140,7 +151,12 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (NodeConnectionHash == NULL)
 	{
+		/*
+		 * We're the first one here. Initialize the hash and register connection
+		 * pruning callback.
+		 */
 		NodeConnectionHash = CreateNodeConnectionHash();
+		RegisterXactCallback(PruneBadConnections, NULL);
 	}
 
 	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
@@ -156,6 +172,17 @@ GetConnection(char *nodeName, int32 nodePort)
 		nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 										  HASH_ENTER, &entryFound);
 		nodeConnectionEntry->connection = connection;
+	}
+
+	if (!nodeConnectionEntry->inUse)
+	{
+		MemoryContext oldMemoryContext = MemoryContextSwitchTo(CacheMemoryContext);
+
+		nodeConnectionEntry->inUse = true;
+		InUseNodeConnectionEntryList = lappend(InUseNodeConnectionEntryList,
+											   nodeConnectionEntry);
+
+		MemoryContextSwitchTo(oldMemoryContext);
 	}
 
 	return connection;
@@ -301,4 +328,41 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 			(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
 		)
 	);
+}
+
+
+/*
+ * PruneBadConnections is a transaction callback. After any transaction event,
+ * PruneBadConnections inspects every connection marked in use, calls PQfinish
+ * on those in a bad state, and removes their entries from NodeConnectionHash.
+ * Finally, InUseNodeConnectionEntryList is truncated to prepare it for future
+ * transactions.
+ *
+ * Note that this function performs the above actions during any transaction
+ * event, so it may perform cleanup during a pre-commit only to become a no-op
+ * during the subsequent commit.
+ */
+static void
+PruneBadConnections(XactEvent event __attribute__((unused)),
+					void *arg __attribute__((unused)))
+{
+	ListCell *cell = NULL;
+	foreach(cell, InUseNodeConnectionEntryList)
+	{
+		NodeConnectionEntry *entry = (NodeConnectionEntry *) lfirst(cell);
+		NodeConnectionKey key = entry->cacheKey;
+
+		entry->inUse = false;
+
+		if (PQstatus(entry->connection) != CONNECTION_OK)
+		{
+			bool entryFound = false;
+			ereport(errcode(WARNING), (errmsg("Pruning connection to \"%s\" on port %d",
+									   key.nodeName, key.nodePort)));
+			PQfinish(entry->connection);
+			hash_search(NodeConnectionHash, &key, HASH_REMOVE, &entryFound);
+		}
+	}
+
+	InUseNodeConnectionEntryList = NIL;
 }
