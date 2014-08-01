@@ -73,7 +73,6 @@ static HTAB *NodeConnectionHash = NULL;
 
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
-static NodeConnectionEntry * NodeConnectionHashLookup(char *nodeName, int32 nodePort);
 static PGconn * EstablishConnection(char *nodeName, int32 nodePort);
 static void ReportRemoteSqlError(int errorLevel, PGresult *result,
 								 PGconn *connection, bool clearResult,
@@ -133,29 +132,36 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 PGconn *
 GetConnection(char *nodeName, int32 nodePort)
 {
+	PGconn *connection = NULL;
+	NodeConnectionKey nodeConnectionKey;
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
+	bool entryFound = false;
+
+	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
+	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
+	nodeConnectionKey.nodePort = nodePort;
 
 	if (NodeConnectionHash == NULL)
 	{
 		NodeConnectionHash = CreateNodeConnectionHash();
 	}
 
-	nodeConnectionEntry = NodeConnectionHashLookup(nodeName, nodePort);
-
-	if (nodeConnectionEntry->connection == NULL)
+	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
+									  HASH_FIND, &entryFound);
+	if (entryFound)
 	{
-		/* node names are truncated when stored in the cache */
-		char *safeNodeName = nodeConnectionEntry->cacheKey.nodeName;
+		connection = nodeConnectionEntry->connection;
+	}
+	else
+	{
+		connection = EstablishConnection(nodeConnectionKey.nodeName, nodePort);
 
-		/*
-		 * A NULL connection usually means no connection yet exists for the node
-		 * in question, but also arises if a previous operation found the node's
-		 * connection to be in a bad state. So this clears out all other fields.
-		 */
-		nodeConnectionEntry->connection = EstablishConnection(safeNodeName, nodePort);
+		nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
+										  HASH_ENTER, &entryFound);
+		nodeConnectionEntry->connection = connection;
 	}
 
-	return nodeConnectionEntry->connection;
+	return connection;
 }
 
 
@@ -181,33 +187,6 @@ CreateNodeConnectionHash(void)
 	nodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
 
 	return nodeConnectionHash;
-}
-
-
-/*
- * NodeConnectionHashLookup returns the NodeConnectionHash entry for the
- * specified node and port, creating an empty entry if non yet exists.
- */
-static NodeConnectionEntry *
-NodeConnectionHashLookup(char *nodeName, int32 nodePort)
-{
-	NodeConnectionKey nodeConnectionKey;
-	NodeConnectionEntry *nodeConnectionEntry = NULL;
-	bool entryFound = false;
-
-	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
-
-	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
-	nodeConnectionKey.nodePort = nodePort;
-
-	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
-									  HASH_ENTER, &entryFound);
-	if (!entryFound)
-	{
-		nodeConnectionEntry->connection = NULL;
-	}
-
-	return nodeConnectionEntry;
 }
 
 
