@@ -29,6 +29,13 @@
 /* table containing shard interval information */
 #define SHARD_TABLE_NAME "shard"
 
+/* sequence to obtain new shardId */
+#define SHARD_ID_SEQUENCE_NAME "shard_id_sequence"
+
+/* denotes storage type of the underlying shard */
+#define SHARD_STORAGE_TABLE 't'
+#define SHARD_STORAGE_FOREIGN 'f'
+
 /* table has primary key for fast lookup */
 #define SHARD_PKEY_INDEX_NAME "shard_pkey"
 
@@ -36,19 +43,35 @@
 #define SHARD_RELATION_INDEX_NAME "shard_relation_index"
 
 /* human-readable names for addressing columns of shard table */
+#define SHARD_ATTRIBUTE_COUNT 5
 #define ATTR_NUM_SHARD_ID 1
 #define ATTR_NUM_SHARD_RELATION_ID 2
 #define ATTR_NUM_SHARD_STORAGE 3
 #define ATTR_NUM_SHARD_MIN_VALUE 4
 #define ATTR_NUM_SHARD_MAX_VALUE 5
 
+/* ShardState represents the last known state of a shard on a given node */
+typedef enum
+{
+    STATE_INVALID_FIRST = 0,
+	STATE_FINALIZED = 1,
+	STATE_CACHED = 2,
+	STATE_INACTIVE = 3,
+	STATE_TO_DELETE = 4
+
+} ShardState;
+
 /* table containing shard placement information */
 #define SHARD_PLACEMENT_TABLE_NAME "shard_placement"
+
+/* sequence to obtain new placement id */
+#define SHARD_PLACEMENT_ID_SEQUENCE_NAME "shard_placement_id_sequence"
 
 /* index to expedite lookup by shard identifier */
 #define SHARD_PLACEMENT_SHARD_INDEX_NAME "shard_placement_shard_index"
 
 /* human-readable names for addressing columns of shard placement table */
+#define SHARD_PLACEMENT_ATTRIBUTE_COUNT 5
 #define ATTR_NUM_SHARD_PLACEMENT_ID 1
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_ID 2
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE 3
@@ -59,6 +82,7 @@
 #define PARTITION_TABLE_NAME "partition"
 
 /* human-readable names for addressing columns of partition table */
+#define PARTITION_ATTRIBUTE_COUNT 2
 #define ATTR_NUM_PARTITION_RELATION_ID 1
 #define ATTR_NUM_PARTITION_KEY 2
 
@@ -95,6 +119,17 @@ typedef struct ShardPlacement
 	char *nodeName;	/* hostname of machine hosting this shard */
 	int32 nodePort;	/* port number for connecting to host */
 } ShardPlacement;
+
+
+#define NODE_NAME_LENGTH 256
+
+/* In-memory representation of a worker node */
+typedef struct WorkerNode
+{
+	uint32 nodePort;
+	char nodeName[NODE_NAME_LENGTH];
+
+} WorkerNode;
 
 
 extern List * LoadShardList(Oid distributedTableId);
