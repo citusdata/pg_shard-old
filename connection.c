@@ -32,6 +32,9 @@
 #include "utils/hsearch.h"
 #include "utils/palloc.h"
 
+#include "nodes/memnodes.h"
+#include "utils/palloc.h"
+#include "utils/memutils.h"
 
 /* Defines for libpq options */
 #define LIBPQ_HOST_KEYWORD "host"
@@ -175,7 +178,7 @@ NodeConnectionHashInit(void)
 	info.keysize = sizeof(NodeConnectionKey);
 	info.entrysize = sizeof(NodeConnectionEntry);
 	info.hash = tag_hash;
-	info.hcxt = CurrentMemoryContext;
+	info.hcxt = CacheMemoryContext;
 	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
 
 	NodeConnectionHash = hash_create(MODULE_NAME " connections", 32, &info, hashFlags);
@@ -197,9 +200,10 @@ NodeConnectionHashLookup(char *nodeName, int32 nodePort)
 
 	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
 	nodeConnectionKey.nodePort = nodePort;
-
+	
 	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 									  HASH_ENTER, &entryFound);
+
 	if (!entryFound)
 	{
 		nodeConnectionEntry->connection = NULL;

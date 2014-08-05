@@ -23,7 +23,8 @@
 #include "commands/sequence.h"
 #include "connection.h"
 #include "distribution_metadata.h"
-#include "ddl_events.h"
+#include "extend_ddl_commands.h"
+#include "generate_ddl_commands.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
@@ -76,7 +77,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
  	Oid relationId = ResolveRelationId(relationName);
 	uint32 workerNodeIndex = 0;
 	List *workerNodeList = NIL;
-	List *ddlEventList = NIL;
+	List *ddlCommandList = NIL;
 
 	/* split the hash space by the number of shards and set the first min/max values */
 	uint32 hashValueIncrement = UINT_MAX / shardCount;
@@ -102,8 +103,8 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 	/* make sure we don't process cancel signals until all shards are created */
 	HOLD_INTERRUPTS();
 
-	/* retrieve the DDL events for the table */
-	ddlEventList = GetTableDDLEvents(relationId);
+	/* retrieve the DDL commands for the table */
+	ddlCommandList = TableDDLCommandList(relationId);
 
 	while (shardCreatedCount < shardCount)
 	{
@@ -115,8 +116,8 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 		uint64 shardId = ShardId();
 
 		/* extend the names in the DDL events with the shardId */
-		List *extendedDDLEvents = ExtendedTableDDLEvents(ddlEventList, shardId,
-														 relationId);
+		List *extendedDDLCommands = ExtendedDDLCommandList(relationId, shardId,
+														   ddlCommandList);
 
 		ListCell *candidateNodeCell = NULL;
 		List *candidateNodeList = GetCandidateNodes(workerNodeList,	workerNodeIndex,
@@ -128,7 +129,7 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 			char *nodeName = candidateNode->nodeName;
 			uint32 nodePort = candidateNode->nodePort;
 
-			bool created = WorkerCreateShard(nodeName, nodePort, extendedDDLEvents);
+			bool created = WorkerCreateShard(nodeName, nodePort, extendedDDLCommands);
 			if (created)
 			{
 				uint64 shardPlacementId = ShardPlacementId();
