@@ -32,7 +32,7 @@
 #include "utils/errcodes.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
-
+#include "utils/palloc.h"
 
 /* Maximum duration to wait for connection */
 #define CLIENT_CONNECT_TIMEOUT_SECONDS "5"
@@ -261,6 +261,7 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 	char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
 	char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
 	int sqlState = ERRCODE_CONNECTION_FAILURE;
+	bool outputError = false;
 
 	if (sqlStateString != NULL)
 	{
@@ -277,27 +278,49 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 		primaryMessage = PQerrorMessage(connection);
 	}
 
-	/* Fall back to a default */
-	if (primaryMessage == NULL)
-	{
-		primaryMessage = "unknown error";
-	}
-
 	if (clearResult)
 	{
 		PQclear(result);
 	}
 
-	ereport(errorLevel,
-		(
-			errcode(sqlState),
-			errmsg_internal("%s", primaryMessage),
-			(messageDetail ? errdetail_internal("%s", messageDetail)          : 0),
-			(messageHint   ? errhint("%s", messageHint)                       : 0),
-			(errorContext  ? errcontext("%s", errorContext)                   : 0),
-			(sqlCommand    ? errcontext("Remote SQL command: %s", sqlCommand) : 0)
-		)
-	);
+	outputError = errstart(errorLevel, __FILE__, __LINE__, PG_FUNCNAME_MACRO,
+						   TEXTDOMAIN);
+
+	if (outputError)
+	{
+		errcode(sqlState);
+
+		if (primaryMessage != NULL)
+		{
+			errmsg_internal("%s", primaryMessage);
+		}
+		else
+		{
+			errmsg("unknown error");
+		}
+
+		if (messageDetail != NULL)
+		{
+			errdetail_internal("%s", messageDetail);
+		}
+
+		if (messageHint != NULL)
+		{
+			errhint("%s", messageHint);
+		}
+
+		if (errorContext != NULL)
+		{
+			errcontext("%s", errorContext);
+		}
+
+		if (sqlCommand != NULL)
+		{
+			errcontext("Remote SQL command: %s", sqlCommand);
+		}
+
+		errfinish(0);
+	}
 }
 
 
