@@ -18,7 +18,9 @@
 
 #include "connection.h"
 
+#include <errno.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "commands/dbcommands.h"
@@ -30,7 +32,6 @@
 #include "utils/errcodes.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
-#include "utils/palloc.h"
 
 
 /* Maximum duration to wait for connection */
@@ -38,6 +39,9 @@
 
 /* Maximum (textual) lengths of hostname */
 #define MAX_NODE_LENGTH 255
+
+/* Times to attempt connection (or reconnection) */
+#define MAX_CONNECT_ATTEMPTS 2
 
 /* SQL statement for testing */
 #define TEST_SQL "DO $$ BEGIN RAISE %s 'Raised remotely!'; END $$"
@@ -101,6 +105,12 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 
 	connection = GetConnection(nodeName, nodePort);
 
+	if (connection == NULL)
+	{
+		ereport(ERROR, (errmsg("could not connect to node \"%s\" (on port %d)",
+							   nodeName, nodePort)));
+	}
+
 	result = PQexec(connection, sqlCommand.data);
 
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
@@ -119,6 +129,10 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
  * remote PostgreSQL server. If no suitable connection to the specified node on
  * the specified port yet exists, the function establishes a new connection and
  * returns that.
+ *
+ * Returned connections are guaranteed to be in the CONNECTION_OK state. If the
+ * requested connection cannot be established, or if it was previously created
+ * but is now in an unrecoverable bad state, this function returns NULL.
  *
  * Hostnames may not be longer than 255 characters.
  */
@@ -144,19 +158,90 @@ GetConnection(char *nodeName, int32 nodePort)
 	if (entryFound)
 	{
 		connection = nodeConnectionEntry->connection;
+
+		for (int i = 0; (PQstatus(connection) != CONNECTION_OK) &&
+						(i < MAX_CONNECT_ATTEMPTS); i++)
+		{
+			PQreset(connection);
+		}
+
+		if (PQstatus(connection) != CONNECTION_OK)
+		{
+			PurgeConnection(connection);
+			connection = NULL;
+		}
 	}
 	else
 	{
 		connection = ConnectToNode(nodeConnectionKey.nodeName, nodePort);
 
-		nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
-										  HASH_ENTER, &entryFound);
-		nodeConnectionEntry->connection = connection;
+		if (connection != NULL)
+		{
+			nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
+											  HASH_ENTER, &entryFound);
+			nodeConnectionEntry->connection = connection;
+		}
 	}
 
 	return connection;
 }
 
+
+/*
+ * PurgeConnection removes the given connection from the connection hash and
+ * closes it using PQfinish. If our hash does not contain the given connection,
+ * this method simply prints a warning and exits.
+ */
+void PurgeConnection(PGconn *connection)
+{
+	NodeConnectionKey nodeConnectionKey;
+	NodeConnectionEntry *nodeConnectionEntry = NULL;
+	bool entryFound = false;
+
+	PQconninfoOption *conninfoOptions = PQconninfo(connection);
+
+	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
+
+	for (PQconninfoOption *option = conninfoOptions; option != NULL; option++)
+	{
+		if (strncmp(option->keyword, "host", 4) == 0)
+		{
+			strncpy(nodeConnectionKey.nodeName, option->val, MAX_NODE_LENGTH);
+		}
+		else if (strncmp(option->keyword, "port", 4) == 0)
+		{
+			long port = 0l;
+			char *end = NULL;
+
+			errno = 0;
+			port = strtol(option->val, &end, 10);
+
+			Assert(errno == 0);
+			Assert(port > INT_MIN);
+			Assert(port < INT_MAX);
+
+			nodeConnectionKey.nodePort = (int32) port;
+		}
+
+		conninfoOptions++;
+	}
+
+	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
+									  HASH_REMOVE, &entryFound);
+
+	if (entryFound)
+	{
+		Assert(nodeConnectionEntry->connection == connection);
+
+		PQfinish(nodeConnectionEntry->connection);
+	}
+	else
+	{
+		ereport(WARNING, (errmsg("could not find hash entry for connection to "
+								 "%s on port %d", nodeConnectionKey.nodeName,
+								 nodeConnectionKey.nodePort)));
+	}
+}
 
 /*
  * ReportRemoteSqlError retrieves various error fields from the a remote result
@@ -243,6 +328,9 @@ CreateNodeConnectionHash(void)
  * ConnectToNode opens a connection to a remote PostgreSQL server. The function
  * configures the connection's fallback application name to 'pg_shard' and sets
  * the remote encoding to match the local one.
+ *
+ * We attempt to connect up to MAX_CONNECT_ATTEMPT times. After that we give up
+ * and return NULL.
  */
 static PGconn *
 ConnectToNode(char *nodeName, int32 nodePort)
@@ -272,27 +360,17 @@ ConnectToNode(char *nodeName, int32 nodePort)
 	};
 
 	Assert(sizeof(keywordArray) == sizeof(keywordArray));
-	connection = PQconnectdbParams(keywordArray, valueArray, false);
+
+	for (int i = 0; (PQstatus(connection) != CONNECTION_OK) &&
+					(i < MAX_CONNECT_ATTEMPTS); i++)
+	{
+		connection = PQconnectdbParams(keywordArray, valueArray, false);
+	}
 
 	if (PQstatus(connection) != CONNECTION_OK)
 	{
-		char *connectionMessage;
-		char *newline;
-
-		/* strip libpq-appended newline, if any */
-		connectionMessage = pstrdup(PQerrorMessage(connection));
-		newline = strrchr(connectionMessage, '\n');
-		if (newline != NULL)
-		{
-			*newline = '\0';
-		}
-
 		PQfinish(connection);
-
-		ereport(ERROR, (errcode(ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION),
-						errmsg("could not connect to node \"%s\" (on port "
-							   "%d)", nodeName, nodePort),
-						errdetail_internal("%s", connectionMessage)));
+		connection = NULL;
 	}
 
 	return connection;

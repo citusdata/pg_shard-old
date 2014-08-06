@@ -21,6 +21,7 @@
 
 
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
+extern void PurgeConnection(PGconn *connection);
 extern void ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 								 bool clearResult, const char *sqlCommand);
 extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
