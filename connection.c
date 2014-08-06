@@ -56,12 +56,14 @@ typedef struct NodeConnectionKey
 	int32 nodePort;						/* port of host to connect to */
 } NodeConnectionKey;
 
+
 /* NodeConnectionEntry keeps track of connections themselves. */
 typedef struct NodeConnectionEntry
 {
 	NodeConnectionKey cacheKey;	/* hash entry key */
 	PGconn *connection;			/* connection to remote server, if any */
 } NodeConnectionEntry;
+
 
 /*
  * NodeConnectionHash is the connection hash itself. It begins uninitialized.
@@ -311,7 +313,6 @@ CreateNodeConnectionHash(void)
 	int hashFlags = 0;
 
 	memset(&info, 0, sizeof(info));
-
 	info.keysize = sizeof(NodeConnectionKey);
 	info.entrysize = sizeof(NodeConnectionEntry);
 	info.hash = tag_hash;
@@ -340,24 +341,12 @@ ConnectToNode(char *nodeName, int32 nodePort)
 	initStringInfo(&nodePortString);
 	appendStringInfo(&nodePortString, "%d", nodePort);
 
-	const char *keywordArray[] = {
-			"host",
-			"port",
-			"fallback_application_name",
-			"client_encoding",
-			"connect_timeout",
-			"dbname",
-			NULL
-	};
-	const char *valueArray[] = {
-			nodeName,
-			nodePortString.data,
-			"pg_shard",
-			GetDatabaseEncodingName(),
-			CLIENT_CONNECT_TIMEOUT_SECONDS,
-			get_database_name(MyDatabaseId),
-			NULL
-	};
+	const char *keywordArray[] = { "host", "port", "fallback_application_name",
+			"client_encoding", "connect_timeout",
+			"dbname", NULL };
+	const char *valueArray[] = { nodeName, nodePortString.data, "pg_shard",
+			GetDatabaseEncodingName(), CLIENT_CONNECT_TIMEOUT_SECONDS,
+			get_database_name(MyDatabaseId), NULL };
 
 	Assert(sizeof(keywordArray) == sizeof(keywordArray));
 
@@ -372,6 +361,8 @@ ConnectToNode(char *nodeName, int32 nodePort)
 		PQfinish(connection);
 		connection = NULL;
 	}
+
+	pfree(nodePortString.data);
 
 	return connection;
 }
