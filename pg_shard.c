@@ -79,13 +79,13 @@ static planner_hook_type PreviousPlannerHook = NULL;
 
 
 /*
- * _PG_init is called when the module is loaded. It is responsible for saving
- * old hook values and assigning new ones.
+ * _PG_init is called when the module is loaded. In this function we save the
+ * previous utility hook, and then install our hook to pre-intercept calls to
+ * the copy command.
  */
 void
 _PG_init(void)
 {
-	/* Install hooks. */
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlannerHook;
 
@@ -93,13 +93,12 @@ _PG_init(void)
 
 
 /*
- * _PG_fini is called when the module is unloaded. It must restore the old hook
- * values saved by _PG_init.
+ * _PG_fini is called when the module is unloaded. This function uninstalls the
+ * extension's hooks.
  */
 void
 _PG_fini(void)
 {
-	/* Uninstall hooks. */
 	planner_hook = PreviousPlannerHook;
 }
 
@@ -244,9 +243,11 @@ TransformModifyTable(ModifyTable *modifyTable, Query *query,
 	shardPlacements = LoadShardPlacementList(targetShardInterval->id);
 	distributedModifyTable->shardPlacements = shardPlacements;
 
-	distributedModifyTable->sql = deparse_shard_query(query, targetShardInterval->id);
+	distributedModifyTable->sql = makeStringInfo();
+	distributedModifyTable->sql->data = deparse_shard_query(query,
+															targetShardInterval->id);
 
-	ereport(INFO, (errmsg("Distributed SQL: %s", distributedModifyTable->sql)));
+	ereport(INFO, (errmsg("Distributed SQL: %s", distributedModifyTable->sql->data)));
 
 	return distributedModifyTable;
 }
@@ -416,12 +417,12 @@ PruneShardList(List *restrictInfoList, List *shardList, Var *partitionColumn)
 		bool shardPruned = false;
 
 		ShardInterval *shardInterval = LoadShardInterval(shardId);
+
 		/* set the min/max values in the base constraint */
 		UpdateConstraint(baseConstraint, shardInterval);
 		constraintList = list_make1(baseConstraint);
 
 		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
-
 		if (shardPruned)
 		{
 			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
@@ -441,7 +442,7 @@ PruneShardList(List *restrictInfoList, List *shardList, Var *partitionColumn)
  * GetHashFunctionByType locates a default hash function for a type using an Oid
  * for that type. This function raises an error if no such function exists.
  *
- * The function is assumed to be unary.
+ * We assume all hash functions are unary.
  */
 static FunctionCallInfo
 GetHashFunctionByType(Oid typeId)
@@ -468,9 +469,10 @@ GetHashFunctionByType(Oid typeId)
 
 /*
  * BuildBaseConstraint returns an AND clause suitable to test containment of a
- * particular value within an interval, i.e. for a given variable X the returned
- * clause is ((X >= min) AND (X <= max)), where min and max are unbound values
- * to be supplied later.
+ * particular value within an interval. More specifically, for a variable X, the
+ * returned clause is ((X >= min) AND (X <= max)). The variables min and max are
+ * unbound values to be supplied later (probably retrieved from a distributed
+ * table's shard intervals).
  */
 static Node *
 BuildBaseConstraint(Var *partitionColumn)
@@ -491,8 +493,9 @@ BuildBaseConstraint(Var *partitionColumn)
 
 
 /*
- * UpdateConstraint updates a clause previously produced by BuildBaseConstraint
- * to use the minimum and maximum values from a provided shard interval.
+ * UpdateConstraint accepts a constraint previously produced by a call to
+ * BuildBaseConstraint and updates this constraint with the minimum and maximum
+ * values from the provided shard interval.
  */
 static void
 UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
@@ -546,7 +549,7 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 /*
  * GetOperatorByType returns the identifier of the operator implementing the
  * provided strategy (equal, greater than, etc.) for the provided type using
- * the provided access method (BTree, etc.)
+ * the provided access method (BTree, etc.).
  */
 static Oid
 GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
