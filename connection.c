@@ -104,7 +104,7 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
  * requested connection cannot be established, or if it was previously created
  * but is now in an unrecoverable bad state, this function returns NULL.
  *
- * Hostnames may not be longer than 255 characters.
+ * This function throws an error if a hostname over 255 characters is provided.
  */
 PGconn *
 GetConnection(char *nodeName, int32 nodePort)
@@ -113,6 +113,12 @@ GetConnection(char *nodeName, int32 nodePort)
 	NodeConnectionKey nodeConnectionKey;
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
+
+	/* Check input */
+	if (pg_strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
+	{
+		ereport(ERROR, (errmsg("hostnames may not exceed 255 characters")));
+	}
 
 	if (NodeConnectionHash == NULL)
 	{
@@ -138,7 +144,7 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (!entryFound)
 	{
-		connection = ConnectToNode(nodeConnectionKey.nodeName, nodePort);
+		connection = ConnectToNode(nodeName, nodePort);
 		if (connection != NULL)
 		{
 			nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
