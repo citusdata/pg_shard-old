@@ -166,7 +166,7 @@ GetConnection(char *nodeName, int32 nodePort)
 void PurgeConnection(PGconn *connection)
 {
 	NodeConnectionKey nodeConnectionKey;
-	NodeConnectionEntry *nodeConnectionEntry PG_USED_FOR_ASSERTS_ONLY = NULL;
+	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
 
 	char *nodeNameString = ConnectionGetOptionValue(connection, "host");
@@ -191,7 +191,14 @@ void PurgeConnection(PGconn *connection)
 									  HASH_REMOVE, &entryFound);
 	if (entryFound)
 	{
-		Assert(nodeConnectionEntry->connection == connection);
+		if (nodeConnectionEntry->connection != connection)
+		{
+			ereport(WARNING, (errmsg("hash entry for %s:%d contained different "
+									 "connection than that provided by caller",
+									 nodeConnectionKey.nodeName,
+									 nodeConnectionKey.nodePort)));
+			PQfinish(nodeConnectionEntry->connection);
+		}
 	}
 	else
 	{
