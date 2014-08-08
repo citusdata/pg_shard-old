@@ -14,19 +14,18 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
+#include "miscadmin.h"
+#include "pg_config_manual.h"
 #include "postgres_ext.h"
 
 #include "connection.h"
 
-#include <errno.h>
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "commands/dbcommands.h"
 #include "lib/stringinfo.h"
 #include "mb/pg_wchar.h"
-#include "miscadmin.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
@@ -109,8 +108,7 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 
 	if (connection == NULL)
 	{
-		ereport(ERROR, (errmsg("could not connect to node \"%s\" (on port %d)",
-							   nodeName, nodePort)));
+		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
 	}
 
 	result = PQexec(connection, sqlCommand.data);
@@ -146,14 +144,14 @@ GetConnection(char *nodeName, int32 nodePort)
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
 
-	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
-	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
-	nodeConnectionKey.nodePort = nodePort;
-
 	if (NodeConnectionHash == NULL)
 	{
 		NodeConnectionHash = CreateNodeConnectionHash();
 	}
+
+	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
+	strncpy(nodeConnectionKey.nodeName, nodeName, MAX_NODE_LENGTH);
+	nodeConnectionKey.nodePort = nodePort;
 
 	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 									  HASH_FIND, &entryFound);
@@ -176,7 +174,6 @@ GetConnection(char *nodeName, int32 nodePort)
 	else
 	{
 		connection = ConnectToNode(nodeConnectionKey.nodeName, nodePort);
-
 		if (connection != NULL)
 		{
 			nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
@@ -197,7 +194,7 @@ GetConnection(char *nodeName, int32 nodePort)
 void PurgeConnection(PGconn *connection)
 {
 	NodeConnectionKey nodeConnectionKey;
-	NodeConnectionEntry *nodeConnectionEntry = NULL;
+	NodeConnectionEntry *nodeConnectionEntry PG_USED_FOR_ASSERTS_ONLY = NULL;
 	bool entryFound = false;
 
 	PQconninfoOption *conninfoOptions = PQconninfo(connection);
@@ -206,44 +203,36 @@ void PurgeConnection(PGconn *connection)
 
 	for (PQconninfoOption *option = conninfoOptions; option != NULL; option++)
 	{
-		if (strncmp(option->keyword, "host", 4) == 0)
+		if (strncmp(option->keyword, "host", NAMEDATALEN) == 0)
 		{
 			strncpy(nodeConnectionKey.nodeName, option->val, MAX_NODE_LENGTH);
 		}
-		else if (strncmp(option->keyword, "port", 4) == 0)
+		else if (strncmp(option->keyword, "port", NAMEDATALEN) == 0)
 		{
-			long port = 0l;
-			char *end = NULL;
+			int32 port = pg_atoi(option->val, sizeof(int32), 0);
 
-			errno = 0;
-			port = strtol(option->val, &end, 10);
-
-			Assert(errno == 0);
-			Assert(port > INT_MIN);
-			Assert(port < INT_MAX);
-
-			nodeConnectionKey.nodePort = (int32) port;
+			nodeConnectionKey.nodePort = port;
 		}
-
-		conninfoOptions++;
 	}
+
+	PQconninfoFree(conninfoOptions);
 
 	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 									  HASH_REMOVE, &entryFound);
-
 	if (entryFound)
 	{
 		Assert(nodeConnectionEntry->connection == connection);
-
-		PQfinish(nodeConnectionEntry->connection);
 	}
 	else
 	{
-		ereport(WARNING, (errmsg("could not find hash entry for connection to "
-								 "%s on port %d", nodeConnectionKey.nodeName,
+		ereport(WARNING, (errmsg("could not find hash entry for connection to %s:%d",
+								 nodeConnectionKey.nodeName,
 								 nodeConnectionKey.nodePort)));
 	}
+
+	PQfinish(connection);
 }
+
 
 /*
  * ReportRemoteSqlError retrieves various error fields from the a remote result
@@ -371,7 +360,7 @@ ConnectToNode(char *nodeName, int32 nodePort)
 			GetDatabaseEncodingName(), CLIENT_CONNECT_TIMEOUT_SECONDS,
 			get_database_name(MyDatabaseId), NULL };
 
-	Assert(sizeof(keywordArray) == sizeof(keywordArray));
+	Assert(sizeof(keywordArray) == sizeof(valueArray));
 
 	for (int i = 0; (PQstatus(connection) != CONNECTION_OK) &&
 					(i < MAX_CONNECT_ATTEMPTS); i++)
