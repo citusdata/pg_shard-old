@@ -128,20 +128,15 @@ GetConnection(char *nodeName, int32 nodePort)
 	if (entryFound)
 	{
 		connection = nodeConnectionEntry->connection;
-
-		for (int i = 0; (PQstatus(connection) != CONNECTION_OK) &&
-						(i < MAX_CONNECT_ATTEMPTS); i++)
-		{
-			PQreset(connection);
-		}
-
 		if (PQstatus(connection) != CONNECTION_OK)
 		{
 			PurgeConnection(connection);
-			connection = NULL;
+
+			entryFound = false;
 		}
 	}
-	else
+
+	if (!entryFound)
 	{
 		connection = ConnectToNode(nodeConnectionKey.nodeName, nodePort);
 		if (connection != NULL)
