@@ -149,10 +149,11 @@ PlanDistributedInsert(Query *query, ModifyTable *modifyTable)
 	DistributedModifyTable *distributedModifyTable = NULL;
 	RangeTblEntry *resultRangeTableEntry = rt_fetch(query->resultRelation,
 													query->rtable);
-	Var *partitionColumn = PartitionColumn(resultRangeTableEntry->relid);
 
-	if (partitionColumn != NULL)
+	if (TableIsDistributed(resultRangeTableEntry->relid))
 	{
+		Var *partitionColumn = PartitionColumn(resultRangeTableEntry->relid);
+
 		VerifyInsertIsLegal(query, resultRangeTableEntry->relid);
 
 		distributedModifyTable = TransformModifyTable(modifyTable, query,

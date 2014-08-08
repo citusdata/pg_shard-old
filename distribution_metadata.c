@@ -79,11 +79,6 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	Oid outputFunctionId = InvalidOid;
 	bool isVarlena = false;
 
-	if (partitionColumn == NULL)
-	{
-		PG_RETURN_VOID();
-	}
-
 	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
 
 	/* then find min/max values' actual types */
@@ -298,7 +293,7 @@ LoadShardPlacementList(int64 shardId)
 /*
  * PartitionColumn looks up the column used to partition a given distributed
  * table and returns a reference to a Var representing that column. If no entry
- * can be found using the provided identifer, NULL is returned.
+ * can be found using the provided identifer, this function throws an error.
  */
 Var *
 PartitionColumn(Oid distributedTableId)
@@ -330,6 +325,11 @@ PartitionColumn(Oid distributedTableId)
 		char *partitionColumnName = TextDatumGetCString(keyDatum);
 
 		partitionColumn = ColumnNameToColumn(distributedTableId, partitionColumnName);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find partition for distributed "
+							   "relation %u", distributedTableId)));
 	}
 
 	heap_endscan(scanDesc);
@@ -383,6 +383,40 @@ PartitionType(Oid distributedTableId)
 	relation_close(heapRelation, AccessShareLock);
 
 	return partitionType;
+}
+
+
+/*
+ * TableIsDistributed simply returns whether the specified table is distributed.
+ */
+bool
+TableIsDistributed(Oid tableId)
+{
+	bool tableIsDistributed = false;
+	RangeVar *heapRangeVar = NULL;
+	Relation heapRelation = NULL;
+	HeapScanDesc scanDesc = NULL;
+	const int scanKeyCount = 1;
+	ScanKeyData scanKey[scanKeyCount];
+	HeapTuple heapTuple = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
+				F_OIDEQ, ObjectIdGetDatum(tableId));
+
+	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
+
+	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+
+	tableIsDistributed = HeapTupleIsValid(heapTuple);
+
+	heap_endscan(scanDesc);
+	relation_close(heapRelation, AccessShareLock);
+
+	return tableIsDistributed;
 }
 
 
