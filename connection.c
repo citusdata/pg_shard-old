@@ -76,7 +76,6 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 	appendStringInfo(&sqlCommand, TEST_SQL, elevel);
 
 	connection = GetConnection(nodeName, nodePort);
-
 	if (connection == NULL)
 	{
 		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
