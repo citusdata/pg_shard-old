@@ -42,7 +42,6 @@
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
-#include "utils/palloc.h"
 #include "utils/typcache.h"
 
 
@@ -62,7 +61,7 @@ static List * BuildPartitionValueRestrictInfoList(List *partitionValues,
 												  Var *partitionColumn);
 static List * PruneShardList(List *restrictInfoList, List *shardList,
 							 Var *partitionColumn);
-static FunctionCallInfo GetHashFunctionByType(Oid typeId);
+static FmgrInfo * GetHashFunctionByType(Oid typeId);
 static Node * BuildBaseConstraint(Var *partitionColumn);
 static void UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval);
 static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
@@ -350,7 +349,7 @@ FindTargetShardInterval(List *shardList, List *partitionValues, Var *partitionCo
 static List *
 BuildPartitionValueRestrictInfoList(List *partitionValues, Var *partitionColumn)
 {
-	FunctionCallInfo hashCallInfo = GetHashFunctionByType(partitionColumn->vartype);
+	FmgrInfo *fmgrInfo = GetHashFunctionByType(partitionColumn->vartype);
 
 	List *hashEqualityClauseList = NIL;
 	ListCell *columnValueCell = NULL;
@@ -376,9 +375,7 @@ BuildPartitionValueRestrictInfoList(List *partitionValues, Var *partitionColumn)
 		columnConst = (Const *) columnValue;
 		if (!columnConst->constisnull)
 		{
-			hashCallInfo->arg[0] = columnConst->constvalue;
-
-			hashValue = FunctionCallInvoke(hashCallInfo);
+			hashValue = FunctionCall1(fmgrInfo, columnConst->constvalue);
 		}
 
 		UpdateRightOpValue(hashEqualityExpr, hashValue);
@@ -441,29 +438,21 @@ PruneShardList(List *restrictInfoList, List *shardList, Var *partitionColumn)
 /*
  * GetHashFunctionByType locates a default hash function for a type using an Oid
  * for that type. This function raises an error if no such function exists.
- *
- * We assume all hash functions are unary.
  */
-static FunctionCallInfo
+static FmgrInfo *
 GetHashFunctionByType(Oid typeId)
 {
-	FunctionCallInfo fcinfo = (FunctionCallInfo) palloc0(sizeof(FunctionCallInfoData));
 	TypeCacheEntry *typeEntry = lookup_type_cache(typeId, TYPECACHE_HASH_PROC_FINFO);
+	FmgrInfo *fmgrInfo = &typeEntry->hash_proc_finfo;
 
-	if (!OidIsValid(typeEntry->hash_proc_finfo.fn_oid))
+	if (!OidIsValid(fmgrInfo->fn_oid))
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
 						errmsg("could not identify a hash function for type %s",
 							   format_type_be(typeId))));
 	}
 
-	InitFunctionCallInfoData(*fcinfo, &typeEntry->hash_proc_finfo, 1,
-							 InvalidOid, NULL, NULL);
-	fcinfo->arg[0] = 0;
-	fcinfo->argnull[0] = false;
-	fcinfo->isnull = false;
-
-	return fcinfo;
+	return fmgrInfo;
 }
 
 
