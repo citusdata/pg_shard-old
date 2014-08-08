@@ -339,16 +339,18 @@ ConnectToNode(char *nodeName, int32 nodePort)
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
 
-	for (int i = 0; (PQstatus(connection) != CONNECTION_OK) &&
-					(i < MAX_CONNECT_ATTEMPTS); i++)
+	for (int i = 0; i < MAX_CONNECT_ATTEMPTS; i++)
 	{
 		connection = PQconnectdbParams(keywordArray, valueArray, false);
-	}
-
-	if (PQstatus(connection) != CONNECTION_OK)
-	{
-		PQfinish(connection);
-		connection = NULL;
+		if (PQstatus(connection) == CONNECTION_OK)
+		{
+			break;
+		}
+		else
+		{
+			PQfinish(connection);
+			connection = NULL;
+		}
 	}
 
 	pfree(nodePortString.data);
