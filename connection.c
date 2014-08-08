@@ -44,6 +44,7 @@ static HTAB *NodeConnectionHash = NULL;
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
 static PGconn * ConnectToNode(char *nodeName, int32 nodePort);
+static char * ConnectionGetOptionValue(PGconn *connection, char *optionKeyword);
 
 
 /* declarations for dynamic loading */
@@ -115,7 +116,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	bool entryFound = false;
 
 	/* Check input */
-	if (pg_strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
+	if (strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
 	{
 		ereport(ERROR, (errmsg("hostnames may not exceed 255 characters")));
 	}
@@ -168,25 +169,23 @@ void PurgeConnection(PGconn *connection)
 	NodeConnectionEntry *nodeConnectionEntry PG_USED_FOR_ASSERTS_ONLY = NULL;
 	bool entryFound = false;
 
-	PQconninfoOption *conninfoOptions = PQconninfo(connection);
+	char *nodeNameString = ConnectionGetOptionValue(connection, "host");
+	char *nodePortString = ConnectionGetOptionValue(connection, "port");
 
-	memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
-
-	for (PQconninfoOption *option = conninfoOptions; option != NULL; option++)
+	if (nodeNameString != NULL && nodePortString != NULL)
 	{
-		if (strncmp(option->keyword, "host", NAMEDATALEN) == 0)
-		{
-			strncpy(nodeConnectionKey.nodeName, option->val, MAX_NODE_LENGTH);
-		}
-		else if (strncmp(option->keyword, "port", NAMEDATALEN) == 0)
-		{
-			int32 port = pg_atoi(option->val, sizeof(int32), 0);
+		int32 nodePort = pg_atoi(nodePortString, sizeof(int32), 0);
 
-			nodeConnectionKey.nodePort = port;
-		}
+		strncpy(nodeConnectionKey.nodeName, nodeNameString, MAX_NODE_LENGTH);
+		nodeConnectionKey.nodePort = nodePort;
+
+		pfree(nodeNameString);
+		pfree(nodePortString);
 	}
-
-	PQconninfoFree(conninfoOptions);
+	else
+	{
+		ereport(ERROR, (errmsg("connections must have host and port options set")));
+	}
 
 	nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
 									  HASH_REMOVE, &entryFound);
@@ -348,4 +347,30 @@ ConnectToNode(char *nodeName, int32 nodePort)
 	pfree(nodePortString.data);
 
 	return connection;
+}
+
+
+/*
+ * ConnectionGetOptionValue inspects the provided connection for an option with
+ * a given keyword and returns a new palloc'd string with that options's value.
+ * The function returns NULL if the connection has no setting for an option with
+ * the provided keyword.
+ */
+static char *
+ConnectionGetOptionValue(PGconn *connection, char *optionKeyword)
+{
+	char *optionValue = NULL;
+	PQconninfoOption *conninfoOptions = PQconninfo(connection);
+
+	for (PQconninfoOption *option = conninfoOptions; option != NULL; option++)
+	{
+		if (strncmp(option->keyword, optionKeyword, NAMEDATALEN) == 0)
+		{
+			optionValue = pstrdup(option->val);
+		}
+	}
+
+	PQconninfoFree(conninfoOptions);
+
+	return optionValue;
 }
