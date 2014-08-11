@@ -57,4 +57,5 @@ extern void ReportRemoteSqlError(PGresult *result, PGconn *connection,
 								 const char *sqlCommand);
 extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
 
+
 #endif /* PG_SHARD_CONNECTION_H */
