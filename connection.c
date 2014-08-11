@@ -64,14 +64,9 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 	PGconn *connection = NULL;
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
-	text *elevelText = PG_GETARG_TEXT_P(2);
 	PGresult *result;
 
 	char *nodeName = text_to_cstring(nodeText);
-	char *elevel = text_to_cstring(elevelText);
-
-	StringInfo sqlCommand = makeStringInfo();
-	appendStringInfo(sqlCommand, TEST_SQL, elevel);
 
 	connection = GetConnection(nodeName, nodePort);
 	if (connection == NULL)
@@ -79,16 +74,14 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
 	}
 
-	result = PQexec(connection, sqlCommand->data);
+	result = PQexec(connection, TEST_SQL);
 
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
 	{
-		ReportRemoteSqlError(ERROR, result, connection, true, sqlCommand->data);
+		ReportRemoteSqlError(result, connection, TEST_SQL);
 	}
 
 	PQclear(result);
-	pfree(sqlCommand->data);
-	pfree(sqlCommand);
 
 	PG_RETURN_VOID();
 }
@@ -219,21 +212,19 @@ void PurgeConnection(PGconn *connection)
 
 /*
  * ReportRemoteSqlError retrieves various error fields from the a remote result
- * and reports an error at the specified level. Callers should provide this
- * function with the actual SQL command previously sent to the remote server in
- * order to have it included in the user-facing error context string.
+ * and produces an error report at the WARNING level. Callers should provide
+ * this function with the actual SQL command previously sent to the remote
+ * server in order to have it included in the user-facing error context string.
  */
 void
-ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
-					 bool clearResult, const char *sqlCommand)
+ReportRemoteSqlError(PGresult *result, PGconn *connection, const char *sqlCommand)
 {
 	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
-	char *primaryMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
-	char *messageDetail = PQresultErrorField(result, PG_DIAG_MESSAGE_DETAIL);
-	char *messageHint = PQresultErrorField(result, PG_DIAG_MESSAGE_HINT);
-	char *errorContext = PQresultErrorField(result, PG_DIAG_CONTEXT);
+	char *remoteMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
 	int sqlState = ERRCODE_CONNECTION_FAILURE;
-	bool outputError = false;
+	char *nodeName = ConnectionGetOptionValue(connection, "host");
+	char *nodePort = ConnectionGetOptionValue(connection, "port");
+	char *errorPrefix = "Bad result from";
 
 	if (sqlStateString != NULL)
 	{
@@ -241,58 +232,25 @@ ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
 								 sqlStateString[3], sqlStateString[4]);
 	}
 
+	/* Use more specific error prefix for connection failures */
+	if (sqlState == ERRCODE_CONNECTION_FAILURE)
+	{
+		errorPrefix = "Connection failed to";
+	}
+
 	/*
 	 * If the PGresult did not contain a message, the connection may provide a
-	 * suitable top level one.
+	 * suitable top level one. At worst, this is an empty string.
 	 */
-	if (primaryMessage == NULL)
+	if (remoteMessage == NULL)
 	{
-		primaryMessage = PQerrorMessage(connection);
+		remoteMessage = PQerrorMessage(connection);
 	}
 
-	if (clearResult)
-	{
-		PQclear(result);
-	}
-
-	outputError = errstart(errorLevel, __FILE__, __LINE__, PG_FUNCNAME_MACRO,
-						   TEXTDOMAIN);
-
-	if (outputError)
-	{
-		errcode(sqlState);
-
-		if (primaryMessage != NULL)
-		{
-			errmsg_internal("%s", primaryMessage);
-		}
-		else
-		{
-			errmsg("unknown error");
-		}
-
-		if (messageDetail != NULL)
-		{
-			errdetail_internal("%s", messageDetail);
-		}
-
-		if (messageHint != NULL)
-		{
-			errhint("%s", messageHint);
-		}
-
-		if (errorContext != NULL)
-		{
-			errcontext("%s", errorContext);
-		}
-
-		if (sqlCommand != NULL)
-		{
-			errcontext("Remote SQL command: %s", sqlCommand);
-		}
-
-		errfinish(0);
-	}
+	ereport(WARNING, (errcode(sqlState),
+					  errmsg("%s %s:%s", errorPrefix, nodeName, nodePort),
+					  errdetail("Remote message: %s", remoteMessage),
+					  errcontext("Remote SQL command: %s", sqlCommand)));
 }
 
 
@@ -374,10 +332,11 @@ ConnectToNode(char *nodeName, int32 nodePort)
 static char *
 ConnectionGetOptionValue(PGconn *connection, char *optionKeyword)
 {
+
 	char *optionValue = NULL;
 	PQconninfoOption *conninfoOptions = PQconninfo(connection);
 
-	for (PQconninfoOption *option = conninfoOptions; option != NULL; option++)
+	for (PQconninfoOption *option = conninfoOptions; option->keyword != NULL; option++)
 	{
 		if (strncmp(option->keyword, optionKeyword, NAMEDATALEN) == 0)
 		{

@@ -30,7 +30,7 @@
 #define MAX_CONNECT_ATTEMPTS 2
 
 /* SQL statement for testing */
-#define TEST_SQL "DO $$ BEGIN RAISE %s 'Raised remotely!'; END $$"
+#define TEST_SQL "DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$"
 
 /*
  * NodeConnectionKey acts as the key to index into the (process-local) hash
@@ -53,8 +53,8 @@ typedef struct NodeConnectionEntry
 
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
-extern void ReportRemoteSqlError(int errorLevel, PGresult *result, PGconn *connection,
-								 bool clearResult, const char *sqlCommand);
+extern void ReportRemoteSqlError(PGresult *result, PGconn *connection,
+								 const char *sqlCommand);
 extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
 
 #endif /* PG_SHARD_CONNECTION_H */
