@@ -70,10 +70,8 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 	char *nodeName = text_to_cstring(nodeText);
 	char *elevel = text_to_cstring(elevelText);
 
-	StringInfoData sqlCommand;
-	initStringInfo(&sqlCommand);
-
-	appendStringInfo(&sqlCommand, TEST_SQL, elevel);
+	StringInfo sqlCommand = makeStringInfo();
+	appendStringInfo(sqlCommand, TEST_SQL, elevel);
 
 	connection = GetConnection(nodeName, nodePort);
 	if (connection == NULL)
@@ -81,14 +79,16 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
 	}
 
-	result = PQexec(connection, sqlCommand.data);
+	result = PQexec(connection, sqlCommand->data);
 
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
 	{
-		ReportRemoteSqlError(ERROR, result, connection, true, sqlCommand.data);
+		ReportRemoteSqlError(ERROR, result, connection, true, sqlCommand->data);
 	}
 
 	PQclear(result);
+	pfree(sqlCommand->data);
+	pfree(sqlCommand);
 
 	PG_RETURN_VOID();
 }
@@ -175,6 +175,7 @@ void PurgeConnection(PGconn *connection)
 	{
 		int32 nodePort = pg_atoi(nodePortString, sizeof(int32), 0);
 
+		memset(&nodeConnectionKey, 0, sizeof(nodeConnectionKey));
 		strncpy(nodeConnectionKey.nodeName, nodeNameString, MAX_NODE_LENGTH);
 		nodeConnectionKey.nodePort = nodePort;
 
@@ -190,6 +191,12 @@ void PurgeConnection(PGconn *connection)
 									  HASH_REMOVE, &entryFound);
 	if (entryFound)
 	{
+		/*
+		 * It's possible the provided connection matches the host and port for
+		 * an entry in the hash without being precisely the same connection. In
+		 * that case, we will want to close the hash's connection (because the
+		 * entry has already been removed) in addition to the provided one.
+		 */
 		if (nodeConnectionEntry->connection != connection)
 		{
 			ereport(WARNING, (errmsg("hash entry for %s:%d contained different "
@@ -325,20 +332,19 @@ static PGconn *
 ConnectToNode(char *nodeName, int32 nodePort)
 {
 	PGconn *connection = NULL;
-	StringInfoData nodePortString;
-	initStringInfo(&nodePortString);
-	appendStringInfo(&nodePortString, "%d", nodePort);
+	StringInfo nodePortString = makeStringInfo();
+	appendStringInfo(nodePortString, "%d", nodePort);
 
 	const char *keywordArray[] = { "host", "port", "fallback_application_name",
 			"client_encoding", "connect_timeout",
 			"dbname", NULL };
-	const char *valueArray[] = { nodeName, nodePortString.data, "pg_shard",
+	const char *valueArray[] = { nodeName, nodePortString->data, "pg_shard",
 			GetDatabaseEncodingName(), CLIENT_CONNECT_TIMEOUT_SECONDS,
 			get_database_name(MyDatabaseId), NULL };
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
 
-	for (int i = 0; i < MAX_CONNECT_ATTEMPTS; i++)
+	for (int attemptsMade = 0; attemptsMade < MAX_CONNECT_ATTEMPTS; attemptsMade++)
 	{
 		connection = PQconnectdbParams(keywordArray, valueArray, false);
 		if (PQstatus(connection) == CONNECTION_OK)
@@ -352,7 +358,8 @@ ConnectToNode(char *nodeName, int32 nodePort)
 		}
 	}
 
-	pfree(nodePortString.data);
+	pfree(nodePortString->data);
+	pfree(nodePortString);
 
 	return connection;
 }
