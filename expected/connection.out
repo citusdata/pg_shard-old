@@ -12,7 +12,6 @@ CREATE FUNCTION test_pg_shard_connection(text, integer)
 SELECT test_pg_shard_connection('localhost', 5432);
 WARNING:  Bad result from localhost:5432
 DETAIL:  Remote message: Raised remotely!
-CONTEXT:  Remote SQL command: DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$
  test_pg_shard_connection 
 --------------------------
  

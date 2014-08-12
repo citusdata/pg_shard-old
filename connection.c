@@ -78,7 +78,7 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
 	{
-		ReportRemoteSqlError(result, connection, TEST_SQL);
+		ReportRemoteSqlError(connection, result);
 	}
 
 	PQclear(result);
@@ -212,12 +212,10 @@ void PurgeConnection(PGconn *connection)
 
 /*
  * ReportRemoteSqlError retrieves various error fields from the a remote result
- * and produces an error report at the WARNING level. Callers should provide
- * this function with the actual SQL command previously sent to the remote
- * server in order to have it included in the user-facing error context string.
+ * and produces an error report at the WARNING level.
  */
 void
-ReportRemoteSqlError(PGresult *result, PGconn *connection, const char *sqlCommand)
+ReportRemoteSqlError(PGconn *connection, PGresult *result)
 {
 	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 	char *remoteMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
@@ -249,8 +247,7 @@ ReportRemoteSqlError(PGresult *result, PGconn *connection, const char *sqlComman
 
 	ereport(WARNING, (errcode(sqlState),
 					  errmsg("%s %s:%s", errorPrefix, nodeName, nodePort),
-					  errdetail("Remote message: %s", remoteMessage),
-					  errcontext("Remote SQL command: %s", sqlCommand)));
+					  errdetail("Remote message: %s", remoteMessage)));
 }
 
 
