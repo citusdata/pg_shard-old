@@ -242,7 +242,14 @@ ReportRemoteSqlError(PGconn *connection, PGresult *result)
 	 */
 	if (remoteMessage == NULL)
 	{
+		char *pos = NULL;
 		remoteMessage = PQerrorMessage(connection);
+
+		/* trim trailing newline, if any */
+		if ((pos = strchr(remoteMessage, '\n')) != NULL)
+		{
+		    *pos = '\0';
+		}
 	}
 
 	ereport(WARNING, (errcode(sqlState),
@@ -308,6 +315,12 @@ ConnectToNode(char *nodeName, int32 nodePort)
 		}
 		else
 		{
+			/* Warn if still erroring on final attempt */
+			if (attemptsMade == MAX_CONNECT_ATTEMPTS - 1)
+			{
+				ReportRemoteSqlError(connection, NULL);
+			}
+
 			PQfinish(connection);
 			connection = NULL;
 		}
