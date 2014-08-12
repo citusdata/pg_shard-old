@@ -329,7 +329,6 @@ ConnectToNode(char *nodeName, int32 nodePort)
 static char *
 ConnectionGetOptionValue(PGconn *connection, char *optionKeyword)
 {
-
 	char *optionValue = NULL;
 	PQconninfoOption *conninfoOptions = PQconninfo(connection);
 
