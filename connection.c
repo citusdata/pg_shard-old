@@ -299,12 +299,12 @@ ConnectToNode(char *nodeName, int32 nodePort)
 	StringInfo nodePortString = makeStringInfo();
 	appendStringInfo(nodePortString, "%d", nodePort);
 
+	const char *clientEncoding = GetDatabaseEncodingName();
+	const char *dbname = get_database_name(MyDatabaseId);
 	const char *keywordArray[] = { "host", "port", "fallback_application_name",
-			"client_encoding", "connect_timeout",
-			"dbname", NULL };
+			"client_encoding", "connect_timeout", "dbname", NULL };
 	const char *valueArray[] = { nodeName, nodePortString->data, "pg_shard",
-			GetDatabaseEncodingName(), CLIENT_CONNECT_TIMEOUT_SECONDS,
-			get_database_name(MyDatabaseId), NULL };
+			clientEncoding, CLIENT_CONNECT_TIMEOUT_SECONDS, dbname, NULL };
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
 
