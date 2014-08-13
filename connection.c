@@ -242,13 +242,15 @@ ReportRemoteError(PGconn *connection, PGresult *result)
 	 */
 	if (remoteMessage == NULL)
 	{
-		char *pos = NULL;
+		char *lastNewlineIndex = NULL;
+
 		remoteMessage = PQerrorMessage(connection);
+		lastNewlineIndex = strchr(remoteMessage, '\n');
 
 		/* trim trailing newline, if any */
-		if ((pos = strchr(remoteMessage, '\n')) != NULL)
+		if (lastNewlineIndex != NULL)
 		{
-		    *pos = '\0';
+		    *lastNewlineIndex = '\0';
 		}
 	}
 
