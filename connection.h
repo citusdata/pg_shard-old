@@ -53,7 +53,7 @@ typedef struct NodeConnectionEntry
 
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
-void ReportRemoteSqlError(PGconn *connection, PGresult *result);
+void ReportRemoteError(PGconn *connection, PGresult *result);
 extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
 
 

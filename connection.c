@@ -78,7 +78,7 @@ TestPgShardConnection(PG_FUNCTION_ARGS)
 
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
 	{
-		ReportRemoteSqlError(connection, result);
+		ReportRemoteError(connection, result);
 	}
 
 	PQclear(result);
@@ -212,11 +212,11 @@ void PurgeConnection(PGconn *connection)
 
 
 /*
- * ReportRemoteSqlError retrieves various error fields from the a remote result
- * and produces an error report at the WARNING level.
+ * ReportRemoteError retrieves various error fields from the a remote result and
+ * produces an error report at the WARNING level.
  */
 void
-ReportRemoteSqlError(PGconn *connection, PGresult *result)
+ReportRemoteError(PGconn *connection, PGresult *result)
 {
 	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 	char *remoteMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
@@ -319,7 +319,7 @@ ConnectToNode(char *nodeName, int32 nodePort)
 			/* Warn if still erroring on final attempt */
 			if (attemptsMade == MAX_CONNECT_ATTEMPTS - 1)
 			{
-				ReportRemoteSqlError(connection, NULL);
+				ReportRemoteError(connection, NULL);
 			}
 
 			PQfinish(connection);
