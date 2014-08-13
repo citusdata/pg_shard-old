@@ -220,21 +220,20 @@ ReportRemoteError(PGconn *connection, PGresult *result)
 {
 	char *sqlStateString = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 	char *remoteMessage = PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY);
-	int sqlState = ERRCODE_CONNECTION_FAILURE;
 	char *nodeName = ConnectionGetOptionValue(connection, "host");
 	char *nodePort = ConnectionGetOptionValue(connection, "port");
-	char *errorPrefix = "Bad result from";
+	char *errorPrefix = "Connection failed to";
+	int sqlState = ERRCODE_CONNECTION_FAILURE;
 
 	if (sqlStateString != NULL)
 	{
 		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1], sqlStateString[2],
 								 sqlStateString[3], sqlStateString[4]);
-	}
-
-	/* Use more specific error prefix for connection failures */
-	if (sqlState == ERRCODE_CONNECTION_FAILURE)
-	{
-		errorPrefix = "Connection failed to";
+		/* Use more specific error prefix for connection failures */
+		if (sqlState != ERRCODE_CONNECTION_FAILURE)
+		{
+			errorPrefix = "Bad result from";
+		}
 	}
 
 	/*
