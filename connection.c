@@ -114,9 +114,9 @@ GetConnection(char *nodeName, int32 nodePort)
 		ereport(ERROR, (errmsg("hostnames may not exceed 255 characters")));
 	}
 
+	/* if first call, initialize the connection hash */
 	if (NodeConnectionHash == NULL)
 	{
-		/* if first call, initialize the connection hash */
 		NodeConnectionHash = CreateNodeConnectionHash();
 	}
 
@@ -129,8 +129,11 @@ GetConnection(char *nodeName, int32 nodePort)
 	if (entryFound)
 	{
 		connection = nodeConnectionEntry->connection;
-		needNewConnection = (PQstatus(connection) != CONNECTION_OK);
-		if (needNewConnection)
+		if (PQstatus(connection) == CONNECTION_OK)
+		{
+			needNewConnection = false;
+		}
+		else
 		{
 			PurgeConnection(connection);
 		}
@@ -248,7 +251,7 @@ ReportRemoteError(PGconn *connection, PGresult *result)
 		char *lastNewlineIndex = NULL;
 
 		remoteMessage = PQerrorMessage(connection);
-		lastNewlineIndex = strchr(remoteMessage, '\n');
+		lastNewlineIndex = strrchr(remoteMessage, '\n');
 
 		/* trim trailing newline, if any */
 		if (lastNewlineIndex != NULL)
@@ -302,6 +305,7 @@ ConnectToNode(char *nodeName, char *nodePort)
 	PGconn *connection = NULL;
 	const char *clientEncoding = GetDatabaseEncodingName();
 	const char *dbname = get_database_name(MyDatabaseId);
+
 	const char *keywordArray[] = { "host", "port", "fallback_application_name",
 			"client_encoding", "connect_timeout", "dbname", NULL };
 	const char *valueArray[] = { nodeName, nodePort, "pg_shard",
