@@ -106,6 +106,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	NodeConnectionKey nodeConnectionKey;
 	NodeConnectionEntry *nodeConnectionEntry = NULL;
 	bool entryFound = false;
+	bool needNewConnection = true;
 
 	/* Check input */
 	if (strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
@@ -128,15 +129,14 @@ GetConnection(char *nodeName, int32 nodePort)
 	if (entryFound)
 	{
 		connection = nodeConnectionEntry->connection;
-		if (PQstatus(connection) != CONNECTION_OK)
+		needNewConnection = (PQstatus(connection) != CONNECTION_OK);
+		if (needNewConnection)
 		{
 			PurgeConnection(connection);
-
-			entryFound = false;
 		}
 	}
 
-	if (!entryFound)
+	if (needNewConnection)
 	{
 		connection = ConnectToNode(nodeName, nodePort);
 		if (connection != NULL)
