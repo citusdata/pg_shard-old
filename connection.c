@@ -115,6 +115,7 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (NodeConnectionHash == NULL)
 	{
+		/* if first call, initialize the connection hash */
 		NodeConnectionHash = CreateNodeConnectionHash();
 	}
 
