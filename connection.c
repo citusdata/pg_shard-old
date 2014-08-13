@@ -308,7 +308,7 @@ ConnectToNode(char *nodeName, int32 nodePort)
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
 
-	for (int attemptsMade = 0; attemptsMade < MAX_CONNECT_ATTEMPTS; attemptsMade++)
+	for (int attemptIndex = 0; attemptIndex < MAX_CONNECT_ATTEMPTS; attemptIndex++)
 	{
 		connection = PQconnectdbParams(keywordArray, valueArray, false);
 		if (PQstatus(connection) == CONNECTION_OK)
@@ -318,7 +318,7 @@ ConnectToNode(char *nodeName, int32 nodePort)
 		else
 		{
 			/* Warn if still erroring on final attempt */
-			if (attemptsMade == MAX_CONNECT_ATTEMPTS - 1)
+			if (attemptIndex == MAX_CONNECT_ATTEMPTS - 1)
 			{
 				ReportRemoteError(connection, NULL);
 			}
