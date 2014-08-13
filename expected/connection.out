@@ -1,0 +1,24 @@
+-- ===================================================================
+-- create test functions
+-- ===================================================================
+CREATE FUNCTION test_pg_shard_connection(text, integer)
+	RETURNS void
+	AS 'pg_shard', 'TestPgShardConnection'
+	LANGUAGE C STRICT;
+-- ===================================================================
+-- test connection hash functionality
+-- ===================================================================
+-- test connection to localhost raising an exception
+SELECT test_pg_shard_connection('localhost', 5432);
+WARNING:  Bad result from localhost:5432
+DETAIL:  Remote message: Raised remotely!
+ test_pg_shard_connection 
+--------------------------
+ 
+(1 row)
+
+-- test connection to non-existant machine
+SELECT test_pg_shard_connection('dummyhost', 5432);
+WARNING:  Connection failed to dummyhost:5432
+DETAIL:  Remote message: could not translate host name "dummyhost" to address: nodename nor servname provided, or not known
+ERROR:  could not connect to dummyhost:5432
