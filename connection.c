@@ -108,7 +108,7 @@ GetConnection(char *nodeName, int32 nodePort)
 	bool entryFound = false;
 	bool needNewConnection = true;
 
-	/* Check input */
+	/* check input */
 	if (strnlen(nodeName, MAX_NODE_LENGTH + 1) > MAX_NODE_LENGTH)
 	{
 		ereport(ERROR, (errmsg("hostnames may not exceed 255 characters")));
@@ -235,7 +235,7 @@ ReportRemoteError(PGconn *connection, PGresult *result)
 	{
 		sqlState = MAKE_SQLSTATE(sqlStateString[0], sqlStateString[1], sqlStateString[2],
 								 sqlStateString[3], sqlStateString[4]);
-		/* Use more specific error prefix for connection failures */
+		/* use more specific error prefix for connection failures */
 		if (sqlState != ERRCODE_CONNECTION_FAILURE)
 		{
 			errorPrefix = "Bad result from";
@@ -322,7 +322,7 @@ ConnectToNode(char *nodeName, char *nodePort)
 		}
 		else
 		{
-			/* Warn if still erroring on final attempt */
+			/* warn if still erroring on final attempt */
 			if (attemptIndex == MAX_CONNECT_ATTEMPTS - 1)
 			{
 				ReportRemoteError(connection, NULL);
