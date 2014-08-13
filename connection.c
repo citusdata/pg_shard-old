@@ -43,7 +43,7 @@ static HTAB *NodeConnectionHash = NULL;
 
 /* local function forward declarations */
 static HTAB * CreateNodeConnectionHash(void);
-static PGconn * ConnectToNode(char *nodeName, int32 nodePort);
+static PGconn * ConnectToNode(char *nodeName, char *nodePort);
 static char * ConnectionGetOptionValue(PGconn *connection, char *optionKeyword);
 
 
@@ -138,7 +138,10 @@ GetConnection(char *nodeName, int32 nodePort)
 
 	if (needNewConnection)
 	{
-		connection = ConnectToNode(nodeName, nodePort);
+		StringInfo nodePortString = makeStringInfo();
+		appendStringInfo(nodePortString, "%d", nodePort);
+
+		connection = ConnectToNode(nodeName, nodePortString->data);
 		if (connection != NULL)
 		{
 			nodeConnectionEntry = hash_search(NodeConnectionHash, &nodeConnectionKey,
@@ -287,23 +290,21 @@ CreateNodeConnectionHash(void)
 /*
  * ConnectToNode opens a connection to a remote PostgreSQL server. The function
  * configures the connection's fallback application name to 'pg_shard' and sets
- * the remote encoding to match the local one.
+ * the remote encoding to match the local one. This function requires that the
+ * port be specified as a string for easier use with libpq functions.
  *
  * We attempt to connect up to MAX_CONNECT_ATTEMPT times. After that we give up
  * and return NULL.
  */
 static PGconn *
-ConnectToNode(char *nodeName, int32 nodePort)
+ConnectToNode(char *nodeName, char *nodePort)
 {
 	PGconn *connection = NULL;
-	StringInfo nodePortString = makeStringInfo();
-	appendStringInfo(nodePortString, "%d", nodePort);
-
 	const char *clientEncoding = GetDatabaseEncodingName();
 	const char *dbname = get_database_name(MyDatabaseId);
 	const char *keywordArray[] = { "host", "port", "fallback_application_name",
 			"client_encoding", "connect_timeout", "dbname", NULL };
-	const char *valueArray[] = { nodeName, nodePortString->data, "pg_shard",
+	const char *valueArray[] = { nodeName, nodePort, "pg_shard",
 			clientEncoding, CLIENT_CONNECT_TIMEOUT_SECONDS, dbname, NULL };
 
 	Assert(sizeof(keywordArray) == sizeof(valueArray));
@@ -327,9 +328,6 @@ ConnectToNode(char *nodeName, int32 nodePort)
 			connection = NULL;
 		}
 	}
-
-	pfree(nodePortString->data);
-	pfree(nodePortString);
 
 	return connection;
 }
