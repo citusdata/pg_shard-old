@@ -1688,19 +1688,14 @@ pop_ancestor_plan(deparse_namespace *dpns, deparse_namespace *save_dpns)
 /* ----------
  * deparse_shard_query		- Parse back a query for execution on a shard
  *
- * Builds and returns the an SQL string to perform the provided query on a
- * specific shard.
+ * Builds an SQL string to perform the provided query on a specific shard and
+ * places this string into the provided buffer.
  * ----------
  */
-char *
-deparse_shard_query(Query *query, int64 shardid)
+void
+deparse_shard_query(Query *query, int64 shardid, StringInfo buffer)
 {
-	StringInfoData buf;
-	initStringInfo(&buf);
-
-	get_shard_query_def(query, &buf, NIL, shardid, NULL, 0, WRAP_COLUMN_DEFAULT, 0);
-
-	return buf.data;
+	get_shard_query_def(query, buffer, NIL, shardid, NULL, 0, WRAP_COLUMN_DEFAULT, 0);
 }
 
 

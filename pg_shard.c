@@ -42,23 +42,21 @@
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
+#include "utils/palloc.h"
 #include "utils/typcache.h"
 
 
 /* local forward declarations */
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
-static DistributedModifyTable * PlanDistributedInsert(Query *query,
-													  ModifyTable *ModifyTable);
+static DistributedPlan * PlanDistributedModify(Query *query, ModifyTable *modifyTable);
 static void VerifyInsertIsLegal(Query *query, Oid distributedTableId);
-static DistributedModifyTable * TransformModifyTable(ModifyTable *modifyTable,
-													 Query *query, Oid distributedTableId,
-													 Var *partitionColumn);
-static List * ExtractPartitionValues(Plan *sourcePlan, Var *partitionColumn);
-static ShardInterval * FindTargetShardInterval(List *shardList, List *partitionValues,
-											   Var *partitionColumn);
-static List * BuildPartitionValueRestrictInfoList(List *partitionValues,
-												  Var *partitionColumn);
+static DistributedPlannerInfo * BuildDistributedPlannerInfo(Query *query,
+															Oid distributedTableId);
+static void ExtractPartitionValues(DistributedPlannerInfo *distRoot, List *sourcePlans);
+static void FindTargetShardInterval(DistributedPlannerInfo *distRoot);
+static DistributedPlan * BuildDistributedPlan(DistributedPlannerInfo *distRoot);
+static List * BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot);
 static List * PruneShardList(List *restrictInfoList, List *shardList,
 							 Var *partitionColumn);
 static FmgrInfo * GetHashFunctionByType(Oid typeId);
@@ -67,6 +65,7 @@ static void UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
 static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static void UpdateRightOpValue(const OpExpr *clause, Datum value);
+
 
 
 /* declarations for dynamic loading */
@@ -113,6 +112,7 @@ static PlannedStmt *
 PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
+	DistributedPlan* distributedPlan = NULL;
 
 	/* call standard planner to have Query transformations performed */
 	/* TODO: Where do we call PreviousPlannerHook? */
@@ -122,7 +122,8 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 	{
 		case CMD_INSERT:
 		{
-			PlanDistributedInsert(query, (ModifyTable *) plannedStatement->planTree);
+			ModifyTable *modifyTable = (ModifyTable *) plannedStatement->planTree;
+			distributedPlan = PlanDistributedModify(query, modifyTable);
 			break;
 		}
 		default:
@@ -131,35 +132,47 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		}
 	}
 
+	if (distributedPlan != NULL)
+	{
+		plannedStatement->planTree = (Plan *) distributedPlan;
+	}
+
 	return plannedStatement;
 }
 
 
 /*
- * PlanDistributedInsert is the main entry point when planning an INSERT to a
- * distributed table. It checks whether the INSERT's target table is distributed
- * and produces a DistributedModifyTable node if so. Otherwise, this function
- * returns NULL to avoid further distributed processing.
+ * PlanDistributedModify is the main entry point when planning a modification of
+ * a distributed table. It checks whether the modification's target table is
+ * distributed and produces a DistributedPlan node if so. Otherwise, this
+ * function returns NULL to avoid further distributed processing.
  */
-static DistributedModifyTable *
-PlanDistributedInsert(Query *query, ModifyTable *modifyTable)
+static DistributedPlan *
+PlanDistributedModify(Query *query, ModifyTable *modifyTable)
 {
-	DistributedModifyTable *distributedModifyTable = NULL;
+	DistributedPlan *distributedPlan = NULL;
 	RangeTblEntry *resultRangeTableEntry = rt_fetch(query->resultRelation,
 													query->rtable);
+	Oid resultTableId = resultRangeTableEntry->relid;
 
-	if (TableIsDistributed(resultRangeTableEntry->relid))
+	if (TableIsDistributed(resultTableId))
 	{
-		Var *partitionColumn = PartitionColumn(resultRangeTableEntry->relid);
+		DistributedPlannerInfo *distRoot = NULL;
 
-		VerifyInsertIsLegal(query, resultRangeTableEntry->relid);
+		/* check that the insert is legal at all */
+		VerifyInsertIsLegal(query, resultTableId);
 
-		distributedModifyTable = TransformModifyTable(modifyTable, query,
-													  resultRangeTableEntry->relid,
-													  partitionColumn);
+		distRoot = BuildDistributedPlannerInfo(query, resultTableId);
+
+		/* use values of partition columns to determine shard */
+		ExtractPartitionValues(distRoot, modifyTable->plans);
+		FindTargetShardInterval(distRoot);
+
+		/* use accumulated planner state to generate plan */
+		distributedPlan = BuildDistributedPlan(distRoot);
 	}
 
-	return distributedModifyTable;
+	return distributedPlan;
 }
 
 
@@ -200,69 +213,39 @@ VerifyInsertIsLegal(Query *query, Oid distributedTableId)
 
 
 /*
- * TransformModifyTable accepts a standard ModifyTable plan node and produces a
- * corresponding DistributedModifyTable node populated with information needed
- * by the executor to perform an INSERT to a distributed table.
+ * BuildDistributedPlannerInfo creates an object to encapsulate common state
+ * used by the planner during distributed query planning. Prepopulates the state
+ * with the query object, Oid of the distributed table, and partition column.
  */
-static DistributedModifyTable *
-TransformModifyTable(ModifyTable *modifyTable, Query *query,
-					 Oid distributedTableId, Var *partitionColumn)
+static DistributedPlannerInfo *
+BuildDistributedPlannerInfo(Query *query, Oid distributedTableId)
 {
-	DistributedModifyTable *distributedModifyTable = NULL;
-	Plan *sourcePlan = NULL;
-	List *partitionValues = NIL;
-	List *shardList = LoadShardList(distributedTableId);
-	ShardInterval *targetShardInterval = NULL;
-	List *shardPlacements = NIL;
+	DistributedPlannerInfo *distRoot = NULL;
 
-	distributedModifyTable = makeDistNode(DistributedModifyTable);
+	distRoot = makeDistNode(DistributedPlannerInfo);
 
-	/* Fill plan with dummy values for now. */
-	distributedModifyTable->distributedPlan.plan.startup_cost = 0;
-	distributedModifyTable->distributedPlan.plan.total_cost = 0;
-	distributedModifyTable->distributedPlan.plan.plan_rows = 0;
-	distributedModifyTable->distributedPlan.plan.plan_width = 0;
+	distRoot->query = query;
+	distRoot->distributedTableId = distributedTableId;
+	distRoot->partitionColumn = PartitionColumn(distributedTableId);
 
-	/* Copy over Oid of distributed table */
-	distributedModifyTable->distributedPlan.relationId = distributedTableId;
-
-	distributedModifyTable->operation = CMD_INSERT;
-
-	Assert(list_length(modifyTable->plans) == 1);
-	sourcePlan = linitial(modifyTable->plans);
-
-	Assert(IsA(sourcePlan, Result) || IsA(sourcePlan, ValuesScan));
-	distributedModifyTable->sourcePlan = sourcePlan;
-
-	partitionValues = ExtractPartitionValues(distributedModifyTable->sourcePlan,
-											 partitionColumn);
-	targetShardInterval = FindTargetShardInterval(shardList, partitionValues,
-												  partitionColumn);
-
-	shardPlacements = LoadShardPlacementList(targetShardInterval->id);
-	distributedModifyTable->shardPlacements = shardPlacements;
-
-	distributedModifyTable->sql = makeStringInfo();
-	distributedModifyTable->sql->data = deparse_shard_query(query,
-															targetShardInterval->id);
-
-	ereport(INFO, (errmsg("Distributed SQL: %s", distributedModifyTable->sql->data)));
-
-	return distributedModifyTable;
+	return distRoot;
 }
 
 
 /*
- * ExtractPartitionValues extracts partition column values from the source plan
- * field of a modify table node. The subplan must be either a ValuesScan node or
- * a Result. Returns a list of expressions.
+ * ExtractPartitionValues extracts partition column values from a list of source
+ * plans. For now, exactly one source plan is expected and must be either a
+ * ValuesScan node or a Result. Once a list of partition column values has been
+ * computed, this function saves it in the provided DistributedPlannerInfo.
  */
-static List *
-ExtractPartitionValues(Plan *sourcePlan, Var *partitionColumn)
+static void
+ExtractPartitionValues(DistributedPlannerInfo *distRoot, List *sourcePlans)
 {
 	List *partitionColumnValues = NIL;
+	Plan *sourcePlan = (Plan *) linitial(sourcePlans);
 	TargetEntry *targetEntry = get_tle_by_resno(sourcePlan->targetlist,
-												partitionColumn->varattno);
+												distRoot->partitionColumn->varattno);
+	Assert(list_length(modifyTable->plans) == 1);
 
 	switch(nodeTag(sourcePlan))
 	{
@@ -302,21 +285,24 @@ ExtractPartitionValues(Plan *sourcePlan, Var *partitionColumn)
 		}
 	}
 
-	return partitionColumnValues;
+	distRoot->partitionValues = partitionColumnValues;
 }
 
 
 /*
  * FindTargetShardInterval locates a single shard capable of receiving rows with
- * the specified partition values. If no such shard exists (or if more than one
- * does), this method throws an error.
+ * the specified partition values and saves its id in the provided distributed
+ * planner info instance. If no such shard exists (or if more than one does),
+ * this method throws an error.
  */
-static ShardInterval *
-FindTargetShardInterval(List *shardList, List *partitionValues, Var *partitionColumn)
+static void
+FindTargetShardInterval(DistributedPlannerInfo *distRoot)
 {
-	List *restrictInfoList = BuildPartitionValueRestrictInfoList(partitionValues,
-																 partitionColumn);
-	List *shardIntervals = PruneShardList(restrictInfoList, shardList, partitionColumn);
+	List *shardList = LoadShardList(distRoot->distributedTableId);
+	List *restrictInfoList = BuildPartitionValueRestrictInfoList(distRoot);
+	List *shardIntervals = PruneShardList(restrictInfoList, shardList,
+										  distRoot->partitionColumn);
+	ShardInterval *targetShard = NULL;
 
 	if (list_length(shardIntervals) == 0)
 	{
@@ -329,16 +315,39 @@ FindTargetShardInterval(List *shardList, List *partitionValues, Var *partitionCo
 							   "one shard at a time")));
 	}
 
-	return (ShardInterval *) linitial(shardIntervals);
+	targetShard = (ShardInterval *) linitial(shardIntervals);
+	distRoot->shardId = targetShard->id;
+}
+
+
+/*
+ * BuildDistributedPlan constructs a distributed plan using information which
+ * has been collected in a DistributedPlannerInfo instance.
+ */
+static DistributedPlan *
+BuildDistributedPlan(DistributedPlannerInfo *distRoot)
+{
+	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
+	List *shardPlacementList = LoadShardPlacementList(distRoot->shardId);
+
+	Task *task = (Task *) palloc0(sizeof(Task));
+
+	task->queryString = makeStringInfo();
+
+	deparse_shard_query(distRoot->query, distRoot->shardId, task->queryString);
+	task->taskPlacementList = shardPlacementList;
+
+	distributedPlan->taskList = list_make1(task);
+
+	return distributedPlan;
 }
 
 
 /*
  * BuildPartitionValueRestrictInfoList builds a single-element list containing a
- * RestrictInfo node whose clause is a disjunction of equality clauses between
- * the provided partition column and hashes of the partition values. This is to
- * express the idea that the hash of a given row's partition value can take on
- * any one of a finite set of values.
+ * RestrictInfo node. This node represents an OR clause of equality constraints
+ * between the partition column the hashes of values appearing in that column
+ * during this modification.
  *
  * The provided partition values must be Const nodes: if it was impossible to
  * reduce the partition column value for a particular row to a constant, then
@@ -347,20 +356,20 @@ FindTargetShardInterval(List *shardList, List *partitionValues, Var *partitionCo
  * NULL values always hash to zero.
  */
 static List *
-BuildPartitionValueRestrictInfoList(List *partitionValues, Var *partitionColumn)
+BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot)
 {
-	FmgrInfo *fmgrInfo = GetHashFunctionByType(partitionColumn->vartype);
+	FmgrInfo *fmgrInfo = GetHashFunctionByType(distRoot->partitionColumn->vartype);
 
 	List *hashEqualityClauseList = NIL;
 	ListCell *columnValueCell = NULL;
 	Expr *orClause = NULL;
 	RestrictInfo *hashEqualityRestrictInfo = NULL;
 
-	foreach(columnValueCell, partitionValues)
+	foreach(columnValueCell, distRoot->partitionValues)
 	{
 		Expr *columnValue = (Expr *) lfirst(columnValueCell);
 		Const *columnConst = NULL;
-		OpExpr *hashEqualityExpr = MakeOpExpression(partitionColumn,
+		OpExpr *hashEqualityExpr = MakeOpExpression(distRoot->partitionColumn,
 													BTEqualStrategyNumber);
 		/* use zero as the default value if column val is NULL */
 		Datum hashValue = Int64GetDatum(0);
@@ -410,14 +419,13 @@ PruneShardList(List *restrictInfoList, List *shardList, Var *partitionColumn)
 	{
 		uint64 *shardIdPointer = (uint64 *) lfirst(shardCell);
 		uint64 shardId = (*shardIdPointer);
-		List *constraintList = NIL;
+		List *constraintList = list_make1(baseConstraint);
 		bool shardPruned = false;
 
 		ShardInterval *shardInterval = LoadShardInterval(shardId);
 
 		/* set the min/max values in the base constraint */
 		UpdateConstraint(baseConstraint, shardInterval);
-		constraintList = list_make1(baseConstraint);
 
 		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
 		if (shardPruned)
@@ -509,15 +517,12 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 	Oid typeModId = variable->vartypmod;
 	Oid collationId = variable->varcollid;
 
-	Oid accessMethodId = BTREE_AM_OID;
-	Oid operatorId = InvalidOid;
-	Const  *constantValue = NULL;
-	OpExpr *expression = NULL;
-
 	/* Load the operator from system catalogs */
-	operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+	Oid accessMethodId = BTREE_AM_OID;
+	Oid operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
 
-	constantValue = makeNullConst(typeId, typeModId, collationId);
+	Const  *constantValue = makeNullConst(typeId, typeModId, collationId);
+	OpExpr *expression = NULL;
 
 	/* Now make the expression with the given variable and a null constant */
 	expression = (OpExpr *) make_opclause(operatorId,

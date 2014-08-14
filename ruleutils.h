@@ -16,9 +16,10 @@
 
 #include "c.h"
 
+#include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
 
 
-extern char * deparse_shard_query(Query *query, int64 shardid);
+extern void deparse_shard_query(Query *query, int64 shardid, StringInfo buffer);
 
 #endif /* PG_SHARD_RULEUTILS_H */
