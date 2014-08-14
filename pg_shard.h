@@ -31,7 +31,6 @@
  */
 #define makeDistNode(_type_) \
 (	_Pragma ("GCC diagnostic push") \
-	_Pragma ("GCC diagnostic ignored \"-Wgnu-statement-expression\"") \
 	_Pragma ("GCC diagnostic ignored \"-Wenum-conversion\"") \
 	makeNode(_type_) \
 	_Pragma ("GCC diagnostic pop") \
