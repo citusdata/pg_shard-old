@@ -10,7 +10,6 @@
  */
 
 #include "postgres.h"
-#include "fmgr.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
 #include "pg_config_manual.h"
@@ -43,46 +42,6 @@ static HTAB *NodeConnectionHash = NULL;
 static HTAB * CreateNodeConnectionHash(void);
 static PGconn * ConnectToNode(char *nodeName, char *nodePort);
 static char * ConnectionGetOptionValue(PGconn *connection, char *optionKeyword);
-
-
-/* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(TestPgShardConnection);
-
-
-/*
- * TestPgShardConnection accepts three arguments: a hostname, port, and error
- * level. It connects to the host on the specified port and issues a RAISE at
- * the specified level.
- *
- * Intended for use in regression tests.
- */
-Datum
-TestPgShardConnection(PG_FUNCTION_ARGS)
-{
-	PGconn *connection = NULL;
-	text *nodeText = PG_GETARG_TEXT_P(0);
-	int32 nodePort = PG_GETARG_INT32(1);
-	PGresult *result;
-
-	char *nodeName = text_to_cstring(nodeText);
-
-	connection = GetConnection(nodeName, nodePort);
-	if (connection == NULL)
-	{
-		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
-	}
-
-	result = PQexec(connection, TEST_SQL);
-
-	if (PQresultStatus(result) != PGRES_COMMAND_OK)
-	{
-		ReportRemoteError(connection, result);
-	}
-
-	PQclear(result);
-
-	PG_RETURN_VOID();
-}
 
 
 /*

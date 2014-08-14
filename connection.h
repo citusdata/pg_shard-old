@@ -13,9 +13,7 @@
 #ifndef PG_SHARD_CONNECTION_H
 #define PG_SHARD_CONNECTION_H
 
-#include "postgres.h"
 #include "c.h"
-#include "fmgr.h"
 #include "libpq-fe.h"
 
 
@@ -55,7 +53,6 @@ typedef struct NodeConnectionEntry
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
 extern void ReportRemoteError(PGconn *connection, PGresult *result);
-extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_CONNECTION_H */
