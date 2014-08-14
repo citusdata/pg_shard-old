@@ -12,6 +12,6 @@ DATA = pg_shard--develop.sql
 
 REGRESS = init connection distribution_metadata
 
-PG_CONFIG = /usr/local/pgsql/bin/pg_config
+PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
