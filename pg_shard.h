@@ -26,15 +26,11 @@
 
 
 /*
- * Wrap makeNode to suppress compiler warnings. A DistributedNodeTag will be
- * compared to a NodeTag, which isn't smiled upon by the compiler.
+ * Wrap newNode to force a cast of its second argument to NodeTag. This avoids
+ * warnings when the macro expansion assigns a DistributedNodeTag value to a
+ * field with type NodeTag.
  */
-#define makeDistNode(_type_) \
-(	_Pragma ("GCC diagnostic push") \
-	_Pragma ("GCC diagnostic ignored \"-Wenum-conversion\"") \
-	makeNode(_type_) \
-	_Pragma ("GCC diagnostic pop") \
-)
+#define makeDistNode(_type_) ((_type_ *) newNode(sizeof(_type_), (NodeTag) T_##_type_))
 
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of
