@@ -25,6 +25,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "catalog/pg_type.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "utils/builtins.h"
@@ -33,9 +34,129 @@
 
 
 /* declarations for dynamic loading */
+PG_FUNCTION_INFO_V1(PopulateTempTable);
+PG_FUNCTION_INFO_V1(CountTempTable);
+PG_FUNCTION_INFO_V1(GetAndPurgeConnection);
 PG_FUNCTION_INFO_V1(TestDistributionMetadata);
-PG_FUNCTION_INFO_V1(TestPgShardConnection);
 
+
+/* local function forward declarations */
+static PGconn * GetConnectionOrRaiseError(text *nodeText, int32 nodePort);
+static Datum ExtractIntegerDatum(char *input);
+
+
+/*
+ * PopulateTempTable connects to a specified host on a specified port and
+ * creates a temporary table with 100 rows. Because the table is temporary, it
+ * will be visible if a connection is reused but not if a new connection is
+ * opened to the node.
+ */
+Datum
+PopulateTempTable(PG_FUNCTION_ARGS)
+{
+	text *nodeText = PG_GETARG_TEXT_P(0);
+	int32 nodePort = PG_GETARG_INT32(1);
+	PGconn *connection = GetConnectionOrRaiseError(nodeText, nodePort);
+	PGresult *result = PQexec(connection, POPULATE_TEMP_TABLE);
+
+	if (PQresultStatus(result) != PGRES_COMMAND_OK)
+	{
+		ReportRemoteError(connection, result);
+	}
+
+	PQclear(result);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * CountTempTable just returns the integer count of rows in the table created
+ * by PopulateTempTable. If no such table exists, this function emits a warning
+ * and returns 0.
+ */
+Datum
+CountTempTable(PG_FUNCTION_ARGS)
+{
+	text *nodeText = PG_GETARG_TEXT_P(0);
+	int32 nodePort = PG_GETARG_INT32(1);
+	PGconn *connection = GetConnectionOrRaiseError(nodeText, nodePort);
+	PGresult *result = PQexec(connection, COUNT_TEMP_TABLE);
+	Datum count = 0;
+
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		count = Int32GetDatum(0);
+	}
+	else
+	{
+		char *countText = PQgetvalue(result, 0, 0);
+		count = ExtractIntegerDatum(countText);
+	}
+
+	PQclear(result);
+
+	PG_RETURN_DATUM(count);
+}
+
+
+/*
+ * GetAndPurgeConnection first gets a connection using the provided hostname and
+ * port before immediately passing that connection to PurgeConnection. Simply a
+ * wrapper around PurgeConnection that uses hostname/port rather than PGconn.
+ */
+Datum
+GetAndPurgeConnection(PG_FUNCTION_ARGS)
+{
+	text *nodeText = PG_GETARG_TEXT_P(0);
+	int32 nodePort = PG_GETARG_INT32(1);
+	PGconn *connection = GetConnectionOrRaiseError(nodeText, nodePort);
+
+	PurgeConnection(connection);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * GetConnectionOrRaiseError just wraps GetConnection to throw an error if no
+ * connection can be established.
+ */
+static PGconn *
+GetConnectionOrRaiseError(text *nodeText, int32 nodePort)
+{
+	char *nodeName = text_to_cstring(nodeText);
+
+	PGconn *connection = GetConnection(nodeName, nodePort);
+	if (connection == NULL)
+	{
+		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
+	}
+
+	return connection;
+}
+
+
+/*
+ * ExtractIntegerDatum transforms an integer in textual form into a Datum.
+ */
+static Datum
+ExtractIntegerDatum(char *input)
+{
+	Oid typiofunc = InvalidOid;
+	Oid typioparam = InvalidOid;
+	Datum intDatum = 0;
+	FmgrInfo fmgrInfo;
+	memset(&fmgrInfo, 0, sizeof(fmgrInfo));
+
+	getTypeInputInfo(INT4OID, &typiofunc, &typioparam);
+	fmgr_info(typiofunc, &fmgrInfo);
+
+	intDatum = InputFunctionCall(&fmgrInfo, input, typiofunc, -1);
+
+	return intDatum;
+}
 
 /*
  * TestDistributionMetadata prints all current shard and shard placement
@@ -108,38 +229,3 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-
-/*
- * TestPgShardConnection accepts three arguments: a hostname, port, and error
- * level. It connects to the host on the specified port and issues a RAISE at
- * the specified level.
- *
- * Intended for use in regression tests.
- */
-Datum
-TestPgShardConnection(PG_FUNCTION_ARGS)
-{
-	PGconn *connection = NULL;
-	text *nodeText = PG_GETARG_TEXT_P(0);
-	int32 nodePort = PG_GETARG_INT32(1);
-	PGresult *result;
-
-	char *nodeName = text_to_cstring(nodeText);
-
-	connection = GetConnection(nodeName, nodePort);
-	if (connection == NULL)
-	{
-		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
-	}
-
-	result = PQexec(connection, TEST_SQL);
-
-	if (PQresultStatus(result) != PGRES_COMMAND_OK)
-	{
-		ReportRemoteError(connection, result);
-	}
-
-	PQclear(result);
-
-	PG_RETURN_VOID();
-}

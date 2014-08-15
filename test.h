@@ -17,10 +17,17 @@
 #include "postgres.h"
 #include "fmgr.h"
 
-/* SQL statement for testing */
-#define TEST_SQL "DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$"
 
+/* SQL statements for testing */
+#define POPULATE_TEMP_TABLE "CREATE TEMPORARY TABLE numbers " \
+							"AS SELECT * FROM generate_series(1, 100);"
+#define COUNT_TEMP_TABLE "SELECT COUNT(*) FROM numbers;"
+
+
+extern Datum PopulateTempTable(PG_FUNCTION_ARGS);
+extern Datum CountTempTable(PG_FUNCTION_ARGS);
+extern Datum GetAndPurgeConnection(PG_FUNCTION_ARGS);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
-extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
+
 
 #endif /* PG_SHARD_TEST_H */
