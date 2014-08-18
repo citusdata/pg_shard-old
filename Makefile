@@ -1,8 +1,8 @@
 # Makefile
 
 MODULE_big = pg_shard
-OBJS = pg_shard.o connection.o distribution_metadata.o generate_ddl_commands.o \
-	extend_ddl_commands.o partition_protocol.o
+OBJS = connection.o distribution_metadata.o extend_ddl_commands.o \
+	generate_ddl_commands.o partition_protocol.o pg_shard.o
 
 PG_CPPFLAGS = -std=c99 -pedantic -Wall -Wextra -I$(libpq_srcdir)
 

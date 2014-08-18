@@ -1,7 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * extend_ddl_commands.c
- *			functions to extend ddl commands for a table.
+ *			Functions to extend ddl commands for a table. This file contains
+ *			functions which are borrowed from CitusDB.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
@@ -17,8 +18,7 @@
 #include "catalog/heap.h"
 #include "catalog/namespace.h"
 #include "commands/defrem.h"
-#include "extend_ddl_commands.h"
-#include "generate_ddl_commands.h"
+#include "ddl_commands.h"
 #include "lib/stringinfo.h"
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
@@ -401,6 +401,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 				StringInfo setStorageString = makeStringInfo();
 				char *storageType = NULL;
 				char *columnName = alterTableCommand->name;
+
 				Assert(IsA(alterTableCommand->def, String));
 				storageType = strVal(alterTableCommand->def);
 
@@ -419,6 +420,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 				StringInfo setStatisticsString = makeStringInfo();
 				int newStatsTarget = 0;
 				char *columnName = alterTableCommand->name;
+
 				Assert(IsA(alterTableCommand->def, Integer));
 				newStatsTarget = intVal(alterTableCommand->def);
 
@@ -735,9 +737,9 @@ cookConstraint(ParseState *parseState, Node *rawConstraint, char *relationName)
 static char *
 DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 {
-	List *indexParamsList = NIL;
-	ListCell *indexParamsCell = NULL;
-	bool firstOptionPrinted = false;
+	List *indexElementList = NIL;
+	ListCell *indexElementCell = NULL;
+	bool firstElementPrinted = false;
 	char *relationName = indexStmt->relation->relname;
 	char *schemaName = indexStmt->relation->schemaname;
 	char *qualifiedTableName = quote_qualified_identifier(schemaName, relationName);
@@ -764,15 +766,16 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 					 quote_identifier(indexStmt->accessMethod));
 
 	/* add the columns or expression for this index */
-	indexParamsList = indexStmt->indexParams;
-	foreach(indexParamsCell, indexParamsList)
+	indexElementList = indexStmt->indexParams;
+	foreach(indexElementCell, indexElementList)
 	{
-		IndexElem *indexElem = (IndexElem *) lfirst(indexParamsCell);
-		if (firstOptionPrinted)
+		IndexElem *indexElem = (IndexElem *) lfirst(indexElementCell);
+
+		if (firstElementPrinted)
 		{
 			appendStringInfoString(deparsedIndexStmt, ", ");
 		}
-		firstOptionPrinted = true;
+		firstElementPrinted = true;
 
 		if (indexElem->name != NULL)
 		{
@@ -782,11 +785,8 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		{
 			Node *expression = indexElem->expr;
 			char *masterRelationName = get_rel_name(masterRelationId);
-			List *exprContext = deparse_context_for(masterRelationName,
-													masterRelationId);
-			char *exprString = deparse_expression(expression,
-												  exprContext,
-												  false, false);
+			List *exprContext = deparse_context_for(masterRelationName, masterRelationId);
+			char *exprString = deparse_expression(expression, exprContext, false, false);
 			
 			/* add parentheses if it's not a bare function call */
 			if (IsA(expression, FuncExpr) &&
@@ -805,8 +805,8 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		{
 			char *collationName = NULL;
 			char *schemaName = NULL;
-			DeconstructQualifiedName(indexElem->collation, &schemaName, &collationName);
 
+			DeconstructQualifiedName(indexElem->collation, &schemaName, &collationName);
 			appendStringInfo(deparsedIndexStmt, " COLLATE %s",
 							 quote_identifier(collationName));
 		}
@@ -816,6 +816,7 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		{
 			char *opClassName = NULL;
 			char *schemaName = NULL;
+
 			DeconstructQualifiedName(indexElem->opclass, &schemaName, &opClassName);
 			appendStringInfo(deparsedIndexStmt, " %s", opClassName);
 		}
@@ -877,7 +878,13 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 		appendStringInfo(deparsedIndexStmt, ")");
 	}
 
-	/* XXX partial index */
+	/* we don't support partial indexes yet */
+	if (indexStmt->whereClause)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot deparse index: %s", indexStmt->idxname),
+						errdetail("Partial indexes are currently unsupported")));
+	}
 
 	return deparsedIndexStmt->data;
 }

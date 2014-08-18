@@ -27,6 +27,7 @@ CREATE SCHEMA pgs_distribution_metadata
 	-- partition lists a partition key for each distributed table
 	CREATE TABLE partition (
 		relation_id oid unique not null,
+		partition_method char not null,
 		key text not null
 	)
 
@@ -47,3 +48,9 @@ SELECT pg_catalog.pg_extension_config_dump(
 	'pgs_distribution_metadata.shard_placement', '');
 SELECT pg_catalog.pg_extension_config_dump(
 	'pgs_distribution_metadata.partition', '');
+
+-- define the shard creation function
+CREATE FUNCTION master_create_distributed_table(tablename text, partitioncolumn text,
+	shardcount integer DEFAULT 32, replicationfactor integer DEFAULT 2)
+RETURNS void
+LANGUAGE C IMMUTABLE STRICT AS 'MODULE_PATHNAME';

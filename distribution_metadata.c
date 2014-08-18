@@ -28,7 +28,11 @@
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "access/tupdesc.h"
+#include "access/xact.h"
+#include "catalog/indexing.h"
+#include "catalog/namespace.h"
 #include "catalog/pg_type.h"
+#include "commands/sequence.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -465,4 +469,228 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	shardPlacement->nodePort = DatumGetInt32(nodePortDatum);
 
 	return shardPlacement;
+}
+
+
+/*
+ * InsertPartitionRow opens the partition metadata table and inserts a new row
+ * with the given values.
+ */
+void
+InsertPartitionRow(Oid relationId, char partitionType, text *partitionKeyText)
+{
+	Relation pgPartition = NULL;
+	TupleDesc tupleDescriptor = NULL;
+	HeapTuple heapTuple = NULL;
+	Datum values[PARTITION_TABLE_ATTRIBUTE_COUNT];
+	bool isNulls[PARTITION_TABLE_ATTRIBUTE_COUNT];
+	StringInfo partitionTableName = makeStringInfo();
+	StringInfo partitionTypeString = makeStringInfo();
+	Oid partitionRelationId = InvalidOid;
+
+	appendStringInfo(partitionTableName, "%s.%s", METADATA_SCHEMA_NAME,
+					 PARTITION_TABLE_NAME);
+	partitionRelationId = ResolveRelationId(partitionTableName->data);
+
+	appendStringInfoChar(partitionTypeString, partitionType);
+
+	/* form new shard tuple */
+	memset(values, 0, sizeof(values));
+	memset(isNulls, false, sizeof(isNulls));
+
+	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(relationId);
+	values[ATTR_NUM_PARTITION_TYPE - 1] = CStringGetTextDatum(partitionTypeString->data);
+	values[ATTR_NUM_PARTITION_KEY - 1] = PointerGetDatum(partitionKeyText);
+
+	/* open shard relation and insert new tuple */
+	pgPartition = heap_open(partitionRelationId, RowExclusiveLock);
+
+	tupleDescriptor = RelationGetDescr(pgPartition);
+	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
+
+	simple_heap_insert(pgPartition, heapTuple);
+	CatalogUpdateIndexes(pgPartition, heapTuple);
+	CommandCounterIncrement();
+
+	/* close relation */
+	heap_close(pgPartition, RowExclusiveLock);
+}
+
+
+/*
+ * InsertShardRow opens the shard metadata table and inserts a new row with
+ * the given values into that table. Note that we allow the user to pass in
+ * null min/max values.
+ */
+void
+InsertShardRow(Oid relationId, uint64 shardId, char shardStorage,
+			   text *shardMinValue, text *shardMaxValue)
+{
+	Relation pgShard = NULL;
+	TupleDesc tupleDescriptor = NULL;
+	HeapTuple heapTuple = NULL;
+	Datum values[SHARD_TABLE_ATTRIBUTE_COUNT];
+	bool isNulls[SHARD_TABLE_ATTRIBUTE_COUNT];
+
+	StringInfo shardStorageString = makeStringInfo();
+	StringInfo shardTableName = makeStringInfo();
+	Oid shardRelationId = InvalidOid;
+
+	appendStringInfo(shardTableName, "%s.%s", METADATA_SCHEMA_NAME, SHARD_TABLE_NAME);
+	shardRelationId = ResolveRelationId(shardTableName->data);
+
+	appendStringInfoChar(shardStorageString, shardStorage);
+
+	/* form new shard tuple */
+	memset(values, 0, sizeof(values));
+	memset(isNulls, false, sizeof(isNulls));
+
+	values[ATTR_NUM_SHARD_ID - 1] = Int64GetDatum(shardId);
+	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(relationId);
+	values[ATTR_NUM_SHARD_STORAGE - 1] = CStringGetTextDatum(shardStorageString->data);
+
+	/* check if shard min/max values are null */
+	if (shardMinValue != NULL && shardMaxValue != NULL)
+	{
+		values[ATTR_NUM_SHARD_MIN_VALUE - 1] = PointerGetDatum(shardMinValue);
+		values[ATTR_NUM_SHARD_MAX_VALUE - 1] = PointerGetDatum(shardMaxValue);
+	}
+	else
+	{
+		isNulls[ATTR_NUM_SHARD_MIN_VALUE - 1] = true;
+		isNulls[ATTR_NUM_SHARD_MAX_VALUE - 1] = true;
+	}
+
+	/* open shard relation and insert new tuple */
+	pgShard = heap_open(shardRelationId, RowExclusiveLock);
+
+	tupleDescriptor = RelationGetDescr(pgShard);
+	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
+
+	simple_heap_insert(pgShard, heapTuple);
+	CatalogUpdateIndexes(pgShard, heapTuple);
+	CommandCounterIncrement();
+	
+	/* close relation */
+	heap_close(pgShard, RowExclusiveLock);
+}
+
+
+/*
+ * InsertShardPlacementRow opens the shard placement metadata table and inserts
+ * a row with the given values into the table.
+ */
+void
+InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
+						ShardState shardState, char *nodeName, uint32 nodePort)
+{
+	Relation pgShardPlacement = NULL;
+	TupleDesc tupleDescriptor = NULL;
+	HeapTuple heapTuple = NULL;
+	Datum values[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
+	bool isNulls[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
+
+	Oid shardPlacementRelationId = InvalidOid;
+
+	StringInfo shardPlacementTableName = makeStringInfo();
+	appendStringInfo(shardPlacementTableName, "%s.%s", METADATA_SCHEMA_NAME,
+					 SHARD_PLACEMENT_TABLE_NAME);
+	shardPlacementRelationId = ResolveRelationId(shardPlacementTableName->data);
+
+	/* form new shard placement tuple */
+	memset(values, 0, sizeof(values));
+	memset(isNulls, false, sizeof(isNulls));
+
+	values[ATTR_NUM_SHARD_PLACEMENT_ID - 1] = Int64GetDatum(shardPlacementId);
+	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_ID - 1] = Int64GetDatum(shardId);
+	values[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = UInt32GetDatum(shardState);
+	values[ATTR_NUM_SHARD_PLACEMENT_NODE_NAME - 1] = CStringGetTextDatum(nodeName);
+	values[ATTR_NUM_SHARD_PLACEMENT_NODE_PORT - 1] = UInt32GetDatum(nodePort);
+
+	/* open shard placement relation and insert new tuple */
+	pgShardPlacement = heap_open(shardPlacementRelationId, RowExclusiveLock);
+
+	tupleDescriptor = RelationGetDescr(pgShardPlacement);
+	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
+
+	simple_heap_insert(pgShardPlacement, heapTuple);
+	CatalogUpdateIndexes(pgShardPlacement, heapTuple);
+	CommandCounterIncrement();
+
+	/* close relation */
+	heap_close(pgShardPlacement, RowExclusiveLock);
+}
+
+
+/*
+ * NewShardId allocates and returns a unique shardId for the shard to be
+ * created. The function relies on an internal sequence created when the
+ * extension is loaded to generate unique identifiers.
+ */
+uint64
+NewShardId()
+{
+	Oid shardIdSequenceId = InvalidOid;
+	Datum shardIdSequenceIdDatum = 0;
+	Datum shardIdDatum = 0;
+	uint64 shardId = 0;
+
+	StringInfo shardIdSequenceName = makeStringInfo();
+	appendStringInfo(shardIdSequenceName, "%s.%s", METADATA_SCHEMA_NAME,
+					 SHARD_ID_SEQUENCE_NAME);
+	shardIdSequenceId = ResolveRelationId(shardIdSequenceName->data);
+	shardIdSequenceIdDatum = ObjectIdGetDatum(shardIdSequenceId);
+
+	/* generate new and unique shardId from sequence */
+	shardIdDatum = DirectFunctionCall1(nextval_oid, shardIdSequenceIdDatum);
+	shardId = (uint64) DatumGetInt64(shardIdDatum);
+
+	return shardId;
+}
+
+
+/*
+ * NewShardPlacementId allocates and returns a unique shardPlacementId for the
+ * shard placement to be created. The function relies on an internal sequence
+ * created when the extension is loaded to generate unique identifiers.
+ */
+uint64
+NewShardPlacementId()
+{
+	Oid shardPlacementIdSequenceId = InvalidOid;
+	Datum shardPlacementIdSequenceIdDatum = 0;
+	Datum shardPlacementIdDatum = 0;
+	uint64 shardPlacementId = 0;
+
+	StringInfo shardPlacementIdSequenceName = makeStringInfo();
+	appendStringInfo(shardPlacementIdSequenceName, "%s.%s", METADATA_SCHEMA_NAME,
+					 SHARD_PLACEMENT_ID_SEQUENCE_NAME);
+	shardPlacementIdSequenceId = ResolveRelationId(shardPlacementIdSequenceName->data);
+	shardPlacementIdSequenceIdDatum = ObjectIdGetDatum(shardPlacementIdSequenceId);
+
+	/* generate new and unique shardId from sequence */
+	shardPlacementIdDatum = DirectFunctionCall1(nextval_oid,
+												shardPlacementIdSequenceIdDatum);
+	shardPlacementId = (uint64) DatumGetInt64(shardPlacementIdDatum);
+
+	return shardPlacementId;
+}
+
+
+/* Finds the relationId from a potentially qualified relation name. */
+Oid
+ResolveRelationId(const char *relationName)
+{
+	List *relationNameList = NIL;
+	RangeVar *relation = NULL;
+	Oid  relationId = InvalidOid;
+	bool failOK = false;		/* error if relation cannot be found */
+	text *relationNameText = cstring_to_text(relationName);
+
+	/* resolve relationId from passed in schema and relation name */
+	relationNameList = textToQualifiedNameList(relationNameText);
+	relation = makeRangeVarFromNameList(relationNameList);
+	relationId = RangeVarGetRelid(relation, NoLock, failOK);
+
+	return relationId;
 }

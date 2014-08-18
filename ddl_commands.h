@@ -1,27 +1,30 @@
 /*-------------------------------------------------------------------------
  *
- * generate_ddl_events.h
- *			function declarations to generate ddl commands for a table
+ * ddl_commands.h
+ *			function declarations to generate and extend ddl commands for a
+ *			table.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014, Citus Data, Inc.
  *
- * IDENTIFICATION
- *			generate_ddl_events.h
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */
 
-#ifndef GENERATE_DDL_EVENTS_H
-#define GENERATE_DDL_EVENTS_H
+#ifndef DDL_COMMANDS_H
+#define DDL_COMMANDS_H
 
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 
 
-/* function for generating ddl commands */
+#define SHARD_NAME_SEPARATOR '_'
+
 extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
+extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,
+									 List *ddlCommandList);
 
 
-#endif /* GENERATE_DDL_EVENTS_H */
+#endif /* DDL_COMMANDS_H */

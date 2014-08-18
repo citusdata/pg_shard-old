@@ -44,7 +44,7 @@
 #define SHARD_RELATION_INDEX_NAME "shard_relation_index"
 
 /* human-readable names for addressing columns of shard table */
-#define SHARD_ATTRIBUTE_COUNT 5
+#define SHARD_TABLE_ATTRIBUTE_COUNT 5
 #define ATTR_NUM_SHARD_ID 1
 #define ATTR_NUM_SHARD_RELATION_ID 2
 #define ATTR_NUM_SHARD_STORAGE 3
@@ -61,7 +61,7 @@
 #define SHARD_PLACEMENT_SHARD_INDEX_NAME "shard_placement_shard_index"
 
 /* human-readable names for addressing columns of shard placement table */
-#define SHARD_PLACEMENT_ATTRIBUTE_COUNT 5
+#define SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT 5
 #define ATTR_NUM_SHARD_PLACEMENT_ID 1
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_ID 2
 #define ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE 3
@@ -72,9 +72,13 @@
 #define PARTITION_TABLE_NAME "partition"
 
 /* human-readable names for addressing columns of partition table */
-#define PARTITION_ATTRIBUTE_COUNT 2
+#define PARTITION_TABLE_ATTRIBUTE_COUNT 3
 #define ATTR_NUM_PARTITION_RELATION_ID 1
-#define ATTR_NUM_PARTITION_KEY 2
+#define ATTR_NUM_PARTITION_TYPE 2
+#define ATTR_NUM_PARTITION_KEY 3
+
+/* denotes partition type of the distributed table */
+#define HASH_PARTITION_TYPE 'h'
 
 /* ShardState represents the last known state of a shard on a given node */
 typedef enum
@@ -136,6 +140,16 @@ extern List * LoadShardList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
+extern void InsertPartitionRow(Oid relationId, char partitionType,
+							   text *partitionKeyText);
+extern void InsertShardRow(Oid relationId, uint64 shardId, char shardStorage,
+						   text *shardMinValue, text *shardMaxValue);
+extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
+									ShardState shardState, char *nodeName,
+									uint32 nodePort);
+extern uint64 NewShardId(void);
+extern uint64 NewShardPlacementId(void);
+extern Oid ResolveRelationId(const char *relationName);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 
 
