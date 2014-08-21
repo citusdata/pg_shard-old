@@ -1,8 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * generate_ddl_commands.c
- *			Functions to retrieve ddl commands for a table. This file contains
- *			functions which are borrowed from CitusDB.
+ * Functions to retrieve ddl commands for a table. This file contains functions
+ * which are borrowed from CitusDB.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
@@ -13,6 +13,7 @@
  */
 
 #include "postgres.h"
+#include "ddl_commands.h"
 
 #include "access/genam.h"
 #include "access/heapam.h"
@@ -24,7 +25,6 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_index.h"
 #include "commands/defrem.h"
-#include "ddl_commands.h"
 #include "foreign/foreign.h"
 #include "lib/stringinfo.h"
 #include "utils/builtins.h"

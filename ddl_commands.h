@@ -1,8 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * ddl_commands.h
- *			function declarations to generate and extend ddl commands for a
- *			table.
+ *
+ * Function declarations to generate and extend ddl commands for a table.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *

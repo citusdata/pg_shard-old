@@ -1,8 +1,8 @@
 /*-------------------------------------------------------------------------
  *
  * extend_ddl_commands.c
- *			Functions to extend ddl commands for a table. This file contains
- *			functions which are borrowed from CitusDB.
+ * Functions to extend ddl commands for a table. This file contains functions
+ * which are borrowed from CitusDB.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
@@ -13,12 +13,12 @@
  */
 
 #include "postgres.h"
+#include "ddl_commands.h"
 
 #include "access/heapam.h"
 #include "catalog/heap.h"
 #include "catalog/namespace.h"
 #include "commands/defrem.h"
-#include "ddl_commands.h"
 #include "lib/stringinfo.h"
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
@@ -45,8 +45,7 @@ static char * DeparseAlterTableStmt(AlterTableStmt *alterTableStmt);
 static char * DeparseIndexConstraint(Constraint *constraint);
 static char * DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId);
 static List * TableElementsOfType(List *tableElementList, NodeTag nodeType);
-static Node * cookConstraint(ParseState *parseState, Node *rawConstraint,
-							 char *relationName);
+static Node * CookConstraint(ParseState *parseState, Node *rawConstraint);
 static char * DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId);
 
 
@@ -107,12 +106,7 @@ ParseTreeNode(const char *ddlCommand)
 static void
 ExtendDDLCommand(Node *parseTree, uint64 shardId)
 {
-	/* we don't extend names in extension commands */
 	NodeTag nodeType = nodeTag(parseTree);
-	if (nodeType == T_CreateExtensionStmt)
-	{
-		return;
-	}
 
 	switch (nodeType)
 	{
@@ -639,7 +633,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 
 		/* convert the expression from its raw parsed form */
 		Assert(constraint->cooked_expr == NULL);
-		plannedExpression = cookConstraint(parseState, constraint->raw_expr, NULL);
+		plannedExpression = CookConstraint(parseState, constraint->raw_expr);
 
 		/* deparse check constraint string */
 		checkContext = deparse_context_for(masterRelationName, masterRelationId);
@@ -695,13 +689,13 @@ TableElementsOfType(List *tableElementList, NodeTag nodeType)
 
 
 /*
- * cookConstraint takes a raw CHECK constraint expression and converts it to a
+ * CookConstraint takes a raw CHECK constraint expression and converts it to a
  * cooked format to allow us to deparse that back into its string form. Parse
  * state must be set up to recognize any vars that might appear in the
  * expression. Note: This function is pulled from src/backed/catalog/heap.c.
  */
 static Node *
-cookConstraint(ParseState *parseState, Node *rawConstraint, char *relationName)
+CookConstraint(ParseState *parseState, Node *rawConstraint)
 {
 	/* transform raw parsetree to executable expression */
 	Node *cookedExpression = transformExpr(parseState, rawConstraint,
@@ -712,17 +706,6 @@ cookConstraint(ParseState *parseState, Node *rawConstraint, char *relationName)
 
 	/* take care of collations */
 	assign_expr_collations(parseState, cookedExpression);
-
-	/*
-	 * Make sure no outside relations are referred to (this is probably dead
-	 * code now that add_missing_from is history).
-	 */
-	if (list_length(parseState->p_rtable) != 1)
-	{
-		ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-			errmsg("only table \"%s\" can be referenced in check constraint",
-				   relationName)));
-	}
 
 	return cookedExpression;
 }

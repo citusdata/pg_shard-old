@@ -307,7 +307,6 @@ PartitionColumn(Oid distributedTableId)
 	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
@@ -341,6 +340,53 @@ PartitionColumn(Oid distributedTableId)
 
 
 /*
+ * PartitionType looks up the type used to partition a given distributed
+ * table and returns a char representing this type. If no entry can be found
+ * using the provided identifer, this function throws an error.
+ */
+char
+PartitionType(Oid distributedTableId)
+{
+	char partitionType = 0;
+	RangeVar *heapRangeVar = NULL;
+	Relation heapRelation = NULL;
+	HeapScanDesc scanDesc = NULL;
+	const int scanKeyCount = 1;
+	ScanKeyData scanKey[scanKeyCount];
+	HeapTuple heapTuple = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
+				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
+
+	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
+
+	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(heapTuple))
+	{
+		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
+		bool isNull = false;
+
+		Datum partitionTypeDatum = heap_getattr(heapTuple, ATTR_NUM_PARTITION_TYPE,
+												tupleDescriptor, &isNull);
+		partitionType = DatumGetChar(partitionTypeDatum);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find partition for distributed "
+							   "relation %u", distributedTableId)));
+	}
+
+	heap_endscan(scanDesc);
+	relation_close(heapRelation, AccessShareLock);
+
+	return partitionType;
+}
+
+
+/*
  * ColumnNameToColumn accepts a relation identifier and column name and returns
  * a Var that represents that column in that relation. This function throws an
  * error if the column doesn't exist or is a system column.
@@ -361,8 +407,7 @@ ColumnNameToColumn(Oid relationId, char *columnName)
 	if (columnId == InvalidAttrNumber)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_COLUMN),
-						errmsg("partition column \"%s\" not found",
-							   columnName)));
+						errmsg("partition column \"%s\" not found", columnName)));
 	}
 	else if (!AttrNumberIsForUserDefinedAttr(columnId))
 	{
@@ -477,43 +522,36 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
  * with the given values.
  */
 void
-InsertPartitionRow(Oid relationId, char partitionType, text *partitionKeyText)
+InsertPartitionRow(Oid distributedTableId, char partitionType, text *partitionKeyText)
 {
-	Relation pgPartition = NULL;
+	Relation partitionRelation = NULL;
+	RangeVar *partitionRangeVar = NULL;
 	TupleDesc tupleDescriptor = NULL;
 	HeapTuple heapTuple = NULL;
 	Datum values[PARTITION_TABLE_ATTRIBUTE_COUNT];
 	bool isNulls[PARTITION_TABLE_ATTRIBUTE_COUNT];
-	StringInfo partitionTableName = makeStringInfo();
-	StringInfo partitionTypeString = makeStringInfo();
-	Oid partitionRelationId = InvalidOid;
 
-	appendStringInfo(partitionTableName, "%s.%s", METADATA_SCHEMA_NAME,
-					 PARTITION_TABLE_NAME);
-	partitionRelationId = ResolveRelationId(partitionTableName->data);
-
-	appendStringInfoChar(partitionTypeString, partitionType);
-
-	/* form new shard tuple */
+	/* form new partition tuple */
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
-	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(relationId);
-	values[ATTR_NUM_PARTITION_TYPE - 1] = CStringGetTextDatum(partitionTypeString->data);
+	values[ATTR_NUM_PARTITION_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
+	values[ATTR_NUM_PARTITION_TYPE - 1] = CharGetDatum(partitionType);
 	values[ATTR_NUM_PARTITION_KEY - 1] = PointerGetDatum(partitionKeyText);
 
-	/* open shard relation and insert new tuple */
-	pgPartition = heap_open(partitionRelationId, RowExclusiveLock);
+	/* open the partition relation and insert new tuple */
+	partitionRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
+	partitionRelation = heap_openrv(partitionRangeVar, RowExclusiveLock);
 
-	tupleDescriptor = RelationGetDescr(pgPartition);
+	tupleDescriptor = RelationGetDescr(partitionRelation);
 	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
 
-	simple_heap_insert(pgPartition, heapTuple);
-	CatalogUpdateIndexes(pgPartition, heapTuple);
+	simple_heap_insert(partitionRelation, heapTuple);
+	CatalogUpdateIndexes(partitionRelation, heapTuple);
 	CommandCounterIncrement();
 
 	/* close relation */
-	heap_close(pgPartition, RowExclusiveLock);
+	relation_close(partitionRelation, RowExclusiveLock);
 }
 
 
@@ -523,31 +561,23 @@ InsertPartitionRow(Oid relationId, char partitionType, text *partitionKeyText)
  * null min/max values.
  */
 void
-InsertShardRow(Oid relationId, uint64 shardId, char shardStorage,
+InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
 			   text *shardMinValue, text *shardMaxValue)
 {
-	Relation pgShard = NULL;
+	Relation shardRelation = NULL;
+	RangeVar *shardRangeVar = NULL;
 	TupleDesc tupleDescriptor = NULL;
 	HeapTuple heapTuple = NULL;
 	Datum values[SHARD_TABLE_ATTRIBUTE_COUNT];
 	bool isNulls[SHARD_TABLE_ATTRIBUTE_COUNT];
-
-	StringInfo shardStorageString = makeStringInfo();
-	StringInfo shardTableName = makeStringInfo();
-	Oid shardRelationId = InvalidOid;
-
-	appendStringInfo(shardTableName, "%s.%s", METADATA_SCHEMA_NAME, SHARD_TABLE_NAME);
-	shardRelationId = ResolveRelationId(shardTableName->data);
-
-	appendStringInfoChar(shardStorageString, shardStorage);
 
 	/* form new shard tuple */
 	memset(values, 0, sizeof(values));
 	memset(isNulls, false, sizeof(isNulls));
 
 	values[ATTR_NUM_SHARD_ID - 1] = Int64GetDatum(shardId);
-	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(relationId);
-	values[ATTR_NUM_SHARD_STORAGE - 1] = CStringGetTextDatum(shardStorageString->data);
+	values[ATTR_NUM_SHARD_RELATION_ID - 1] = ObjectIdGetDatum(distributedTableId);
+	values[ATTR_NUM_SHARD_STORAGE - 1] = CharGetDatum(shardStorage);
 
 	/* check if shard min/max values are null */
 	if (shardMinValue != NULL && shardMaxValue != NULL)
@@ -562,17 +592,18 @@ InsertShardRow(Oid relationId, uint64 shardId, char shardStorage,
 	}
 
 	/* open shard relation and insert new tuple */
-	pgShard = heap_open(shardRelationId, RowExclusiveLock);
+	shardRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_TABLE_NAME, -1);
+	shardRelation = heap_openrv(shardRangeVar, RowExclusiveLock);
 
-	tupleDescriptor = RelationGetDescr(pgShard);
+	tupleDescriptor = RelationGetDescr(shardRelation);
 	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
 
-	simple_heap_insert(pgShard, heapTuple);
-	CatalogUpdateIndexes(pgShard, heapTuple);
+	simple_heap_insert(shardRelation, heapTuple);
+	CatalogUpdateIndexes(shardRelation, heapTuple);
 	CommandCounterIncrement();
 	
 	/* close relation */
-	heap_close(pgShard, RowExclusiveLock);
+	heap_close(shardRelation, RowExclusiveLock);
 }
 
 
@@ -584,18 +615,12 @@ void
 InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 						ShardState shardState, char *nodeName, uint32 nodePort)
 {
-	Relation pgShardPlacement = NULL;
+	Relation shardPlacementRelation = NULL;
+	RangeVar *shardPlacementRangeVar = NULL;
 	TupleDesc tupleDescriptor = NULL;
 	HeapTuple heapTuple = NULL;
 	Datum values[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
 	bool isNulls[SHARD_PLACEMENT_TABLE_ATTRIBUTE_COUNT];
-
-	Oid shardPlacementRelationId = InvalidOid;
-
-	StringInfo shardPlacementTableName = makeStringInfo();
-	appendStringInfo(shardPlacementTableName, "%s.%s", METADATA_SCHEMA_NAME,
-					 SHARD_PLACEMENT_TABLE_NAME);
-	shardPlacementRelationId = ResolveRelationId(shardPlacementTableName->data);
 
 	/* form new shard placement tuple */
 	memset(values, 0, sizeof(values));
@@ -608,89 +633,38 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 	values[ATTR_NUM_SHARD_PLACEMENT_NODE_PORT - 1] = UInt32GetDatum(nodePort);
 
 	/* open shard placement relation and insert new tuple */
-	pgShardPlacement = heap_open(shardPlacementRelationId, RowExclusiveLock);
+	shardPlacementRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+										  SHARD_PLACEMENT_TABLE_NAME, -1);
+	shardPlacementRelation = heap_openrv(shardPlacementRangeVar, RowExclusiveLock);
 
-	tupleDescriptor = RelationGetDescr(pgShardPlacement);
+	tupleDescriptor = RelationGetDescr(shardPlacementRelation);
 	heapTuple = heap_form_tuple(tupleDescriptor, values, isNulls);
 
-	simple_heap_insert(pgShardPlacement, heapTuple);
-	CatalogUpdateIndexes(pgShardPlacement, heapTuple);
+	simple_heap_insert(shardPlacementRelation, heapTuple);
+	CatalogUpdateIndexes(shardPlacementRelation, heapTuple);
 	CommandCounterIncrement();
 
 	/* close relation */
-	heap_close(pgShardPlacement, RowExclusiveLock);
+	heap_close(shardPlacementRelation, RowExclusiveLock);
 }
 
 
 /*
- * NewShardId allocates and returns a unique shardId for the shard to be
- * created. The function relies on an internal sequence created when the
- * extension is loaded to generate unique identifiers.
+ * NextSequenceId allocates and returns a new unique id generated from the given
+ * sequence name.
  */
 uint64
-NewShardId()
+NextSequenceId(char *sequenceName)
 {
-	Oid shardIdSequenceId = InvalidOid;
-	Datum shardIdSequenceIdDatum = 0;
-	Datum shardIdDatum = 0;
-	uint64 shardId = 0;
+	RangeVar *sequenceRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+											  sequenceName, -1);
+	bool failOk = false;
+	Oid sequenceRelationId = RangeVarGetRelid(sequenceRangeVar, NoLock, failOk);
+	Datum sequenceRelationIdDatum = ObjectIdGetDatum(sequenceRelationId);
 
-	StringInfo shardIdSequenceName = makeStringInfo();
-	appendStringInfo(shardIdSequenceName, "%s.%s", METADATA_SCHEMA_NAME,
-					 SHARD_ID_SEQUENCE_NAME);
-	shardIdSequenceId = ResolveRelationId(shardIdSequenceName->data);
-	shardIdSequenceIdDatum = ObjectIdGetDatum(shardIdSequenceId);
+	/* generate new and unique id from sequence */
+	Datum sequenceIdDatum = DirectFunctionCall1(nextval_oid, sequenceRelationIdDatum);
+	uint64 nextSequenceId = (uint64) DatumGetInt64(sequenceIdDatum);
 
-	/* generate new and unique shardId from sequence */
-	shardIdDatum = DirectFunctionCall1(nextval_oid, shardIdSequenceIdDatum);
-	shardId = (uint64) DatumGetInt64(shardIdDatum);
-
-	return shardId;
-}
-
-
-/*
- * NewShardPlacementId allocates and returns a unique shardPlacementId for the
- * shard placement to be created. The function relies on an internal sequence
- * created when the extension is loaded to generate unique identifiers.
- */
-uint64
-NewShardPlacementId()
-{
-	Oid shardPlacementIdSequenceId = InvalidOid;
-	Datum shardPlacementIdSequenceIdDatum = 0;
-	Datum shardPlacementIdDatum = 0;
-	uint64 shardPlacementId = 0;
-
-	StringInfo shardPlacementIdSequenceName = makeStringInfo();
-	appendStringInfo(shardPlacementIdSequenceName, "%s.%s", METADATA_SCHEMA_NAME,
-					 SHARD_PLACEMENT_ID_SEQUENCE_NAME);
-	shardPlacementIdSequenceId = ResolveRelationId(shardPlacementIdSequenceName->data);
-	shardPlacementIdSequenceIdDatum = ObjectIdGetDatum(shardPlacementIdSequenceId);
-
-	/* generate new and unique shardId from sequence */
-	shardPlacementIdDatum = DirectFunctionCall1(nextval_oid,
-												shardPlacementIdSequenceIdDatum);
-	shardPlacementId = (uint64) DatumGetInt64(shardPlacementIdDatum);
-
-	return shardPlacementId;
-}
-
-
-/* Finds the relationId from a potentially qualified relation name. */
-Oid
-ResolveRelationId(const char *relationName)
-{
-	List *relationNameList = NIL;
-	RangeVar *relation = NULL;
-	Oid  relationId = InvalidOid;
-	bool failOK = false;		/* error if relation cannot be found */
-	text *relationNameText = cstring_to_text(relationName);
-
-	/* resolve relationId from passed in schema and relation name */
-	relationNameList = textToQualifiedNameList(relationNameText);
-	relation = makeRangeVarFromNameList(relationNameList);
-	relationId = RangeVarGetRelid(relation, NoLock, failOK);
-
-	return relationId;
+	return nextSequenceId;
 }
