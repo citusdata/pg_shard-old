@@ -17,6 +17,11 @@ CREATE FUNCTION load_shard_interval_array(bigint)
 	AS 'pg_shard', 'LoadShardIntervalArray'
 	LANGUAGE C STRICT;
 
+CREATE FUNCTION load_shard_placement_array(bigint)
+	RETURNS text[]
+	AS 'pg_shard', 'LoadShardPlacementArray'
+	LANGUAGE C STRICT;
+
 -- ===================================================================
 -- test distribution metadata functionality
 -- ===================================================================
@@ -46,7 +51,11 @@ VALUES
 	(1, 'foo', 123, 1, 0),
 	(2, 'foo', 123, 2, 0),
 	(3, 'bar', 456, 3, 0),
-	(4, 'bar', 456, 4, 0);
+	(4, 'bar', 456, 4, 0),
+	(5, 'baz', 123, 1, 0),
+	(6, 'baz', 123, 2, 0),
+	(7, 'qux', 456, 3, 0),
+	(8, 'qux', 456, 4, 0);
 
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
@@ -63,5 +72,11 @@ SELECT load_shard_id_array('customers'::regclass);
 -- should see array with first shard range
 SELECT load_shard_interval_array(1);
 
--- should see error for non-existant shard
+-- should see error for non-existent shard
 SELECT load_shard_interval_array(5);
+
+-- should see two placements
+SELECT load_shard_placement_array(2);
+
+-- should see error for non-existent shard
+SELECT load_shard_placement_array(6);

@@ -13,6 +13,10 @@ CREATE FUNCTION load_shard_interval_array(bigint)
 	RETURNS integer[]
 	AS 'pg_shard', 'LoadShardIntervalArray'
 	LANGUAGE C STRICT;
+CREATE FUNCTION load_shard_placement_array(bigint)
+	RETURNS text[]
+	AS 'pg_shard', 'LoadShardPlacementArray'
+	LANGUAGE C STRICT;
 -- ===================================================================
 -- test distribution metadata functionality
 -- ===================================================================
@@ -37,7 +41,11 @@ VALUES
 	(1, 'foo', 123, 1, 0),
 	(2, 'foo', 123, 2, 0),
 	(3, 'bar', 456, 3, 0),
-	(4, 'bar', 456, 4, 0);
+	(4, 'bar', 456, 4, 0),
+	(5, 'baz', 123, 1, 0),
+	(6, 'baz', 123, 2, 0),
+	(7, 'qux', 456, 3, 0),
+	(8, 'qux', 456, 4, 0);
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
 	('events'::regclass, 'h', 'name');
@@ -48,7 +56,11 @@ INFO:  Shard Interval #4
 INFO:  	relation:	events
 INFO:  	min value:	30
 INFO:  	max value:	40
-INFO:  	1 shard placements:
+INFO:  	2 shard placements:
+INFO:  		ShardPlacement #8
+INFO:  			shard:	4
+INFO:  			node name:	qux
+INFO:  			node port:	456
 INFO:  		ShardPlacement #4
 INFO:  			shard:	4
 INFO:  			node name:	bar
@@ -57,7 +69,11 @@ INFO:  Shard Interval #3
 INFO:  	relation:	events
 INFO:  	min value:	20
 INFO:  	max value:	30
-INFO:  	1 shard placements:
+INFO:  	2 shard placements:
+INFO:  		ShardPlacement #7
+INFO:  			shard:	3
+INFO:  			node name:	qux
+INFO:  			node port:	456
 INFO:  		ShardPlacement #3
 INFO:  			shard:	3
 INFO:  			node name:	bar
@@ -66,7 +82,11 @@ INFO:  Shard Interval #2
 INFO:  	relation:	events
 INFO:  	min value:	10
 INFO:  	max value:	20
-INFO:  	1 shard placements:
+INFO:  	2 shard placements:
+INFO:  		ShardPlacement #6
+INFO:  			shard:	2
+INFO:  			node name:	baz
+INFO:  			node port:	123
 INFO:  		ShardPlacement #2
 INFO:  			shard:	2
 INFO:  			node name:	foo
@@ -75,7 +95,11 @@ INFO:  Shard Interval #1
 INFO:  	relation:	events
 INFO:  	min value:	0
 INFO:  	max value:	10
-INFO:  	1 shard placements:
+INFO:  	2 shard placements:
+INFO:  		ShardPlacement #5
+INFO:  			shard:	1
+INFO:  			node name:	baz
+INFO:  			node port:	123
 INFO:  		ShardPlacement #1
 INFO:  			shard:	1
 INFO:  			node name:	foo
@@ -106,6 +130,16 @@ SELECT load_shard_interval_array(1);
  {0,10}
 (1 row)
 
--- should see error for non-existant shard
+-- should see error for non-existent shard
 SELECT load_shard_interval_array(5);
 ERROR:  could not find entry for shard 5
+-- should see two placements
+SELECT load_shard_placement_array(2);
+ load_shard_placement_array 
+----------------------------
+ {baz:123,foo:123}
+(1 row)
+
+-- should see error for non-existent shard
+SELECT load_shard_placement_array(6);
+ERROR:  could not find any placements for shardId 6

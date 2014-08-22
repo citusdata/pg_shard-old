@@ -41,6 +41,7 @@ PG_FUNCTION_INFO_V1(GetAndPurgeConnection);
 PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 PG_FUNCTION_INFO_V1(LoadShardIdArray);
 PG_FUNCTION_INFO_V1(LoadShardIntervalArray);
+PG_FUNCTION_INFO_V1(LoadShardPlacementArray);
 
 
 /* local function forward declarations */
@@ -272,7 +273,7 @@ LoadShardIdArray(PG_FUNCTION_ARGS)
  * LoadShardIntervalArray loads a shard interval using a provided identifier and
  * returns a two-element array consisting of the min and max values contained in
  * that shard interval (currently always integer values). If no such interval
- * can be found, raises an error instead.
+ * can be found, this function raises an error instead.
  */
 Datum
 LoadShardIntervalArray(PG_FUNCTION_ARGS)
@@ -289,6 +290,44 @@ LoadShardIntervalArray(PG_FUNCTION_ARGS)
 												   shardInterval->valueTypeId);
 
 	PG_RETURN_ARRAYTYPE_P(shardIntervalArrayType);
+}
+
+
+/*
+ * LoadShardPlacementArray loads a shard interval using a provided identifier
+ * and returns an array of strings containing the node name and port for each
+ * placement of the specified shard interval. If no such shard interval can be
+ * found, this function raises an error instead.
+ */
+Datum
+LoadShardPlacementArray(PG_FUNCTION_ARGS)
+{
+	int64 shardId = PG_GETARG_INT64(0);
+	ArrayType *placementArrayType = NULL;
+	List *placementList = LoadShardPlacementList(shardId);
+	ListCell *placementCell = NULL;
+	int datumCount = list_length(placementList);
+	int datumIndex = 0;
+	Datum *placementDatums = palloc0(datumCount * sizeof(Datum));
+	Oid datumTypeId = TEXTOID;
+	StringInfo placementInfo = makeStringInfo();
+
+	foreach(placementCell, placementList)
+	{
+		ShardPlacement *placement = (ShardPlacement *) lfirst(placementCell);
+		appendStringInfo(placementInfo, "%s:%d", placement->nodeName,
+						 placement->nodePort);
+
+		placementDatums[datumIndex] = CStringGetTextDatum(placementInfo->data);
+		datumIndex++;
+		resetStringInfo(placementInfo);
+	}
+
+	placementArrayType = DatumArrayToArrayType(placementDatums, datumCount, datumTypeId);
+
+	pfree(placementDatums);
+
+	PG_RETURN_ARRAYTYPE_P(placementArrayType);
 }
 
 
