@@ -56,6 +56,7 @@ create_distributed_table(PG_FUNCTION_ARGS)
 {
 	text *tableNameText = PG_GETARG_TEXT_P(0);
 	text *partitionColumnText = PG_GETARG_TEXT_P(1);
+	char partitionMethod = PG_GETARG_CHAR(2);
 	Oid distributedTableId = ResolveRelationId(tableNameText);
 
 	/* verify column exists in given table */
@@ -66,8 +67,14 @@ create_distributed_table(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errmsg("could not find column: %s", partitionColumnName)));
 	}
 
+	/* we only support hash partitioning method for now */
+	if (partitionMethod != HASH_PARTITION_TYPE)
+	{
+		ereport(ERROR, (errmsg("unsupported partition method: %c", partitionMethod)));
+	}
+
 	/* insert row into the partition metadata table */
-	InsertPartitionRow(distributedTableId, HASH_PARTITION_TYPE, partitionColumnText);
+	InsertPartitionRow(distributedTableId, partitionMethod, partitionColumnText);
 
 	PG_RETURN_VOID();
 }

@@ -50,7 +50,8 @@ SELECT pg_catalog.pg_extension_config_dump(
 	'pgs_distribution_metadata.partition', '');
 
 -- define the table distribution functions
-CREATE FUNCTION create_distributed_table(tablename text, partitioncolumn text)
+CREATE FUNCTION create_distributed_table(tablename text, partitioncolumn text,
+                                         partitionmethod "char" DEFAULT 'h')
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
