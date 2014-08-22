@@ -56,9 +56,9 @@ typedef struct DistributedPlannerInfo
 	Var *partitionColumn;	/* stores the column on which the table is partitioned */
 	/*
 	 * TODO: For SELECT, change the following to use a list of quals rather than
-	 *       a list of values, and a list of shardIds, rather than a single one.
+	 *       a Const, and a list of shardIds, rather than a single one.
 	 */
-	List *partitionValues;	/* Const values of the partitioned column */
+	Const *partitionValue;	/* Const values of the partitioned column */
 	int64 shardId;			/* the shard affected by the query being planned */
 } DistributedPlannerInfo;
 

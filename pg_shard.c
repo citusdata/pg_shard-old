@@ -53,7 +53,7 @@ static DistributedPlan * PlanDistributedModify(Query *query, ModifyTable *modify
 static void VerifyInsertIsLegal(Query *query, Oid distributedTableId);
 static DistributedPlannerInfo * BuildDistributedPlannerInfo(Query *query,
 															Oid distributedTableId);
-static void ExtractPartitionValues(DistributedPlannerInfo *distRoot, List *sourcePlans);
+static void ExtractPartitionValue(DistributedPlannerInfo *distRoot, List *sourcePlans);
 static void FindTargetShardInterval(DistributedPlannerInfo *distRoot);
 static DistributedPlan * BuildDistributedPlan(DistributedPlannerInfo *distRoot);
 static List * BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot);
@@ -165,7 +165,7 @@ PlanDistributedModify(Query *query, ModifyTable *modifyTable)
 		distRoot = BuildDistributedPlannerInfo(query, resultTableId);
 
 		/* use values of partition columns to determine shard */
-		ExtractPartitionValues(distRoot, modifyTable->plans);
+		ExtractPartitionValue(distRoot, modifyTable->plans);
 		FindTargetShardInterval(distRoot);
 
 		/* use accumulated planner state to generate plan */
@@ -192,8 +192,7 @@ VerifyInsertIsLegal(Query *query, Oid distributedTableId)
 	{
 		RangeTblEntry *rangeTableEntry = lfirst(rangeTableEntryCell);
 
-		if ((rangeTableEntry->relid != distributedTableId) &&
-			(rangeTableEntry->rtekind != RTE_VALUES))
+		if (rangeTableEntry->relid != distributedTableId)
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							errmsg("sharded INSERTs may only reference "
@@ -233,59 +232,28 @@ BuildDistributedPlannerInfo(Query *query, Oid distributedTableId)
 
 
 /*
- * ExtractPartitionValues extracts partition column values from a list of source
- * plans. For now, exactly one source plan is expected and must be either a
- * ValuesScan node or a Result. Once a list of partition column values has been
- * computed, this function saves it in the provided DistributedPlannerInfo.
+ * ExtractPartitionValue extracts partition column values from a list of source
+ * plans. For now, exactly one source plan is expected and must be a Result.
+ * Once a list of partition column values has been computed, this function saves
+ * it in the provided DistributedPlannerInfo.
  */
 static void
-ExtractPartitionValues(DistributedPlannerInfo *distRoot, List *sourcePlans)
+ExtractPartitionValue(DistributedPlannerInfo *distRoot, List *sourcePlans)
 {
-	List *partitionColumnValues = NIL;
 	Plan *sourcePlan = (Plan *) linitial(sourcePlans);
 	TargetEntry *targetEntry = get_tle_by_resno(sourcePlan->targetlist,
 												distRoot->partitionColumn->varattno);
-	Assert(list_length(modifyTable->plans) == 1);
+	Assert(list_length(sourcePlans) == 1);
+	Assert(IsA(sourcePlan, Result));
 
-	switch(nodeTag(sourcePlan))
+	if (!IsA(targetEntry->expr, Const))
 	{
-		case T_Result:
-		{
-			partitionColumnValues = lappend(partitionColumnValues, targetEntry->expr);
-			break;
-		}
-		case T_ValuesScan:
-		{
-			ValuesScan *valuesScan = (ValuesScan *) sourcePlan;
-			Var *valuesScanPartitionColumn = NULL;
-			int valuesScanPartColIndex = 0;
-			ListCell *columnValuesCell = NULL;
-
-			Assert(IsA(targetEntry->expr, Var));
-			valuesScanPartitionColumn = (Var *) targetEntry->expr;
-			valuesScanPartColIndex = valuesScanPartitionColumn->varattno - 1;
-
-			foreach(columnValuesCell, valuesScan->values_lists)
-			{
-				List *columnValues = (List *) lfirst(columnValuesCell);
-				Expr *partitionColumnValue = (Expr *) list_nth(columnValues,
-															   valuesScanPartColIndex);
-
-				partitionColumnValues = lappend(partitionColumnValues,
-												partitionColumnValue);
-			}
-
-			break;
-		}
-		default:
-		{
-			ereport(ERROR, (errmsg("source plan of distributed INSERT must be "
-								   "a Result or ValuesScan node")));
-			break;
-		}
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot plan sharded INSERT using a non-"
+							   "constant partition column value")));
 	}
 
-	distRoot->partitionValues = partitionColumnValues;
+	distRoot->partitionValue = (Const *) targetEntry->expr;
 }
 
 
@@ -361,36 +329,23 @@ BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot)
 	FmgrInfo *fmgrInfo = GetHashFunctionByType(distRoot->partitionColumn->vartype);
 
 	List *hashEqualityClauseList = NIL;
-	ListCell *columnValueCell = NULL;
 	Expr *orClause = NULL;
 	RestrictInfo *hashEqualityRestrictInfo = NULL;
 
-	foreach(columnValueCell, distRoot->partitionValues)
+	Const *columnConst = distRoot->partitionValue;
+	OpExpr *hashEqualityExpr = MakeOpExpression(distRoot->partitionColumn,
+												BTEqualStrategyNumber);
+	/* use zero as the default value if column val is NULL */
+	Datum hashValue = Int64GetDatum(0);
+
+	if (!columnConst->constisnull)
 	{
-		Expr *columnValue = (Expr *) lfirst(columnValueCell);
-		Const *columnConst = NULL;
-		OpExpr *hashEqualityExpr = MakeOpExpression(distRoot->partitionColumn,
-													BTEqualStrategyNumber);
-		/* use zero as the default value if column val is NULL */
-		Datum hashValue = Int64GetDatum(0);
-
-		if (!IsA(columnValue, Const))
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot plan sharded INSERT using a non-"
-								   "constant partition column value")));
-		}
-
-		columnConst = (Const *) columnValue;
-		if (!columnConst->constisnull)
-		{
-			hashValue = FunctionCall1(fmgrInfo, columnConst->constvalue);
-		}
-
-		UpdateRightOpValue(hashEqualityExpr, hashValue);
-
-		hashEqualityClauseList = lappend(hashEqualityClauseList, hashEqualityExpr);
+		hashValue = FunctionCall1(fmgrInfo, columnConst->constvalue);
 	}
+
+	UpdateRightOpValue(hashEqualityExpr, hashValue);
+
+	hashEqualityClauseList = lappend(hashEqualityClauseList, hashEqualityExpr);
 
 	orClause = make_orclause(hashEqualityClauseList);
 	hashEqualityRestrictInfo = make_simple_restrictinfo(orClause);
