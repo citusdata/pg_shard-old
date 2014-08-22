@@ -42,6 +42,7 @@ PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 PG_FUNCTION_INFO_V1(LoadShardIdArray);
 PG_FUNCTION_INFO_V1(LoadShardIntervalArray);
 PG_FUNCTION_INFO_V1(LoadShardPlacementArray);
+PG_FUNCTION_INFO_V1(PartitionColumnAttributeNumber);
 
 
 /* local function forward declarations */
@@ -328,6 +329,21 @@ LoadShardPlacementArray(PG_FUNCTION_ARGS)
 	pfree(placementDatums);
 
 	PG_RETURN_ARRAYTYPE_P(placementArrayType);
+}
+
+
+/*
+ * PartitionColumnAttributeNumber simply finds a distributed table using the
+ * provided Oid and returns the attribute number of its partition column. If the
+ * specified table is not distributed, this function raises an error instead.
+ */
+Datum
+PartitionColumnAttributeNumber(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	Var *partitionColumn = PartitionColumn(distributedTableId);
+
+	PG_RETURN_INT16((int16) partitionColumn->varattno);
 }
 
 

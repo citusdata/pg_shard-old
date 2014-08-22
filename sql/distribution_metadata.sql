@@ -22,17 +22,17 @@ CREATE FUNCTION load_shard_placement_array(bigint)
 	AS 'pg_shard', 'LoadShardPlacementArray'
 	LANGUAGE C STRICT;
 
+CREATE FUNCTION partition_column_attribute_number(oid)
+	RETURNS smallint
+	AS 'pg_shard', 'PartitionColumnAttributeNumber'
+	LANGUAGE C STRICT;
+
 -- ===================================================================
 -- test distribution metadata functionality
 -- ===================================================================
 
 
 CREATE TEMPORARY TABLE events (
-	id bigint,
-	name text
-);
-
-CREATE TEMPORARY TABLE customers (
 	id bigint,
 	name text
 );
@@ -66,8 +66,8 @@ SELECT test_distribution_metadata('events'::regclass);
 -- should see above shard identifiers
 SELECT load_shard_id_array('events'::regclass);
 
--- should see empty array (no distribution)
-SELECT load_shard_id_array('customers'::regclass);
+-- should see empty array (catalog is not distributed)
+SELECT load_shard_id_array('pg_type'::regclass);
 
 -- should see array with first shard range
 SELECT load_shard_interval_array(1);
@@ -80,3 +80,9 @@ SELECT load_shard_placement_array(2);
 
 -- should see error for non-existent shard
 SELECT load_shard_placement_array(6);
+
+-- should see attribute number of 'name'
+SELECT partition_column_attribute_number('events'::regclass);
+
+-- should see error (catalog is not distributed)
+SELECT partition_column_attribute_number('pg_type'::regclass);

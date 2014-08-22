@@ -31,6 +31,7 @@ extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 extern Datum LoadShardIdArray(PG_FUNCTION_ARGS);
 extern Datum LoadShardIntervalArray(PG_FUNCTION_ARGS);
 extern Datum LoadShardPlacementArray(PG_FUNCTION_ARGS);
+extern Datum PartitionColumnAttributeNumber(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_TEST_H */
