@@ -27,6 +27,7 @@
 #include "commands/defrem.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodes.h"
+#include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
@@ -49,11 +50,10 @@
 /* local forward declarations */
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
-static DistributedPlan * PlanDistributedModify(Query *query, ModifyTable *modifyTable);
-static void VerifyInsertIsLegal(Query *query, Oid distributedTableId);
+static DistributedPlan * PlanDistributedModify(Query *query);
 static DistributedPlannerInfo * BuildDistributedPlannerInfo(Query *query,
 															Oid distributedTableId);
-static void ExtractPartitionValue(DistributedPlannerInfo *distRoot, List *sourcePlans);
+static void ExtractPartitionValue(DistributedPlannerInfo *distRoot);
 static void FindTargetShardInterval(DistributedPlannerInfo *distRoot);
 static DistributedPlan * BuildDistributedPlan(DistributedPlannerInfo *distRoot);
 static List * BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot);
@@ -65,6 +65,8 @@ static void UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
 static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static void UpdateRightOpValue(const OpExpr *clause, Datum value);
+static bool NeedsDistributedPlanning(Query *queryTree);
+static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
 
 
 
@@ -86,7 +88,6 @@ _PG_init(void)
 {
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlannerHook;
-
 }
 
 
@@ -112,29 +113,25 @@ static PlannedStmt *
 PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
-	DistributedPlan* distributedPlan = NULL;
 
 	/* call standard planner to have Query transformations performed */
 	/* TODO: Where do we call PreviousPlannerHook? */
 	plannedStatement = standard_planner(query, cursorOptions, boundParams);
 
-	switch (query->commandType)
+	if (NeedsDistributedPlanning(query))
 	{
-		case CMD_INSERT:
-		{
-			ModifyTable *modifyTable = (ModifyTable *) plannedStatement->planTree;
-			distributedPlan = PlanDistributedModify(query, modifyTable);
-			break;
-		}
-		default:
-		{
-			break;
-		}
-	}
+		DistributedPlan *distributedPlan = NULL;
+		CmdType cmdType = query->commandType;
 
-	if (distributedPlan != NULL)
-	{
-		plannedStatement->planTree = (Plan *) distributedPlan;
+		if (cmdType == CMD_INSERT)
+		{
+			distributedPlan = PlanDistributedModify(query);
+		}
+
+		/* TODO: Add SELECT handling here */
+
+		Task *task = linitial(distributedPlan->taskList);
+		ereport(INFO, (errmsg("%s", task->queryString->data)));
 	}
 
 	return plannedStatement;
@@ -148,66 +145,33 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
  * function returns NULL to avoid further distributed processing.
  */
 static DistributedPlan *
-PlanDistributedModify(Query *query, ModifyTable *modifyTable)
+PlanDistributedModify(Query *query)
 {
 	DistributedPlan *distributedPlan = NULL;
 	RangeTblEntry *resultRangeTableEntry = rt_fetch(query->resultRelation,
 													query->rtable);
 	Oid resultTableId = resultRangeTableEntry->relid;
 
-	if (TableIsDistributed(resultTableId))
-	{
-		DistributedPlannerInfo *distRoot = NULL;
+	DistributedPlannerInfo *distRoot = NULL;
 
-		/* check that the insert is legal at all */
-		VerifyInsertIsLegal(query, resultTableId);
-
-		distRoot = BuildDistributedPlannerInfo(query, resultTableId);
-
-		/* use values of partition columns to determine shard */
-		ExtractPartitionValue(distRoot, modifyTable->plans);
-		FindTargetShardInterval(distRoot);
-
-		/* use accumulated planner state to generate plan */
-		distributedPlan = BuildDistributedPlan(distRoot);
-	}
-
-	return distributedPlan;
-}
-
-
-/*
- * VerifyInsertIsLegal inspects a provided query in order to verify that it does
- * not violate any restrictions on the types of INSERT commands allowed by this
- * extension. In particular, only one distributed table may be referenced, and
- * it may not be mixed with references to other local tables. Finally, function
- * scans, subqueries, CTEs, and RETURNING clauses must not appear.
- */
-static void
-VerifyInsertIsLegal(Query *query, Oid distributedTableId)
-{
-	ListCell *rangeTableEntryCell = NULL;
-
-	foreach(rangeTableEntryCell, query->rtable)
-	{
-		RangeTblEntry *rangeTableEntry = lfirst(rangeTableEntryCell);
-
-		if (rangeTableEntry->relid != distributedTableId)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("sharded INSERTs may only reference "
-								   "a single table and cannot use sub"
-								   "queries, common table expressions, "
-								   "or function scans")));
-		}
-	}
-
+	/* Reject queries with a returning list */
 	if (list_length(query->returningList) > 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan sharded INSERT that uses a "
 							   "RETURNING clause")));
 	}
+
+	distRoot = BuildDistributedPlannerInfo(query, resultTableId);
+
+	/* use values of partition columns to determine shard */
+	ExtractPartitionValue(distRoot);
+	FindTargetShardInterval(distRoot);
+
+	/* use accumulated planner state to generate plan */
+	distributedPlan = BuildDistributedPlan(distRoot);
+
+	return distributedPlan;
 }
 
 
@@ -238,22 +202,27 @@ BuildDistributedPlannerInfo(Query *query, Oid distributedTableId)
  * it in the provided DistributedPlannerInfo.
  */
 static void
-ExtractPartitionValue(DistributedPlannerInfo *distRoot, List *sourcePlans)
+ExtractPartitionValue(DistributedPlannerInfo *distRoot)
 {
-	Plan *sourcePlan = (Plan *) linitial(sourcePlans);
-	TargetEntry *targetEntry = get_tle_by_resno(sourcePlan->targetlist,
+	Var *partitionColumn = distRoot->partitionColumn;
+	TargetEntry *targetEntry = get_tle_by_resno(distRoot->query->targetList,
 												distRoot->partitionColumn->varattno);
-	Assert(list_length(sourcePlans) == 1);
-	Assert(IsA(sourcePlan, Result));
+	Const *value = makeNullConst(partitionColumn->vartype, partitionColumn->vartypmod,
+							   partitionColumn->varcollid);
 
-	if (!IsA(targetEntry->expr, Const))
+	if (targetEntry != NULL)
 	{
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded INSERT using a non-"
-							   "constant partition column value")));
+		if (!IsA(targetEntry->expr, Const))
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot plan sharded INSERT using a non-"
+								   "constant partition column value")));
+		}
+
+		value = (Const *) targetEntry->expr;
 	}
 
-	distRoot->partitionValue = (Const *) targetEntry->expr;
+	distRoot->partitionValue = value;
 }
 
 
@@ -531,4 +500,96 @@ UpdateRightOpValue(const OpExpr *clause, Datum value)
 	rightConst->constvalue = value;
 	rightConst->constisnull = false;
 	rightConst->constbyval = true;
+}
+
+
+/*
+ * NeedsDistributedPlanning checks if the passed in Query is an INSERT command
+ * running on partitioned relations. If it is, we start distributed planning.
+ */
+static bool
+NeedsDistributedPlanning(Query *queryTree)
+{
+	List *rangeTableList = NIL;
+	ListCell *rangeTableCell = NULL;
+	bool hasLocalRelation = false;
+	bool hasDistributedRelation = false;
+
+	if (queryTree->commandType != CMD_INSERT)
+	{
+		return false;
+	}
+
+	/* extract range table entries for simple relations only */
+	ExtractRangeTableRelationWalker((Node *) queryTree, &rangeTableList);
+
+	foreach(rangeTableCell, rangeTableList)
+	{
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
+		if (TableIsDistributed(rangeTableEntry->relid))
+		{
+			hasDistributedRelation = true;
+		}
+		else
+		{
+			hasLocalRelation = true;
+		}
+	}
+
+	/* users can't mix local and distributed relations in one query */
+	if (hasLocalRelation && hasDistributedRelation)
+	{
+		ereport(ERROR, (errmsg("cannot plan queries that include both regular and "
+							   "partitioned relations")));
+	}
+
+	return hasDistributedRelation;
+}
+
+
+/*
+ * ExtractRangeTableRelationWalker walks over a query tree, and finds all range
+ * table entries that are plain relations. For recursing into the query tree,
+ * this function uses the query tree walker since the expression tree walker
+ * doesn't recurse into sub-queries.
+ */
+static bool
+ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
+{
+	bool walkerResult = false;
+	if (node == NULL)
+	{
+		return false;
+	}
+
+	if (IsA(node, RangeTblEntry))
+	{
+		RangeTblEntry *rangeTable = (RangeTblEntry *) node;
+		if (rangeTable->rtekind == RTE_RELATION)
+		{
+			(*rangeTableList) = lappend(*rangeTableList, rangeTable);
+		}
+		else if (rangeTable->rtekind == RTE_VALUES)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("multi-row INSERT not supported")));
+		}
+		else if (rangeTable->rtekind == RTE_CTE)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("common table expressions not supported")));
+		}
+	}
+	else if (IsA(node, Query))
+	{
+		walkerResult = query_tree_walker((Query *) node, ExtractRangeTableRelationWalker,
+										 rangeTableList, QTW_EXAMINE_RTES);
+	}
+	else
+	{
+		walkerResult = expression_tree_walker(node, ExtractRangeTableRelationWalker,
+											  rangeTableList);
+	}
+
+	return walkerResult;
 }
