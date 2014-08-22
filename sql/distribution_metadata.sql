@@ -7,14 +7,23 @@ CREATE FUNCTION test_distribution_metadata(oid)
 	AS 'pg_shard', 'TestDistributionMetadata'
 	LANGUAGE C STRICT;
 
+CREATE FUNCTION load_shard_id_array(oid)
+	RETURNS bigint[]
+	AS 'pg_shard', 'LoadShardIdArray'
+	LANGUAGE C STRICT;
 
 -- ===================================================================
 -- test distribution metadata functionality
 -- ===================================================================
 
 
-CREATE TABLE events (
-	id bigserial,
+CREATE TEMPORARY TABLE events (
+	id bigint,
+	name text
+);
+
+CREATE TEMPORARY TABLE customers (
+	id bigint,
 	name text
 );
 
@@ -39,3 +48,9 @@ VALUES
 	('events'::regclass, 'h', 'name');
 
 SELECT test_distribution_metadata('events'::regclass);
+
+-- should see above shard identifiers
+SELECT load_shard_id_array('events'::regclass);
+
+-- should see empty array (no distribution)
+SELECT load_shard_id_array('customers'::regclass);

@@ -28,6 +28,7 @@
 #include "catalog/pg_type.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/lsyscache.h"
@@ -38,11 +39,14 @@ PG_FUNCTION_INFO_V1(PopulateTempTable);
 PG_FUNCTION_INFO_V1(CountTempTable);
 PG_FUNCTION_INFO_V1(GetAndPurgeConnection);
 PG_FUNCTION_INFO_V1(TestDistributionMetadata);
+PG_FUNCTION_INFO_V1(LoadShardIdArray);
 
 
 /* local function forward declarations */
 static PGconn * GetConnectionOrRaiseError(text *nodeText, int32 nodePort);
 static Datum ExtractIntegerDatum(char *input);
+static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
+										 Oid datumTypeId);
 
 
 /*
@@ -229,3 +233,55 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+
+/*
+ * LoadShardIdArray returns the shard identifiers for a particular distributed
+ * table as a bigint array.
+ */
+Datum
+LoadShardIdArray(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	ArrayType *shardIdArrayType = NULL;
+	List *shardList = LoadShardList(distributedTableId);
+	ListCell *shardCell = NULL;
+	int datumCount = list_length(shardList);
+	int datumIndex = 0;
+	Datum *shardIdDatums = palloc0(datumCount * sizeof(Datum));
+	Oid datumTypeId = INT8OID;
+
+	foreach(shardCell, shardList)
+	{
+		int64 *shardId = (int64 *) lfirst(shardCell);
+		Datum shardIdDatum = Int64GetDatum(*shardId);
+
+		shardIdDatums[datumIndex] = shardIdDatum;
+		datumIndex++;
+	}
+
+	shardIdArrayType = DatumArrayToArrayType(shardIdDatums, datumCount, datumTypeId);
+
+	pfree(shardIdDatums);
+
+	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
+}
+
+
+/*
+ * DatumArrayToArrayType converts the provided Datum array (of the specified
+ * length and type) into an ArrayType suitable for returning from a UDF.
+ */
+static ArrayType *
+DatumArrayToArrayType(Datum *datumArray, int datumCount, Oid datumTypeId)
+{
+	ArrayType *arrayObject = NULL;
+	int16 typeLength = 0;
+	bool typeByValue = false;
+	char typeAlignment = 0;
+
+	get_typlenbyvalalign(datumTypeId, &typeLength, &typeByValue, &typeAlignment);
+	arrayObject = construct_array(datumArray, datumCount, datumTypeId,
+								  typeLength, typeByValue, typeAlignment);
+
+	return arrayObject;
+}
