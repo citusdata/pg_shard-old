@@ -148,10 +148,7 @@ static DistributedPlan *
 PlanDistributedModify(Query *query)
 {
 	DistributedPlan *distributedPlan = NULL;
-	RangeTblEntry *resultRangeTableEntry = rt_fetch(query->resultRelation,
-													query->rtable);
-	Oid resultTableId = resultRangeTableEntry->relid;
-
+	Oid resultTableId = getrelid(query->resultRelation, query->rtable);
 	DistributedPlannerInfo *distRoot = NULL;
 
 	/* Reject queries with a returning list */
