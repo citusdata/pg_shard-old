@@ -9,6 +9,10 @@ CREATE FUNCTION load_shard_id_array(oid)
 	RETURNS bigint[]
 	AS 'pg_shard', 'LoadShardIdArray'
 	LANGUAGE C STRICT;
+CREATE FUNCTION load_shard_interval_array(bigint)
+	RETURNS integer[]
+	AS 'pg_shard', 'LoadShardIntervalArray'
+	LANGUAGE C STRICT;
 -- ===================================================================
 -- test distribution metadata functionality
 -- ===================================================================
@@ -95,3 +99,13 @@ SELECT load_shard_id_array('customers'::regclass);
  {}
 (1 row)
 
+-- should see array with first shard range
+SELECT load_shard_interval_array(1);
+ load_shard_interval_array 
+---------------------------
+ {0,10}
+(1 row)
+
+-- should see error for non-existant shard
+SELECT load_shard_interval_array(5);
+ERROR:  could not find entry for shard 5

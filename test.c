@@ -40,6 +40,7 @@ PG_FUNCTION_INFO_V1(CountTempTable);
 PG_FUNCTION_INFO_V1(GetAndPurgeConnection);
 PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 PG_FUNCTION_INFO_V1(LoadShardIdArray);
+PG_FUNCTION_INFO_V1(LoadShardIntervalArray);
 
 
 /* local function forward declarations */
@@ -184,7 +185,7 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
 
 	/* then find min/max values' actual types */
-	getTypeOutputInfo(partitionColumn->vartype, &outputFunctionId, &isVarlena);
+	getTypeOutputInfo(INT4OID, &outputFunctionId, &isVarlena);
 	fmgr_info(outputFunctionId, &outputFunctionInfo);
 
 	ereport(INFO, (errmsg("Table partition using column #%d with type \"%s\"",
@@ -264,6 +265,30 @@ LoadShardIdArray(PG_FUNCTION_ARGS)
 	pfree(shardIdDatums);
 
 	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
+}
+
+
+/*
+ * LoadShardIntervalArray loads a shard interval using a provided identifier and
+ * returns a two-element array consisting of the min and max values contained in
+ * that shard interval (currently always integer values). If no such interval
+ * can be found, raises an error instead.
+ */
+Datum
+LoadShardIntervalArray(PG_FUNCTION_ARGS)
+{
+	int64 shardId = PG_GETARG_INT64(0);
+	ArrayType *shardIntervalArrayType = NULL;
+	ShardInterval *shardInterval = LoadShardInterval(shardId);
+	Datum shardIntervalArray[] = { shardInterval->minValue, shardInterval->maxValue };
+
+	/* for now we expect value type to always be integer (hash output) */
+	Assert(shardInterval->valueTypeId == INT4OID);
+
+	shardIntervalArrayType = DatumArrayToArrayType(shardIntervalArray, 2,
+												   shardInterval->valueTypeId);
+
+	PG_RETURN_ARRAYTYPE_P(shardIntervalArrayType);
 }
 
 
