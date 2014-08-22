@@ -15,7 +15,6 @@
 #include "c.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
-#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "connection.h"
@@ -26,19 +25,20 @@
 #include <string.h>
 
 #include "catalog/pg_type.h"
+#include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/lsyscache.h"
+#include "utils/palloc.h"
 
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(PopulateTempTable);
 PG_FUNCTION_INFO_V1(CountTempTable);
 PG_FUNCTION_INFO_V1(GetAndPurgeConnection);
-PG_FUNCTION_INFO_V1(TestDistributionMetadata);
 PG_FUNCTION_INFO_V1(LoadShardIdArray);
 PG_FUNCTION_INFO_V1(LoadShardIntervalArray);
 PG_FUNCTION_INFO_V1(LoadShardPlacementArray);
@@ -165,77 +165,6 @@ ExtractIntegerDatum(char *input)
 	return intDatum;
 }
 
-/*
- * TestDistributionMetadata prints all current shard and shard placement
- * configuration at INFO level for testing purposes.
- */
-Datum
-TestDistributionMetadata(PG_FUNCTION_ARGS)
-{
-	Oid distributedTableId = PG_GETARG_OID(0);
-
-	Var *partitionColumn = PartitionColumn(distributedTableId);
-	List *shardIntervalList = LoadShardIntervalList(distributedTableId);
-	List *shardPlacementList = NIL;
-
-	ListCell *cell = NULL;
-
-	FmgrInfo outputFunctionInfo;
-	Oid outputFunctionId = InvalidOid;
-	bool isVarlena = false;
-
-	memset(&outputFunctionInfo, 0, sizeof(outputFunctionInfo));
-
-	/* then find min/max values' actual types */
-	getTypeOutputInfo(INT4OID, &outputFunctionId, &isVarlena);
-	fmgr_info(outputFunctionId, &outputFunctionInfo);
-
-	ereport(INFO, (errmsg("Table partition using column #%d with type \"%s\"",
-						  partitionColumn->varattno,
-						  format_type_be(partitionColumn->vartype))));
-
-	ereport(INFO, (errmsg("Found %d shards...", list_length(shardIntervalList))));
-
-	foreach(cell, shardIntervalList)
-	{
-		ListCell *shardPlacementCell = NULL;
-		ShardInterval *shardInterval = lfirst(cell);
-
-		char *minValueStr = OutputFunctionCall(&outputFunctionInfo,
-											   shardInterval->minValue);
-		char *maxValueStr = OutputFunctionCall(&outputFunctionInfo,
-											   shardInterval->maxValue);
-
-		ereport(INFO, (errmsg("Shard Interval #" INT64_FORMAT, shardInterval->id)));
-		ereport(INFO, (errmsg("\trelation:\t%s",
-							  get_rel_name(shardInterval->relationId))));
-
-		ereport(INFO, (errmsg("\tmin value:\t%s", minValueStr)));
-		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
-
-		shardPlacementList = LoadShardPlacementList(shardInterval->id);
-		ereport(INFO, (errmsg("\t%d shard placements:",
-							  list_length(shardPlacementList))));
-
-		foreach(shardPlacementCell, shardPlacementList)
-
-		{
-			ShardPlacement *shardPlacement = NULL;
-
-			shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
-
-			ereport(INFO, (errmsg("\t\tShardPlacement #" INT64_FORMAT,
-								  shardPlacement->id)));
-			ereport(INFO, (errmsg("\t\t\tshard:\t" INT64_FORMAT,
-								  shardPlacement->shardId)));
-			ereport(INFO, (errmsg("\t\t\tnode name:\t%s", shardPlacement->nodeName)));
-			ereport(INFO, (errmsg("\t\t\tnode port:\t%u", shardPlacement->nodePort)));
-		}
-	}
-
-	PG_RETURN_VOID();
-}
-
 
 /*
  * LoadShardIdArray returns the shard identifiers for a particular distributed
@@ -246,7 +175,7 @@ LoadShardIdArray(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	ArrayType *shardIdArrayType = NULL;
-	List *shardList = LoadShardList(distributedTableId);
+	List *shardList = LoadShardIntervalList(distributedTableId);
 	ListCell *shardCell = NULL;
 	int datumCount = list_length(shardList);
 	int datumIndex = 0;
@@ -255,8 +184,8 @@ LoadShardIdArray(PG_FUNCTION_ARGS)
 
 	foreach(shardCell, shardList)
 	{
-		int64 *shardId = (int64 *) lfirst(shardCell);
-		Datum shardIdDatum = Int64GetDatum(*shardId);
+		ShardInterval *shardId = (ShardInterval *) lfirst(shardCell);
+		Datum shardIdDatum = Int64GetDatum(shardId->id);
 
 		shardIdDatums[datumIndex] = shardIdDatum;
 		datumIndex++;

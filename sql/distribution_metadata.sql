@@ -2,11 +2,6 @@
 -- create test functions
 -- ===================================================================
 
-CREATE FUNCTION test_distribution_metadata(oid)
-	RETURNS void
-	AS 'pg_shard', 'TestDistributionMetadata'
-	LANGUAGE C STRICT;
-
 CREATE FUNCTION load_shard_id_array(oid)
 	RETURNS bigint[]
 	AS 'pg_shard', 'LoadShardIdArray'
@@ -60,8 +55,6 @@ VALUES
 INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
 	('events'::regclass, 'h', 'name');
-
-SELECT test_distribution_metadata('events'::regclass);
 
 -- should see above shard identifiers
 SELECT load_shard_id_array('events'::regclass);
