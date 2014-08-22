@@ -1,7 +1,8 @@
 /*-------------------------------------------------------------------------
  *
- * partition_protocol.h
- *			pg_shard function declarations to create partitions
+ * create_shards.h
+ * pg_shard function declarations to initialize distributed tables and their
+ * shards.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
@@ -10,8 +11,8 @@
  *-------------------------------------------------------------------------
  */
 
-#ifndef PARTITION_PROTOCOL_H
-#define PARTITION_PROTOCOL_H
+#ifndef CREATE_SHARDS_H
+#define CREATE_SHARDS_H
 
 #include "fmgr.h"
 
@@ -37,4 +38,4 @@ extern Datum create_distributed_table(PG_FUNCTION_ARGS);
 extern Datum create_shards(PG_FUNCTION_ARGS);
 
 
-#endif /* PARTITION_PROTOCOL_H */
+#endif /* CREATE_SHARDS_H */

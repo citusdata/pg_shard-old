@@ -1,12 +1,13 @@
 /*-------------------------------------------------------------------------
  *
- * partition_protocol.c
- *			pg_shard functions to create partitions
+ * create_shards.c
+ * pg_shard functions to create a distributed table and initialize shards for
+ * that table.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  * IDENTIFICATION
- *			partition_protocol.c
+ *			create_shards.c
  *
  *-------------------------------------------------------------------------
  */
