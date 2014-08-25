@@ -566,16 +566,18 @@ ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
 		{
 			(*rangeTableList) = lappend(*rangeTableList, rangeTable);
 		}
-		else if (rangeTable->rtekind == RTE_VALUES)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("multi-row INSERT not supported")));
-		}
-		else if (rangeTable->rtekind == RTE_CTE)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("common table expressions not supported")));
-		}
+		/* TODO: This check must live elsewhere
+		 *	else if (rangeTable->rtekind == RTE_VALUES)
+		 *	{
+		 *		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+		 *						errmsg("multi-row INSERT not supported")));
+		 *	}
+		 *	else if (rangeTable->rtekind == RTE_CTE)
+		 *	{
+		 *		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+		 *						errmsg("common table expressions not supported")));
+		 *	}
+		 */
 	}
 	else if (IsA(node, Query))
 	{
