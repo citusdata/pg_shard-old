@@ -36,10 +36,10 @@
 
 
 /* local function forward declarations */
-static char * pg_get_tableschemadef_string(Oid tableRelationId);
+static char * pg_shard_get_tableschemadef_string(Oid tableRelationId);
 static char * generate_relation_name(Oid relationId);
-static char * pg_get_tablecolumnoptionsdef_string(Oid tableRelationId);
-static char * pg_get_indexclusterdef_string(Oid indexRelationId);
+static char * pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId);
+static char * pg_shard_get_indexclusterdef_string(Oid indexRelationId);
 
 
 /*
@@ -62,8 +62,8 @@ TableDDLCommandList(Oid relationId)
 	HeapTuple heapTuple = NULL;
 
 	/* fetch table schema and column option definitions */
-	tableSchemaDef = pg_get_tableschemadef_string(relationId);
-	tableColumnOptionsDef = pg_get_tablecolumnoptionsdef_string(relationId);
+	tableSchemaDef = pg_shard_get_tableschemadef_string(relationId);
+	tableColumnOptionsDef = pg_shard_get_tablecolumnoptionsdef_string(relationId);
 	
 	tableDDLCommandList = lappend(tableDDLCommandList, tableSchemaDef);
 	if (tableColumnOptionsDef != NULL)
@@ -128,7 +128,7 @@ TableDDLCommandList(Oid relationId)
 		/* if table is clustered on this index, append definition to the list */
 		if (indexForm->indisclustered)
 		{
-			char *clusteredDef = pg_get_indexclusterdef_string(indexId);
+			char *clusteredDef = pg_shard_get_indexclusterdef_string(indexId);
 			Assert (clusteredDef != NULL);
 
 			tableDDLCommandList = lappend(tableDDLCommandList, clusteredDef);
@@ -152,7 +152,7 @@ TableDDLCommandList(Oid relationId)
  * creations; specifically, unique and primary key constraints are excluded.  
  */
 static char *
-pg_get_tableschemadef_string(Oid tableRelationId)
+pg_shard_get_tableschemadef_string(Oid tableRelationId)
 {
 	Relation relation = NULL;
 	char *relationName = NULL;
@@ -396,7 +396,7 @@ AppendOptionListToString(StringInfo stringBuffer, List *optionList)
  * values for their storage types and statistics.
  */
 static char *
-pg_get_tablecolumnoptionsdef_string(Oid tableRelationId)
+pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 {
 	Relation relation = NULL;
 	char *relationName = NULL;
@@ -532,7 +532,7 @@ pg_get_tablecolumnoptionsdef_string(Oid tableRelationId)
  * index.
  */
 static char *
-pg_get_indexclusterdef_string(Oid indexRelationId)
+pg_shard_get_indexclusterdef_string(Oid indexRelationId)
 {
 	HeapTuple indexTuple = NULL;
 	Form_pg_index indexForm = NULL;
