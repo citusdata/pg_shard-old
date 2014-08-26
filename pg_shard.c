@@ -14,10 +14,10 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "pg_config.h"
 
 #include "pg_shard.h"
 #include "distribution_metadata.h"
+#include "pruning.h"
 #include "ruleutils.h"
 
 #include <stddef.h>
@@ -33,18 +33,13 @@
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
-#include "nodes/relation.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
-#include "optimizer/predtest.h"
-#include "optimizer/restrictinfo.h"
 #include "parser/parsetree.h"
-#include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
-#include "utils/typcache.h"
 
 
 /* local forward declarations */
@@ -56,18 +51,12 @@ static DistributedPlannerInfo * BuildDistributedPlannerInfo(Query *query,
 static void ExtractPartitionValue(DistributedPlannerInfo *distRoot);
 static void FindTargetShardInterval(DistributedPlannerInfo *distRoot);
 static DistributedPlan * BuildDistributedPlan(DistributedPlannerInfo *distRoot);
-static List * BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot);
-static List * PruneShardList(List *restrictInfoList, List *shardList,
-							 Var *partitionColumn);
-static FmgrInfo * GetHashFunctionByType(Oid typeId);
-static Node * BuildBaseConstraint(Var *partitionColumn);
-static void UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval);
+static List * BuildPartitionValueWhereList(DistributedPlannerInfo *distRoot);
 static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
-static void UpdateRightOpValue(const OpExpr *clause, Datum value);
+static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
 static bool NeedsDistributedPlanning(Query *queryTree);
 static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
-
 
 
 /* declarations for dynamic loading */
@@ -125,13 +114,14 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		if (cmdType == CMD_INSERT)
 		{
+			Task *task = NULL;
+
 			distributedPlan = PlanDistributedModify(query);
+			task = linitial(distributedPlan->taskList);
+			ereport(INFO, (errmsg("%s", task->queryString->data)));
 		}
 
 		/* TODO: Add SELECT handling here */
-
-		Task *task = linitial(distributedPlan->taskList);
-		ereport(INFO, (errmsg("%s", task->queryString->data)));
 	}
 
 	return plannedStatement;
@@ -233,9 +223,9 @@ static void
 FindTargetShardInterval(DistributedPlannerInfo *distRoot)
 {
 	List *shardList = LoadShardList(distRoot->distributedTableId);
-	List *restrictInfoList = BuildPartitionValueRestrictInfoList(distRoot);
-	List *shardIntervals = PruneShardList(restrictInfoList, shardList,
-										  distRoot->partitionColumn);
+	List *whereClauseList = BuildPartitionValueWhereList(distRoot);
+	List *shardIntervals = PruneShardList(distRoot->partitionColumn, whereClauseList,
+										  shardList);
 	ShardInterval *targetShard = NULL;
 
 	if (list_length(shardIntervals) == 0)
@@ -278,152 +268,20 @@ BuildDistributedPlan(DistributedPlannerInfo *distRoot)
 
 
 /*
- * BuildPartitionValueRestrictInfoList builds a single-element list containing a
- * RestrictInfo node. This node represents an OR clause of equality constraints
- * between the partition column the hashes of values appearing in that column
- * during this modification.
- *
- * The provided partition values must be Const nodes: if it was impossible to
- * reduce the partition column value for a particular row to a constant, then
- * the distributed INSERT will fail.
- *
- * NULL values always hash to zero.
+ * BuildPartitionValueWhereList builds a single-element list with an equality
+ * clause on the partition column of the distributed table being planned. The
+ * right-hand side of this clause is set to the particular value of the row
+ * being inserted in order to leverage shard pruning logic during INSERT.
  */
 static List *
-BuildPartitionValueRestrictInfoList(DistributedPlannerInfo *distRoot)
+BuildPartitionValueWhereList(DistributedPlannerInfo *distRoot)
 {
-	FmgrInfo *fmgrInfo = GetHashFunctionByType(distRoot->partitionColumn->vartype);
+	Const *columnConst= distRoot->partitionValue;
+	OpExpr *equalityExpr = MakeOpExpression(distRoot->partitionColumn,
+											BTEqualStrategyNumber);
+	UpdateRightOpConst(equalityExpr, columnConst);
 
-	List *hashEqualityClauseList = NIL;
-	Expr *orClause = NULL;
-	RestrictInfo *hashEqualityRestrictInfo = NULL;
-
-	Const *columnConst = distRoot->partitionValue;
-	OpExpr *hashEqualityExpr = MakeOpExpression(distRoot->partitionColumn,
-												BTEqualStrategyNumber);
-	/* use zero as the default value if column val is NULL */
-	Datum hashValue = Int64GetDatum(0);
-
-	if (!columnConst->constisnull)
-	{
-		hashValue = FunctionCall1(fmgrInfo, columnConst->constvalue);
-	}
-
-	UpdateRightOpValue(hashEqualityExpr, hashValue);
-
-	hashEqualityClauseList = lappend(hashEqualityClauseList, hashEqualityExpr);
-
-	orClause = make_orclause(hashEqualityClauseList);
-	hashEqualityRestrictInfo = make_simple_restrictinfo(orClause);
-
-	return list_make1(hashEqualityRestrictInfo);
-}
-
-
-/*
- * PruneShardList takes a list of RestrictInfo nodes, a ShardInterval list, and
- * a reference to the partition column for the table in question. It uses the
- * RestrictInfo nodes to reject elements of the shard list and returns the list
- * after such filtering has been applied.
- */
-static List *
-PruneShardList(List *restrictInfoList, List *shardList, Var *partitionColumn)
-{
-	List *remainingShardList = NIL;
-	ListCell *shardCell = NULL;
-
-	/* build the base expression for constraint */
-	Node *baseConstraint = BuildBaseConstraint(partitionColumn);
-
-	/* walk over shard list and check if shards can be pruned */
-	foreach(shardCell, shardList)
-	{
-		uint64 *shardIdPointer = (uint64 *) lfirst(shardCell);
-		uint64 shardId = (*shardIdPointer);
-		List *constraintList = list_make1(baseConstraint);
-		bool shardPruned = false;
-
-		ShardInterval *shardInterval = LoadShardInterval(shardId);
-
-		/* set the min/max values in the base constraint */
-		UpdateConstraint(baseConstraint, shardInterval);
-
-		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
-		if (shardPruned)
-		{
-			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
-									UINT64_FORMAT, shardId)));
-		}
-		else
-		{
-			remainingShardList = lappend(remainingShardList, shardIdPointer);
-		}
-	}
-
-	return remainingShardList;
-}
-
-
-/*
- * GetHashFunctionByType locates a default hash function for a type using an Oid
- * for that type. This function raises an error if no such function exists.
- */
-static FmgrInfo *
-GetHashFunctionByType(Oid typeId)
-{
-	TypeCacheEntry *typeEntry = lookup_type_cache(typeId, TYPECACHE_HASH_PROC_FINFO);
-	FmgrInfo *fmgrInfo = &typeEntry->hash_proc_finfo;
-
-	if (!OidIsValid(fmgrInfo->fn_oid))
-	{
-		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION),
-						errmsg("could not identify a hash function for type %s",
-							   format_type_be(typeId))));
-	}
-
-	return fmgrInfo;
-}
-
-
-/*
- * BuildBaseConstraint returns an AND clause suitable to test containment of a
- * particular value within an interval. More specifically, for a variable X, the
- * returned clause is ((X >= min) AND (X <= max)). The variables min and max are
- * unbound values to be supplied later (probably retrieved from a distributed
- * table's shard intervals).
- */
-static Node *
-BuildBaseConstraint(Var *partitionColumn)
-{
-	Node *baseConstraint = NULL;
-	OpExpr *lessThanExpr = NULL;
-	OpExpr *greaterThanExpr = NULL;
-
-	/* Build these expressions with only one argument for now */
-	lessThanExpr = MakeOpExpression(partitionColumn, BTLessEqualStrategyNumber);
-	greaterThanExpr = MakeOpExpression(partitionColumn, BTGreaterEqualStrategyNumber);
-
-	/* Build base constaint as an and of two qual conditions */
-	baseConstraint = make_and_qual((Node *) lessThanExpr, (Node *) greaterThanExpr);
-
-	return baseConstraint;
-}
-
-
-/*
- * UpdateConstraint accepts a constraint previously produced by a call to
- * BuildBaseConstraint and updates this constraint with the minimum and maximum
- * values from the provided shard interval.
- */
-static void
-UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
-{
-	BoolExpr *andExpr = (BoolExpr *) baseConstraint;
-	Node *lessThanExpr = (Node *) linitial(andExpr->args);
-	Node *greaterThanExpr = (Node *) lsecond(andExpr->args);
-
-	UpdateRightOpValue((OpExpr *)greaterThanExpr, shardInterval->minValue);
-	UpdateRightOpValue((OpExpr *)lessThanExpr, shardInterval->maxValue);
+	return list_make1(equalityExpr);
 }
 
 
@@ -485,7 +343,7 @@ GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
  * right-hand side with the provided value.
  */
 static void
-UpdateRightOpValue(const OpExpr *clause, Datum value)
+UpdateRightOpConst(const OpExpr *clause, Const *constNode)
 {
 	Node *rightOp = get_rightop((Expr *)clause);
 	Const *rightConst = NULL;
@@ -494,9 +352,9 @@ UpdateRightOpValue(const OpExpr *clause, Datum value)
 
 	rightConst = (Const *) rightOp;
 
-	rightConst->constvalue = value;
-	rightConst->constisnull = false;
-	rightConst->constbyval = true;
+	rightConst->constvalue = constNode->constvalue;
+	rightConst->constisnull = constNode->constisnull;
+	rightConst->constbyval = constNode->constbyval;
 }
 
 

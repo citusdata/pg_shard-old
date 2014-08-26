@@ -55,15 +55,14 @@ static bool SimpleOpExpression(Expr *clause);
  * and returns remaining shards in another list.
  */
 List *
-PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
+PruneShardList(Var *partitionColumn, List *whereClauseList, List *shardList)
 {
 	List *remainingShardList = NIL;
 	ListCell *shardCell = NULL;
 	List *restrictInfoList = NIL;
 	Node *baseConstraint = NULL;
 
-	Var *partitionColumn = PartitionColumn(relationId);
-	char partitionMethod = PartitionMethod(relationId);
+	char partitionMethod = PartitionMethod(0);
 
 	/* build the filter clause list for the partition method */
 	if (partitionMethod == DISTRIBUTE_BY_HASH)
