@@ -14,6 +14,8 @@
 #ifndef CREATE_SHARDS_H
 #define CREATE_SHARDS_H
 
+#include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
 
 #define WORKER_LIST_FILENAME "pg_worker_list.conf"

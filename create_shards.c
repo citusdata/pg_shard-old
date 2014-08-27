@@ -13,21 +13,34 @@
  */
 
 #include "postgres.h"
+#include "libpq-fe.h"
+#include "miscadmin.h"
+#include "pg_config_manual.h"
+#include "port.h"
+#include "postgres_ext.h"
+
 #include "connection.h"
 #include "create_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
 
+#include <ctype.h>
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "access/attnum.h"
 #include "catalog/namespace.h"
-#include "commands/dbcommands.h"
-#include "miscadmin.h"
-#include "nodes/makefuncs.h"
+#include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 #include "storage/fd.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
+#include "utils/errcodes.h"
 #include "utils/lsyscache.h"
-#include "utils/rel.h"
+#include "utils/palloc.h"
 
 
 /* local function forward declarations */

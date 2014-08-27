@@ -13,24 +13,40 @@
  */
 
 #include "postgres.h"
+#include "c.h"
+#include "postgres_ext.h"
+
 #include "ddl_commands.h"
 
+#include <stddef.h>
+
+#include "access/attnum.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup.h"
 #include "access/htup_details.h"
+#include "access/skey.h"
+#include "access/tupdesc.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
-#include "catalog/namespace.h"
+#include "catalog/pg_attribute.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_index.h"
 #include "commands/defrem.h"
 #include "foreign/foreign.h"
 #include "lib/stringinfo.h"
+#include "nodes/nodes.h"
+#include "nodes/parsenodes.h"
+#include "nodes/pg_list.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
+#include "utils/errcodes.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/palloc.h"
 #include "utils/rel.h"
+#include "utils/relcache.h"
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 

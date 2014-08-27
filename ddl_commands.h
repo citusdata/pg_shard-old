@@ -14,7 +14,10 @@
 #ifndef DDL_COMMANDS_H
 #define DDL_COMMANDS_H
 
+#include "c.h"
 #include "fmgr.h"
+#include "postgres_ext.h"
+
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 

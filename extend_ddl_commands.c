@@ -13,7 +13,14 @@
  */
 
 #include "postgres.h"
+#include "c.h"
 #include "ddl_commands.h"
+#include "pg_config.h"
+#include "pg_config_manual.h"
+#include "postgres_ext.h"
+
+#include <stdio.h>
+#include <string.h>
 
 #include "access/heapam.h"
 #include "catalog/heap.h"
@@ -22,6 +29,9 @@
 #include "lib/stringinfo.h"
 #include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
+#include "nodes/pg_list.h"
+#include "nodes/primnodes.h"
+#include "nodes/value.h"
 #include "parser/parse_coerce.h"
 #include "parser/parse_collate.h"
 #include "parser/parse_expr.h"
@@ -29,9 +39,14 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
 #include "parser/parse_utilcmd.h"
+#include "storage/lock.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
+#include "utils/errcodes.h"
 #include "utils/lsyscache.h"
+#include "utils/palloc.h"
+#include "utils/relcache.h"
 
 
 /* local function forward declarations */
