@@ -34,8 +34,8 @@ VALUES
 	(3, 'bar', 456, 3, 0),
 	(4, 'bar', 456, 4, 0);
 
-INSERT INTO pgs_distribution_metadata.partition (relation_id, key)
+INSERT INTO pgs_distribution_metadata.partition (relation_id, partition_method, key)
 VALUES
-	('events'::regclass, 'name');
+	('events'::regclass, 'h', 'name');
 
 SELECT test_distribution_metadata('events'::regclass);
