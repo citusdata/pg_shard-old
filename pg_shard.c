@@ -51,7 +51,6 @@ static DistributedPlannerInfo * BuildDistributedPlannerInfo(Query *query,
 static void ExtractPartitionValue(DistributedPlannerInfo *distRoot);
 static void FindTargetShardInterval(DistributedPlannerInfo *distRoot);
 static DistributedPlan * BuildDistributedPlan(DistributedPlannerInfo *distRoot);
-static List * BuildPartitionValueWhereList(DistributedPlannerInfo *distRoot);
 static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
@@ -224,10 +223,19 @@ FindTargetShardInterval(DistributedPlannerInfo *distRoot)
 {
 	ShardInterval *shardInterval = NULL;
 	List *shardList = LoadShardList(distRoot->distributedTableId);
-	List *whereClauseList = BuildPartitionValueWhereList(distRoot);
-	List *shardIntervalList = PruneShardList(distRoot->partitionColumn, whereClauseList,
-											 shardList);
-	int shardIntervalCount = list_length(shardIntervalList);
+	List *whereClauseList = NIL;
+	List *shardIntervalList = NIL;
+	int shardIntervalCount = 0;
+
+	/* build equality expression based on partition column value for row */
+	OpExpr *equalityExpr = MakeOpExpression(distRoot->partitionColumn,
+											BTEqualStrategyNumber);
+	UpdateRightOpConst(equalityExpr, distRoot->partitionValue);
+	whereClauseList = list_make1(equalityExpr);
+
+	shardIntervalList = PruneShardList(distRoot->partitionColumn, whereClauseList,
+									   shardList);
+	shardIntervalCount = list_length(shardIntervalList);
 	if (shardIntervalCount == 0)
 	{
 		ereport(ERROR, (errmsg("no shard exists to accept these rows")));
@@ -265,24 +273,6 @@ BuildDistributedPlan(DistributedPlannerInfo *distRoot)
 	distributedPlan->taskList = list_make1(task);
 
 	return distributedPlan;
-}
-
-
-/*
- * BuildPartitionValueWhereList builds a single-element list with an equality
- * clause on the partition column of the distributed table being planned. The
- * right-hand side of this clause is set to the particular value of the row
- * being inserted in order to leverage shard pruning logic during INSERT.
- */
-static List *
-BuildPartitionValueWhereList(DistributedPlannerInfo *distRoot)
-{
-	Const *columnConst= distRoot->partitionValue;
-	OpExpr *equalityExpr = MakeOpExpression(distRoot->partitionColumn,
-											BTEqualStrategyNumber);
-	UpdateRightOpConst(equalityExpr, columnConst);
-
-	return list_make1(equalityExpr);
 }
 
 
