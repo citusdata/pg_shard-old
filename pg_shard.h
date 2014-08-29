@@ -40,27 +40,7 @@ typedef enum DistributedNodeTag
 {
 	/* Tags for distributed planning begin a safe distance after all other tags. */
 	T_DistributedPlan = 2100,		/* plan to be built and passed to executor */
-	T_DistributedPlannerInfo = 2500	/* internal state during planning */
 } DistributedNodeTag;
-
-
-/*
- * DistributedPlannerInfo contains the private state the planner builds up when
- * planning a distributed query. Once this structure is complete, it is used to
- * generate a DistributedPlan node to pass to the executor.
- */
-typedef struct DistributedPlannerInfo
-{
-	Query *query;			/* the top-level query being planned */
-	Oid distributedTableId;	/* identifies the target table of the distributed plan */
-	Var *partitionColumn;	/* stores the column on which the table is partitioned */
-	/*
-	 * TODO: For SELECT, change the following to use a list of quals rather than
-	 *       a Const, and a list of shardIds, rather than a single one.
-	 */
-	Const *partitionValue;	/* Const values of the partitioned column */
-	int64 shardId;			/* the shard affected by the query being planned */
-} DistributedPlannerInfo;
 
 
 /*
