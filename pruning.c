@@ -9,6 +9,7 @@
 #include "c.h"
 #include "fmgr.h"
 #include "pg_config.h"
+#include "postgres_ext.h"
 
 #include "distribution_metadata.h"
 #include "pruning.h"
