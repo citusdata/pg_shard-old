@@ -1,8 +1,14 @@
-/*
- * pruning.c
+/*-------------------------------------------------------------------------
  *
- *  Created on: Aug 22, 2014
- *      Author: jason
+ * pruning.c
+ *			Pruning function implementations for pg_shard extension
+ *
+ * Portions Copyright (c) 2014, Citus Data, Inc.
+ *
+ * IDENTIFICATION
+ *			pruning.c
+ *
+ *-------------------------------------------------------------------------
  */
 
 #include "postgres.h"
@@ -34,6 +40,7 @@
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
 #include "utils/typcache.h"
+
 
 static char PartitionMethod(Oid relationId);
 static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
@@ -97,14 +104,12 @@ PruneShardList(Var *partitionColumn, List *whereClauseList, List *shardList)
 		bool shardPruned = false;
 
 		ShardInterval *shardInterval = LoadShardInterval(shardId);
-//		if (shardInterval->minValueExists && shardInterval->maxValueExists)
-		{
-			/* set the min/max values in the base constraint */
-			UpdateConstraint(baseConstraint, shardInterval);
-			constraintList = list_make1(baseConstraint);
 
-			shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
-		}
+		/* set the min/max values in the base constraint */
+		UpdateConstraint(baseConstraint, shardInterval);
+		constraintList = list_make1(baseConstraint);
+
+		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
 
 		if (shardPruned)
 		{

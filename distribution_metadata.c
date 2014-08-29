@@ -401,7 +401,6 @@ TableIsDistributed(Oid tableId)
 	HeapTuple heapTuple = NULL;
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
-
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
 
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,

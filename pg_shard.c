@@ -222,25 +222,25 @@ ExtractPartitionValue(DistributedPlannerInfo *distRoot)
 static void
 FindTargetShardInterval(DistributedPlannerInfo *distRoot)
 {
+	ShardInterval *shardInterval = NULL;
 	List *shardList = LoadShardList(distRoot->distributedTableId);
 	List *whereClauseList = BuildPartitionValueWhereList(distRoot);
-	List *shardIntervals = PruneShardList(distRoot->partitionColumn, whereClauseList,
-										  shardList);
-	ShardInterval *targetShard = NULL;
-
-	if (list_length(shardIntervals) == 0)
+	List *shardIntervalList = PruneShardList(distRoot->partitionColumn, whereClauseList,
+											 shardList);
+	int shardIntervalCount = list_length(shardIntervalList);
+	if (shardIntervalCount == 0)
 	{
 		ereport(ERROR, (errmsg("no shard exists to accept these rows")));
 	}
-	else if (list_length(shardIntervals) > 1)
+	else if (shardIntervalCount > 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan query that inserts into more than "
 							   "one shard at a time")));
 	}
 
-	targetShard = (ShardInterval *) linitial(shardIntervals);
-	distRoot->shardId = targetShard->id;
+	shardInterval = (ShardInterval *) linitial(shardIntervalList);
+	distRoot->shardId = shardInterval->id;
 }
 
 
@@ -253,12 +253,13 @@ BuildDistributedPlan(DistributedPlannerInfo *distRoot)
 {
 	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
 	List *shardPlacementList = LoadShardPlacementList(distRoot->shardId);
+	Task *task = NULL;
 
-	Task *task = (Task *) palloc0(sizeof(Task));
+	StringInfo queryString = makeStringInfo();
+	deparse_shard_query(distRoot->query, distRoot->shardId, queryString);
 
-	task->queryString = makeStringInfo();
-
-	deparse_shard_query(distRoot->query, distRoot->shardId, task->queryString);
+	task = (Task *) palloc0(sizeof(Task));
+	task->queryString = queryString;
 	task->taskPlacementList = shardPlacementList;
 
 	distributedPlan->taskList = list_make1(task);

@@ -18,10 +18,13 @@
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
 
+
 #define DISTRIBUTE_BY_HASH		'h'
 #define HASHED_COLUMN_NUMBER	MaxAttrNumber
 
+
 extern List * PruneShardList(Var *partitionColumn, List *whereClauseList,
 							 List *shardList);
+
 
 #endif /* PG_SHARD_PRUNING_H */

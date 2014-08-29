@@ -70,7 +70,6 @@
 #include "utils/xml.h"
 
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wgnu-statement-expression"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wswitch"
 
