@@ -182,20 +182,17 @@ BuildDistributedPlannerInfo(Query *query, Oid distributedTableId)
 
 
 /*
- * ExtractPartitionValue extracts partition column values from a list of source
- * plans. For now, exactly one source plan is expected and must be a Result.
- * Once a list of partition column values has been computed, this function saves
- * it in the provided DistributedPlannerInfo.
+ * ExtractPartitionValue extracts the partition column value from a the target
+ * of a modification command. If a partition value is not a constant, is NULL,
+ * or is missing altogether, this function throws an error.
  */
 static void
 ExtractPartitionValue(DistributedPlannerInfo *distRoot)
 {
-	Var *partitionColumn = distRoot->partitionColumn;
+	Const *value = NULL;
+
 	TargetEntry *targetEntry = get_tle_by_resno(distRoot->query->targetList,
 												distRoot->partitionColumn->varattno);
-	Const *value = makeNullConst(partitionColumn->vartype, partitionColumn->vartypmod,
-								 partitionColumn->varcollid);
-
 	if (targetEntry != NULL)
 	{
 		if (!IsA(targetEntry->expr, Const))
@@ -206,6 +203,13 @@ ExtractPartitionValue(DistributedPlannerInfo *distRoot)
 		}
 
 		value = (Const *) targetEntry->expr;
+	}
+
+	if (value == NULL || value->constisnull)
+	{
+		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+						errmsg("cannot plan INSERT using row with NULL value "
+							   "in partition column")));
 	}
 
 	distRoot->partitionValue = value;
