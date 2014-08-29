@@ -301,6 +301,9 @@ UpdateRightOpConst(const OpExpr *clause, Const *constNode)
 /*
  * NeedsDistributedPlanning checks if the passed in Query is an INSERT command
  * running on partitioned relations. If it is, we start distributed planning.
+ *
+ * This function throws an error if the query represents a multi-row INSERT or
+ * mixes distributed and local tables.
  */
 static bool
 NeedsDistributedPlanning(Query *queryTree)
@@ -309,6 +312,7 @@ NeedsDistributedPlanning(Query *queryTree)
 	ListCell *rangeTableCell = NULL;
 	bool hasLocalRelation = false;
 	bool hasDistributedRelation = false;
+	bool hasValuesScan = false;
 
 	if (queryTree->commandType != CMD_INSERT)
 	{
@@ -321,7 +325,12 @@ NeedsDistributedPlanning(Query *queryTree)
 	foreach(rangeTableCell, rangeTableList)
 	{
 		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
-		if (TableIsDistributed(rangeTableEntry->relid))
+
+		if(rangeTableEntry->rtekind == RTE_VALUES)
+		{
+			hasValuesScan = true;
+		}
+		else if (TableIsDistributed(rangeTableEntry->relid))
 		{
 			hasDistributedRelation = true;
 		}
@@ -331,11 +340,21 @@ NeedsDistributedPlanning(Query *queryTree)
 		}
 	}
 
-	/* users can't mix local and distributed relations in one query */
-	if (hasLocalRelation && hasDistributedRelation)
+	if (hasDistributedRelation)
 	{
-		ereport(ERROR, (errmsg("cannot plan queries that include both regular and "
-							   "partitioned relations")));
+		/* users can't mix local and distributed relations in one query */
+		if (hasLocalRelation)
+		{
+			ereport(ERROR, (errmsg("cannot plan queries that include both regular and "
+								   "partitioned relations")));
+		}
+
+		if (hasValuesScan)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("multi-row INSERTs to distributed tables "
+								   "are not supported")));
+		}
 	}
 
 	return hasDistributedRelation;
@@ -344,9 +363,13 @@ NeedsDistributedPlanning(Query *queryTree)
 
 /*
  * ExtractRangeTableRelationWalker walks over a query tree, and finds all range
- * table entries that are plain relations. For recursing into the query tree,
- * this function uses the query tree walker since the expression tree walker
- * doesn't recurse into sub-queries.
+ * table entries that are plain relations or values scans. For recursing into
+ * the query tree, this function uses the query tree walker since the expression
+ * tree walker doesn't recurse into sub-queries.
+ *
+ * Values scans are not supported, but there is no field on the Query that can
+ * be easily checked to detect them, so we collect them here and let the logic
+ * in NeedsDistributedPlanning sort it out.
  */
 static bool
 ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
@@ -360,22 +383,10 @@ ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
 	if (IsA(node, RangeTblEntry))
 	{
 		RangeTblEntry *rangeTable = (RangeTblEntry *) node;
-		if (rangeTable->rtekind == RTE_RELATION)
+		if (rangeTable->rtekind == RTE_RELATION || rangeTable->rtekind == RTE_VALUES)
 		{
 			(*rangeTableList) = lappend(*rangeTableList, rangeTable);
 		}
-		/* TODO: This check must live elsewhere
-		 *	else if (rangeTable->rtekind == RTE_VALUES)
-		 *	{
-		 *		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-		 *						errmsg("multi-row INSERT not supported")));
-		 *	}
-		 *	else if (rangeTable->rtekind == RTE_CTE)
-		 *	{
-		 *		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-		 *						errmsg("common table expressions not supported")));
-		 *	}
-		 */
 	}
 	else if (IsA(node, Query))
 	{
