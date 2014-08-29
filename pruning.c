@@ -269,27 +269,27 @@ GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 static bool
 SimpleOpExpression(Expr *clause)
 {
-	Node *leftOperator = NULL;
-	Node *rightOperator = NULL;
+	Node *leftOperand = NULL;
+	Node *rightOperand = NULL;
 	Const *constantClause = NULL;
 
 	if (is_opclause(clause) && list_length(((OpExpr *) clause)->args) == 2)
 	{
-		leftOperator = get_leftop(clause);
-		rightOperator = get_rightop(clause);
+		leftOperand = get_leftop(clause);
+		rightOperand = get_rightop(clause);
 	}
 	else
 	{
 		return false; /* not a binary opclause */
 	}
 
-	if (IsA(rightOperator, Const) && IsA(leftOperator, Var))
+	if (IsA(rightOperand, Const) && IsA(leftOperand, Var))
 	{
-		constantClause = (Const *) rightOperator;
+		constantClause = (Const *) rightOperand;
 	}
-	else if (IsA(leftOperator, Const) && IsA(rightOperator, Var))
+	else if (IsA(leftOperand, Const) && IsA(rightOperand, Var))
 	{
-		constantClause = (Const *) leftOperator;
+		constantClause = (Const *) leftOperand;
 	}
 	else
 	{
@@ -390,17 +390,17 @@ HashableClauseMutator(Node *originalNode, Var *partitionColumn)
 static bool
 OpExpressionContainsColumn(OpExpr *operatorExpression, Var *partitionColumn)
 {
-	Node *leftOperator = get_leftop((Expr *) operatorExpression);
-	Node *rightOperator = get_rightop((Expr *) operatorExpression);
+	Node *leftOperand = get_leftop((Expr *) operatorExpression);
+	Node *rightOperand = get_rightop((Expr *) operatorExpression);
 	Var *column = NULL;
 
-	if (IsA(leftOperator, Var))
+	if (IsA(leftOperand, Var))
 	{
-		column = (Var *) leftOperator;
+		column = (Var *) leftOperand;
 	}
 	else
 	{
-		column = (Var *) rightOperator;
+		column = (Var *) rightOperand;
 	}
 
 	return equal(column, partitionColumn);
@@ -426,17 +426,17 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	FmgrInfo *hashFunction = NULL;
 	TypeCacheEntry *typeEntry = NULL;
 
-	Node *leftOperator = get_leftop((Expr *) operatorExpression);
-	Node *rightOperator = get_rightop((Expr *) operatorExpression);
+	Node *leftOperand = get_leftop((Expr *) operatorExpression);
+	Node *rightOperand = get_rightop((Expr *) operatorExpression);
 	Const *constant = NULL;
 
-	if (IsA(rightOperator, Const))
+	if (IsA(rightOperand, Const))
 	{
-		constant = (Const *) rightOperator;
+		constant = (Const *) rightOperand;
 	}
 	else
 	{
-		constant = (Const *) leftOperator;
+		constant = (Const *) leftOperand;
 	}
 
 	/* Load the operator from system catalogs */
@@ -485,7 +485,7 @@ static Var *
 MakeInt4Column()
 {
 	Index tableId = 0;
-	AttrNumber columnAttributeNumber = HASHED_COLUMN_NUMBER;
+	AttrNumber columnAttributeNumber = RESERVED_HASHED_COLUMN_ID;
 	Oid columnType = INT4OID;
 	int32 columnTypeMod = -1;
 	Oid columnCollationOid = InvalidOid;

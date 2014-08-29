@@ -20,7 +20,7 @@
 
 
 #define DISTRIBUTE_BY_HASH		'h'
-#define HASHED_COLUMN_NUMBER	MaxAttrNumber
+#define RESERVED_HASHED_COLUMN_ID	MaxAttrNumber
 
 
 extern List * PruneShardList(Var *partitionColumn, List *whereClauseList,
