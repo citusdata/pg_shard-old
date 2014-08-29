@@ -235,7 +235,7 @@ FindTargetShardInterval(DistributedPlannerInfo *distRoot)
 	UpdateRightOpConst(equalityExpr, distRoot->partitionValue);
 	whereClauseList = list_make1(equalityExpr);
 
-	shardIntervalList = PruneShardList(distRoot->partitionColumn, whereClauseList,
+	shardIntervalList = PruneShardList(distRoot->distributedTableId, whereClauseList,
 									   shardList);
 	shardIntervalCount = list_length(shardIntervalList);
 	if (shardIntervalCount == 0)

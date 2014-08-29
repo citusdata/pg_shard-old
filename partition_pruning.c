@@ -42,7 +42,6 @@
 #include "utils/typcache.h"
 
 
-static char PartitionMethod(Oid relationId);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static bool SimpleOpExpression(Expr *clause);
 static Node * HashableClauseMutator(Node *originalNode, Var *partitionColumn);
@@ -62,14 +61,15 @@ static bool SimpleOpExpression(Expr *clause);
  * and returns remaining shards in another list.
  */
 List *
-PruneShardList(Var *partitionColumn, List *whereClauseList, List *shardList)
+PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
 {
 	List *remainingShardList = NIL;
 	ListCell *shardCell = NULL;
 	List *restrictInfoList = NIL;
 	Node *baseConstraint = NULL;
 
-	char partitionMethod = PartitionMethod(0);
+	Var *partitionColumn = PartitionColumn(relationId);
+	char partitionMethod = PartitionType(relationId);
 
 	/* build the filter clause list for the partition method */
 	if (partitionMethod == DISTRIBUTE_BY_HASH)
@@ -533,12 +533,3 @@ MakeOpExpressionWithZeroConst()
 	return operatorExpression;
 }
 
-
-/*
- * Dummy method until pg_shard gets PartitionMethod support.
- */
-static char
-PartitionMethod(Oid relationId __attribute__((unused)))
-{
-	return DISTRIBUTE_BY_HASH;
-}
