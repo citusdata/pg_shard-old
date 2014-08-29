@@ -59,7 +59,7 @@ static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
 PG_MODULE_MAGIC;
 
 
-/* Saved hook values in case of unload */
+/* saved hook values in case of unload */
 static planner_hook_type PreviousPlannerHook = NULL;
 
 
