@@ -194,7 +194,7 @@ ExtractPartitionValue(DistributedPlannerInfo *distRoot)
 	TargetEntry *targetEntry = get_tle_by_resno(distRoot->query->targetList,
 												distRoot->partitionColumn->varattno);
 	Const *value = makeNullConst(partitionColumn->vartype, partitionColumn->vartypmod,
-							   partitionColumn->varcollid);
+								 partitionColumn->varcollid);
 
 	if (targetEntry != NULL)
 	{
