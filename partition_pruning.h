@@ -25,6 +25,7 @@
 
 extern List * PruneShardList(Var *partitionColumn, List *whereClauseList,
 							 List *shardList);
+extern OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 
 
 #endif /* PG_SHARD_PARTITION_PRUNING_H */

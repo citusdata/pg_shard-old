@@ -43,7 +43,6 @@
 
 
 static char PartitionMethod(Oid relationId);
-static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static bool SimpleOpExpression(Expr *clause);
 static Node * HashableClauseMutator(Node *originalNode, Var *partitionColumn);
@@ -213,7 +212,7 @@ UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
  * implements the operator clause as defined by the variable and the strategy
  * number.
  */
-static OpExpr *
+OpExpr *
 MakeOpExpression(Var *variable, int16 strategyNumber)
 {
 	Oid typeId = variable->vartype;

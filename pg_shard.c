@@ -51,8 +51,6 @@ static DistributedPlannerInfo * BuildDistributedPlannerInfo(Query *query,
 static void ExtractPartitionValue(DistributedPlannerInfo *distRoot);
 static void FindTargetShardInterval(DistributedPlannerInfo *distRoot);
 static DistributedPlan * BuildDistributedPlan(DistributedPlannerInfo *distRoot);
-static OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
-static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
 static bool NeedsDistributedPlanning(Query *queryTree);
 static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
@@ -277,59 +275,6 @@ BuildDistributedPlan(DistributedPlannerInfo *distRoot)
 	distributedPlan->taskList = list_make1(task);
 
 	return distributedPlan;
-}
-
-
-/*
- * MakeOpExpression simply returns a binary operator expression for the provided
- * variable type and strategy (equal, greater than, less than, etc.).
- */
-static OpExpr *
-MakeOpExpression(Var *variable, int16 strategyNumber)
-{
-	Oid typeId = variable->vartype;
-	Oid typeModId = variable->vartypmod;
-	Oid collationId = variable->varcollid;
-
-	/* Load the operator from system catalogs */
-	Oid accessMethodId = BTREE_AM_OID;
-	Oid operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
-
-	Const  *constantValue = makeNullConst(typeId, typeModId, collationId);
-	OpExpr *expression = NULL;
-
-	/* Now make the expression with the given variable and a null constant */
-	expression = (OpExpr *) make_opclause(operatorId,
-										  InvalidOid, /* no result type yet */
-										  false,	  /* no return set */
-										  (Expr *) variable,
-										  (Expr *) constantValue,
-										  InvalidOid, collationId);
-
-	/* Set implementing function id and result type */
-	expression->opfuncid = get_opcode(operatorId);
-	expression->opresulttype = get_func_rettype(expression->opfuncid);
-
-	return expression;
-}
-
-
-/*
- * GetOperatorByType returns the identifier of the operator implementing the
- * provided strategy (equal, greater than, etc.) for the provided type using
- * the provided access method (BTree, etc.).
- */
-static Oid
-GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
-{
-	/* Get default operator class from pg_opclass */
-	Oid operatorClassId = GetDefaultOpClass(typeId, accessMethodId);
-
-	Oid operatorFamily = get_opclass_family(operatorClassId);
-
-	Oid operatorId = get_opfamily_member(operatorFamily, typeId, typeId, strategyNumber);
-
-	return operatorId;
 }
 
 
