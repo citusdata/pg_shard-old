@@ -2,7 +2,10 @@
  *
  * ruleutils.c
  *	  Functions to convert stored expressions/querytrees back to
- *	  source text
+ *	  source text. Used by pg_shard to recreate the text of an
+ *	  incoming query with the proper shard identifier added. As
+ *	  these methods are static in PostgreSQL proper, we copied
+ *	  this file for the time being.
  *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
