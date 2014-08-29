@@ -1,18 +1,18 @@
 /*-------------------------------------------------------------------------
  *
- * pruning.h
+ * partition_pruning.h
  *			Pruning function declarations for pg_shard extension
  *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  *
  * IDENTIFICATION
- *			pruning.h
+ *			partition_pruning.h
  *
  *-------------------------------------------------------------------------
  */
 
-#ifndef PG_SHARD_PRUNING_H
-#define PG_SHARD_PRUNING_H
+#ifndef PG_SHARD_PARTITION_PRUNING_H
+#define PG_SHARD_PARTITION_PRUNING_H
 
 #include "access/attnum.h"
 #include "nodes/pg_list.h"
@@ -27,4 +27,4 @@ extern List * PruneShardList(Var *partitionColumn, List *whereClauseList,
 							 List *shardList);
 
 
-#endif /* PG_SHARD_PRUNING_H */
+#endif /* PG_SHARD_PARTITION_PRUNING_H */

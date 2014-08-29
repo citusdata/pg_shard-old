@@ -17,7 +17,7 @@
 
 #include "pg_shard.h"
 #include "distribution_metadata.h"
-#include "pruning.h"
+#include "partition_pruning.h"
 #include "ruleutils.h"
 
 #include <stddef.h>
