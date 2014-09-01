@@ -25,9 +25,6 @@
 #include <stddef.h>
 
 #include "access/skey.h"
-#include "catalog/pg_am.h"
-#include "commands/defrem.h"
-#include "nodes/makefuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
@@ -40,7 +37,6 @@
 #include "parser/parsetree.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
-#include "utils/lsyscache.h"
 #include "utils/palloc.h"
 
 
