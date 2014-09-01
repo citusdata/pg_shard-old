@@ -47,9 +47,9 @@ static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static DistributedPlan * PlanDistributedModify(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
-static int64 FindTargetShardInterval(Oid distributedTableId, Var *partitionColumn,
-									 Const *partitionValue);
-static DistributedPlan * BuildDistributedPlan(Query *query, int64 shardId);
+static List * FindTargetShardList(Oid distributedTableId, Var *partitionColumn,
+								  Const *partitionValue);
+static DistributedPlan * BuildDistributedPlan(Query *query, List *targetShardList);
 static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
 static bool NeedsDistributedPlanning(Query *queryTree);
 static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
@@ -105,14 +105,12 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 	if (NeedsDistributedPlanning(query))
 	{
-		DistributedPlan *distributedPlan = NULL;
 		CmdType cmdType = query->commandType;
 
 		if (cmdType == CMD_INSERT)
 		{
 			Task *task = NULL;
-
-			distributedPlan = PlanDistributedModify(query);
+			DistributedPlan *distributedPlan = PlanDistributedModify(query);
 			task = linitial(distributedPlan->taskList);
 			ereport(INFO, (errmsg("%s", task->queryString->data)));
 		}
@@ -137,7 +135,7 @@ PlanDistributedModify(Query *query)
 	Oid resultTableId = getrelid(query->resultRelation, query->rtable);
 	Var *partitionColumn = PartitionColumn(resultTableId);
 	Const *partitionValue = NULL;
-	int64 targetShardId = 0;
+	List *targetShardList = NIL;
 
 	/* Reject queries with a returning list */
 	if (list_length(query->returningList) > 0)
@@ -149,11 +147,11 @@ PlanDistributedModify(Query *query)
 
 	/* use values of partition columns to determine shard */
 	partitionValue = ExtractPartitionValue(query, partitionColumn);
-	targetShardId = FindTargetShardInterval(resultTableId, partitionColumn,
-											partitionValue);
+	targetShardList = FindTargetShardList(resultTableId, partitionColumn,
+										  partitionValue);
 
 	/* use accumulated planner state to generate plan */
-	distributedPlan = BuildDistributedPlan(query, targetShardId);
+	distributedPlan = BuildDistributedPlan(query, targetShardList);
 
 	return distributedPlan;
 }
@@ -195,63 +193,56 @@ ExtractPartitionValue(Query *query, Var *partitionColumn)
 
 
 /*
- * FindTargetShardInterval locates a single shard capable of receiving rows with
- * the specified partition values and saves its id in the provided distributed
- * planner info instance. If no such shard exists (or if more than one does),
- * this method throws an error.
+ * FindTargetShardInterval locates shards capable of receiving rows with the
+ * specified partition value. If no such shards exist, this method will return
+ * NIL.
  */
-static int64
-FindTargetShardInterval(Oid distributedTableId, Var *partitionColumn,
-						Const *partitionValue)
+static List *
+FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partitionValue)
 {
-	ShardInterval *shardInterval = NULL;
 	List *shardList = LoadShardList(distributedTableId);
 	List *whereClauseList = NIL;
-	List *shardIntervalList = NIL;
-	int shardIntervalCount = 0;
+	List *targetShardList = NIL;
 
 	/* build equality expression based on partition column value for row */
 	OpExpr *equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
 	UpdateRightOpConst(equalityExpr, partitionValue);
 	whereClauseList = list_make1(equalityExpr);
 
-	shardIntervalList = PruneShardList(distributedTableId, whereClauseList, shardList);
-	shardIntervalCount = list_length(shardIntervalList);
-	if (shardIntervalCount == 0)
-	{
-		ereport(ERROR, (errmsg("no shard exists to accept these rows")));
-	}
-	else if (shardIntervalCount > 1)
-	{
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan query that inserts into more than "
-							   "one shard at a time")));
-	}
+	targetShardList = PruneShardList(distributedTableId, whereClauseList, shardList);
 
-	shardInterval = (ShardInterval *) linitial(shardIntervalList);
-
-	return shardInterval->id;
+	return targetShardList;
 }
 
 
 /*
- * BuildDistributedPlan constructs a distributed plan from a query and shardId.
+ * BuildDistributedPlan constructs a distributed plan from a query and list of
+ * ShardInterval instances.
  */
 static DistributedPlan *
-BuildDistributedPlan(Query *query, int64 shardId)
+BuildDistributedPlan(Query *query, List *targetShardList)
 {
 	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
-	List *shardPlacementList = LoadShardPlacementList(shardId);
-	Task *task = NULL;
+	ListCell *targetShardCell = NULL;
+	List *taskList = NIL;
 
-	StringInfo queryString = makeStringInfo();
-	deparse_shard_query(query, shardId, queryString);
+	foreach(targetShardCell, targetShardList)
+	{
+		ShardInterval *targetShard = (ShardInterval *) lfirst(targetShardCell);
+		List *shardPlacementList = LoadShardPlacementList(targetShard->id);
+		Task *task = NULL;
 
-	task = (Task *) palloc0(sizeof(Task));
-	task->queryString = queryString;
-	task->taskPlacementList = shardPlacementList;
+		StringInfo queryString = makeStringInfo();
+		deparse_shard_query(query, targetShard->id, queryString);
 
-	distributedPlan->taskList = list_make1(task);
+		task = (Task *) palloc0(sizeof(Task));
+		task->queryString = queryString;
+		task->taskPlacementList = shardPlacementList;
+
+		taskList = lappend(taskList, task);
+	}
+
+	distributedPlan->taskList = taskList;
 
 	return distributedPlan;
 }
