@@ -47,14 +47,14 @@
 /* local forward declarations */
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
+static bool NeedsDistributedPlanning(Query *queryTree);
+static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
 static DistributedPlan * PlanDistributedModify(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static List * FindTargetShardList(Oid distributedTableId, Var *partitionColumn,
 								  Const *partitionValue);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *targetShardList);
 static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
-static bool NeedsDistributedPlanning(Query *queryTree);
-static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
 
 
 /* declarations for dynamic loading */
@@ -121,152 +121,6 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 	}
 
 	return plannedStatement;
-}
-
-
-/*
- * PlanDistributedModify is the main entry point when planning a modification of
- * a distributed table. It checks whether the modification's target table is
- * distributed and produces a DistributedPlan node if so. Otherwise, this
- * function returns NULL to avoid further distributed processing.
- */
-static DistributedPlan *
-PlanDistributedModify(Query *query)
-{
-	DistributedPlan *distributedPlan = NULL;
-	Oid resultTableId = getrelid(query->resultRelation, query->rtable);
-	Var *partitionColumn = PartitionColumn(resultTableId);
-	Const *partitionValue = NULL;
-	List *targetShardList = NIL;
-
-	/* Reject queries with a returning list */
-	if (list_length(query->returningList) > 0)
-	{
-		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded INSERT that uses a "
-							   "RETURNING clause")));
-	}
-
-	/* use values of partition columns to determine shard */
-	partitionValue = ExtractPartitionValue(query, partitionColumn);
-	targetShardList = FindTargetShardList(resultTableId, partitionColumn,
-										  partitionValue);
-
-	/* use accumulated planner state to generate plan */
-	distributedPlan = BuildDistributedPlan(query, targetShardList);
-
-	return distributedPlan;
-}
-
-
-/*
- * ExtractPartitionValue extracts the partition column value from a the target
- * of a modification command. If a partition value is not a constant, is NULL,
- * or is missing altogether, this function throws an error.
- */
-static Const *
-ExtractPartitionValue(Query *query, Var *partitionColumn)
-{
-	Const *value = NULL;
-
-	TargetEntry *targetEntry = get_tle_by_resno(query->targetList,
-												partitionColumn->varattno);
-	if (targetEntry != NULL)
-	{
-		if (!IsA(targetEntry->expr, Const))
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot plan sharded INSERT using a non-"
-								   "constant partition column value")));
-		}
-
-		value = (Const *) targetEntry->expr;
-	}
-
-	if (value == NULL || value->constisnull)
-	{
-		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-						errmsg("cannot plan INSERT using row with NULL value "
-							   "in partition column")));
-	}
-
-	return value;
-}
-
-
-/*
- * FindTargetShardInterval locates shards capable of receiving rows with the
- * specified partition value. If no such shards exist, this method will return
- * NIL.
- */
-static List *
-FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partitionValue)
-{
-	List *shardList = LoadShardList(distributedTableId);
-	List *whereClauseList = NIL;
-	List *targetShardList = NIL;
-
-	/* build equality expression based on partition column value for row */
-	OpExpr *equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
-	UpdateRightOpConst(equalityExpr, partitionValue);
-	whereClauseList = list_make1(equalityExpr);
-
-	targetShardList = PruneShardList(distributedTableId, whereClauseList, shardList);
-
-	return targetShardList;
-}
-
-
-/*
- * BuildDistributedPlan constructs a distributed plan from a query and list of
- * ShardInterval instances.
- */
-static DistributedPlan *
-BuildDistributedPlan(Query *query, List *targetShardList)
-{
-	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
-	ListCell *targetShardCell = NULL;
-	List *taskList = NIL;
-
-	foreach(targetShardCell, targetShardList)
-	{
-		ShardInterval *targetShard = (ShardInterval *) lfirst(targetShardCell);
-		List *shardPlacementList = LoadShardPlacementList(targetShard->id);
-		Task *task = NULL;
-
-		StringInfo queryString = makeStringInfo();
-		deparse_shard_query(query, targetShard->id, queryString);
-
-		task = (Task *) palloc0(sizeof(Task));
-		task->queryString = queryString;
-		task->taskPlacementList = shardPlacementList;
-
-		taskList = lappend(taskList, task);
-	}
-
-	distributedPlan->taskList = taskList;
-
-	return distributedPlan;
-}
-
-
-/*
- * UpdateRightOpValue updates the provided clause (in-place) by replacing its
- * right-hand side with the provided value.
- */
-static void
-UpdateRightOpConst(const OpExpr *clause, Const *constNode)
-{
-	Node *rightOp = get_rightop((Expr *)clause);
-	Const *rightConst = NULL;
-
-	Assert(IsA(rightOp, Const));
-
-	rightConst = (Const *) rightOp;
-
-	rightConst->constvalue = constNode->constvalue;
-	rightConst->constisnull = constNode->constisnull;
-	rightConst->constbyval = constNode->constbyval;
 }
 
 
@@ -372,4 +226,146 @@ ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
 	}
 
 	return walkerResult;
+}
+
+
+/*
+ * PlanDistributedModify is the main entry point when planning a modification of
+ * a distributed table. A DistributedPlan for the query in question is returned,
+ * unless the query uses unsupported features, in which case this function will
+ * throw an error.
+ */
+static DistributedPlan *
+PlanDistributedModify(Query *query)
+{
+	DistributedPlan *distributedPlan = NULL;
+	Oid resultTableId = getrelid(query->resultRelation, query->rtable);
+	Var *partitionColumn = PartitionColumn(resultTableId);
+	Const *partitionValue = NULL;
+	List *targetShardList = NIL;
+
+	/* Reject queries with a returning list */
+	if (list_length(query->returningList) > 0)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot plan sharded INSERT that uses a "
+							   "RETURNING clause")));
+	}
+
+	/* use values of partition columns to determine shards, then build plan */
+	partitionValue = ExtractPartitionValue(query, partitionColumn);
+	targetShardList = FindTargetShardList(resultTableId, partitionColumn,
+										  partitionValue);
+	distributedPlan = BuildDistributedPlan(query, targetShardList);
+
+	return distributedPlan;
+}
+
+
+/*
+ * ExtractPartitionValue extracts the partition column value from a the target
+ * of a modification command. If a partition value is not a constant, is NULL,
+ * or is missing altogether, this function throws an error.
+ */
+static Const *
+ExtractPartitionValue(Query *query, Var *partitionColumn)
+{
+	Const *value = NULL;
+	TargetEntry *targetEntry = get_tle_by_resno(query->targetList,
+												partitionColumn->varattno);
+	if (targetEntry != NULL)
+	{
+		if (!IsA(targetEntry->expr, Const))
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot plan sharded INSERT using a non-"
+								   "constant partition column value")));
+		}
+
+		value = (Const *) targetEntry->expr;
+	}
+
+	if (value == NULL || value->constisnull)
+	{
+		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+						errmsg("cannot plan INSERT using row with NULL value "
+							   "in partition column")));
+	}
+
+	return value;
+}
+
+
+/*
+ * FindTargetShardInterval locates shards capable of receiving rows with the
+ * provided partition value. If no such shards exist, this method returns NIL.
+ */
+static List *
+FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partitionValue)
+{
+	List *shardList = LoadShardList(distributedTableId);
+	List *whereClauseList = NIL;
+	List *targetShardList = NIL;
+
+	/* build equality expression based on partition column value for row */
+	OpExpr *equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
+	UpdateRightOpConst(equalityExpr, partitionValue);
+	whereClauseList = list_make1(equalityExpr);
+
+	targetShardList = PruneShardList(distributedTableId, whereClauseList, shardList);
+
+	return targetShardList;
+}
+
+
+/*
+ * BuildDistributedPlan simply creates the DistributedPlan instance from the
+ * provided query and target shard list.
+ */
+static DistributedPlan *
+BuildDistributedPlan(Query *query, List *targetShardList)
+{
+	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
+	ListCell *targetShardCell = NULL;
+	List *taskList = NIL;
+
+	foreach(targetShardCell, targetShardList)
+	{
+		ShardInterval *targetShard = (ShardInterval *) lfirst(targetShardCell);
+		List *shardPlacementList = LoadShardPlacementList(targetShard->id);
+		Task *task = NULL;
+
+		StringInfo queryString = makeStringInfo();
+		deparse_shard_query(query, targetShard->id, queryString);
+
+		task = (Task *) palloc0(sizeof(Task));
+		task->queryString = queryString;
+		task->taskPlacementList = shardPlacementList;
+
+		taskList = lappend(taskList, task);
+	}
+
+	distributedPlan->taskList = taskList;
+
+	return distributedPlan;
+}
+
+
+/*
+ * UpdateRightOpValue updates the provided clause (in-place) by replacing its
+ * right-hand side with the provided value.
+ */
+static void
+UpdateRightOpConst(const OpExpr *clause, Const *constNode)
+{
+	Node *rightOp = get_rightop((Expr *)clause);
+	Const *rightConst = NULL;
+
+	Assert(IsA(rightOp, Const));
+
+	rightConst = (Const *) rightOp;
+
+	rightConst->constvalue = constNode->constvalue;
+	rightConst->constisnull = constNode->constisnull;
+	rightConst->constbyval = constNode->constbyval;
 }
