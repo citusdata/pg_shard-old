@@ -14,6 +14,8 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
+#include "postgres_ext.h"
+
 
 #include "pg_shard.h"
 #include "distribution_metadata.h"

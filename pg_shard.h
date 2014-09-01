@@ -14,14 +14,9 @@
 #ifndef PG_SHARD_H
 #define PG_SHARD_H
 
-#include "c.h"
-#include "postgres_ext.h"
-
 #include "nodes/nodes.h"
-#include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
-#include "nodes/primnodes.h"
 #include "lib/stringinfo.h"
 
 
