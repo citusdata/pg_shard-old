@@ -101,23 +101,34 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
 
-	/* call standard planner to have Query transformations performed */
-	/* TODO: Where do we call PreviousPlannerHook? */
-	plannedStatement = standard_planner(query, cursorOptions, boundParams);
-
 	if (NeedsDistributedPlanning(query))
 	{
+		Query *distributedQuery = copyObject(query);
 		CmdType cmdType = query->commandType;
+
+		/* call standard planner on copy to have Query transformations performed */
+		plannedStatement = standard_planner(distributedQuery, cursorOptions,
+											boundParams);
 
 		if (cmdType == CMD_INSERT)
 		{
 			Task *task = NULL;
-			DistributedPlan *distributedPlan = PlanDistributedModify(query);
+			DistributedPlan *distributedPlan = PlanDistributedModify(distributedQuery);
 			task = linitial(distributedPlan->taskList);
 			ereport(INFO, (errmsg("%s", task->queryString->data)));
 		}
 
 		/* TODO: Add SELECT handling here */
+	}
+
+	/* call previous planner if present, otherwise use standard if we haven't already */
+	if (PreviousPlannerHook != NULL)
+	{
+		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
+	}
+	else if (plannedStatement == NULL)
+	{
+		plannedStatement = standard_planner(query, cursorOptions, boundParams);
 	}
 
 	return plannedStatement;
