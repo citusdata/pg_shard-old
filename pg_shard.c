@@ -24,6 +24,9 @@
 #include <stddef.h>
 
 #include "access/skey.h"
+#include "executor/execdesc.h"
+#include "executor/executor.h"
+#include "nodes/execnodes.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
@@ -49,6 +52,7 @@ static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static PlannerType DeterminePlannerType(Query *query);
 static Oid ExtractFirstDistributedTableId(Query *query);
+static void PgShardExecutorStartHook(QueryDesc *queryDesc, int eflags);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
@@ -64,6 +68,7 @@ PG_MODULE_MAGIC;
 
 /* saved hook values in case of unload */
 static planner_hook_type PreviousPlannerHook = NULL;
+static ExecutorStart_hook_type PreviousExecutorStartHook = NULL;
 
 
 /*
@@ -76,6 +81,9 @@ _PG_init(void)
 {
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlannerHook;
+
+	PreviousExecutorStartHook = ExecutorStart_hook;
+	ExecutorStart_hook = PgShardExecutorStartHook;
 
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
 							 "Informs pg_shard to use CitusDB's select logic.",
@@ -91,6 +99,7 @@ _PG_init(void)
 void
 _PG_fini(void)
 {
+	ExecutorStart_hook = PreviousExecutorStartHook;
 	planner_hook = PreviousPlannerHook;
 }
 
@@ -171,6 +180,35 @@ DeterminePlannerType(Query *query)
 	}
 
 	return plannerType;
+}
+
+
+static void
+PgShardExecutorStartHook(QueryDesc *queryDesc, int eflags)
+{
+	PlannedStmt *planStatement = queryDesc->plannedstmt;
+	bool pgShardExecution = IsAPgShardPlan(planStatement);
+
+	if (pgShardExecution)
+	{
+		/* build empty executor state to obtain per-query memory context */
+		EState *estate = CreateExecutorState();
+		queryDesc->estate = estate;
+
+		/* don't drop into standard executor: we'll handle DistributedPlan */
+	}
+	else
+	{
+		/* this isn't a query pg_shard handles: use previous hook or standard */
+		if (PreviousExecutorStartHook != NULL)
+		{
+			PreviousExecutorStartHook(queryDesc, eflags);
+		}
+		else
+		{
+			standard_ExecutorStart(queryDesc, eflags);
+		}
+	}
 }
 
 

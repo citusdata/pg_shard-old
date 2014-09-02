@@ -14,10 +14,17 @@
 #ifndef PG_SHARD_H
 #define PG_SHARD_H
 
+#include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
 
+
+/*
+ * IsAPgShardPlan tests if pg_shard should execute a given planned statement.
+ */
+#define IsAPgShardPlan(plannedStmt) \
+	((DistributedNodeTag) nodeTag((plannedStmt)->planTree) == T_DistributedPlan)
 
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of
