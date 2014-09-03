@@ -339,7 +339,7 @@ BuildDistributedPlan(Query *query, List *targetShardList)
 	foreach(targetShardCell, targetShardList)
 	{
 		ShardInterval *targetShard = (ShardInterval *) lfirst(targetShardCell);
-		List *shardPlacementList = LoadShardPlacementList(targetShard->id);
+		List *finalizedPlacementList = LoadFinalizedShardPlacementList(targetShard->id);
 		Task *task = NULL;
 
 		StringInfo queryString = makeStringInfo();
@@ -347,7 +347,7 @@ BuildDistributedPlan(Query *query, List *targetShardList)
 
 		task = (Task *) palloc0(sizeof(Task));
 		task->queryString = queryString;
-		task->taskPlacementList = shardPlacementList;
+		task->taskPlacementList = finalizedPlacementList;
 
 		taskList = lappend(taskList, task);
 	}

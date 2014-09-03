@@ -234,6 +234,31 @@ LoadShardInterval(int64 shardId)
 
 
 /*
+ * LoadFinalizedShardPlacementList returns all placements for a given shard that
+ * are in the finalized state. Like LoadShardPlacementList, this function throws
+ * an error if the specified shard has not been placed.
+ */
+List *
+LoadFinalizedShardPlacementList(uint64 shardId)
+{
+	List *finalizedPlacementList = NIL;
+	List *shardPlacementList = LoadShardPlacementList(shardId);
+
+	ListCell *shardPlacementCell = NULL;
+	foreach(shardPlacementCell, shardPlacementList)
+	{
+		ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
+		if (shardPlacement->shardState == STATE_FINALIZED)
+		{
+			finalizedPlacementList = lappend(finalizedPlacementList, shardPlacement);
+		}
+	}
+
+	return finalizedPlacementList;
+}
+
+
+/*
  * LoadShardPlacementList gathers metadata for every placement of a given shard
  * and returns a list of ShardPlacements containing that metadata. The function
  * throws an error if the specified shard has not been placed.
@@ -535,6 +560,8 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 								 tupleDescriptor, &isNull);
 	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
 									  tupleDescriptor, &isNull);
+	Datum shardStateDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE,
+	                                     tupleDescriptor, &isNull);
 	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
 									   tupleDescriptor, &isNull);
 	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
@@ -543,6 +570,7 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	shardPlacement = palloc0(sizeof(ShardPlacement));
 	shardPlacement->id = DatumGetInt64(idDatum);
 	shardPlacement->shardId = DatumGetInt64(shardIdDatum);
+	shardPlacement->shardState = DatumGetInt32(shardStateDatum);
 	shardPlacement->nodeName = TextDatumGetCString(nodeNameDatum);
 	shardPlacement->nodePort = DatumGetInt32(nodePortDatum);
 
