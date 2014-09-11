@@ -14,6 +14,7 @@
 #ifndef PG_SHARD_H
 #define PG_SHARD_H
 
+#include "access/tupdesc.h"
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
@@ -46,6 +47,8 @@ typedef struct DistributedPlan
 {
 	Plan plan;		/* this is a "subclass" of Plan */
 	List *taskList;	/* list of tasks to run as part of this plan */
+	TupleDesc tupleDescriptor; /* description of output tuple */
+
 } DistributedPlan;
 
 
