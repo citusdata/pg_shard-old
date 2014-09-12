@@ -412,12 +412,12 @@ PartitionType(Oid distributedTableId)
 
 
 /*
- * TableIsDistributed simply returns whether the specified table is distributed.
+ * IsDistributedTable simply returns whether the specified table is distributed.
  */
 bool
-TableIsDistributed(Oid tableId)
+IsDistributedTable(Oid tableId)
 {
-	bool tableIsDistributed = false;
+	bool isDistributedTable = false;
 	RangeVar *heapRangeVar = NULL;
 	Relation heapRelation = NULL;
 	HeapScanDesc scanDesc = NULL;
@@ -435,12 +435,12 @@ TableIsDistributed(Oid tableId)
 
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 
-	tableIsDistributed = HeapTupleIsValid(heapTuple);
+	isDistributedTable = HeapTupleIsValid(heapTuple);
 
 	heap_endscan(scanDesc);
 	relation_close(heapRelation, AccessShareLock);
 
-	return tableIsDistributed;
+	return isDistributedTable;
 }
 
 

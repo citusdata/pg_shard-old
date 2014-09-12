@@ -163,7 +163,7 @@ NeedsDistributedPlanning(Query *queryTree)
 		{
 			hasValuesScan = true;
 		}
-		else if (TableIsDistributed(rangeTableEntry->relid))
+		else if (IsDistributedTable(rangeTableEntry->relid))
 		{
 			hasDistributedRelation = true;
 		}
