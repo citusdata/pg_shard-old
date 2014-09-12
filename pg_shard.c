@@ -44,12 +44,12 @@
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static bool NeedsDistributedPlanning(Query *queryTree);
-static bool ExtractRangeTableRelationWalker(Node *node, List **rangeTableList);
+static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static DistributedPlan * PlanDistributedModify(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static List * FindTargetShardList(Oid distributedTableId, Var *partitionColumn,
 								  Const *partitionValue);
-static DistributedPlan * BuildDistributedPlan(Query *query, List *targetShardList);
+static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
 
 
@@ -133,7 +133,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 /*
  * NeedsDistributedPlanning checks if the passed in Query is an INSERT command
- * running on partitioned relations. If it is, we start distributed planning.
+ * running on distributed tables. If it is, we start distributed planning.
  *
  * This function throws an error if the query represents a multi-row INSERT or
  * mixes distributed and local tables.
@@ -153,13 +153,13 @@ NeedsDistributedPlanning(Query *queryTree)
 	}
 
 	/* extract range table entries for simple relations only */
-	ExtractRangeTableRelationWalker((Node *) queryTree, &rangeTableList);
+	ExtractRangeTableEntryWalker((Node *) queryTree, &rangeTableList);
 
 	foreach(rangeTableCell, rangeTableList)
 	{
 		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
 
-		if(rangeTableEntry->rtekind == RTE_VALUES)
+		if (rangeTableEntry->rtekind == RTE_VALUES)
 		{
 			hasValuesScan = true;
 		}
@@ -179,7 +179,7 @@ NeedsDistributedPlanning(Query *queryTree)
 		if (hasLocalRelation)
 		{
 			ereport(ERROR, (errmsg("cannot plan queries that include both regular and "
-								   "partitioned relations")));
+								   "distributed tables")));
 		}
 
 		if (hasValuesScan)
@@ -195,7 +195,7 @@ NeedsDistributedPlanning(Query *queryTree)
 
 
 /*
- * ExtractRangeTableRelationWalker walks over a query tree, and finds all range
+ * ExtractRangeTableEntryWalker walks over a query tree, and finds all range
  * table entries that are plain relations or values scans. For recursing into
  * the query tree, this function uses the query tree walker since the expression
  * tree walker doesn't recurse into sub-queries.
@@ -205,7 +205,7 @@ NeedsDistributedPlanning(Query *queryTree)
  * in NeedsDistributedPlanning sort it out.
  */
 static bool
-ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
+ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 {
 	bool walkerResult = false;
 	if (node == NULL)
@@ -223,12 +223,12 @@ ExtractRangeTableRelationWalker(Node *node, List **rangeTableList)
 	}
 	else if (IsA(node, Query))
 	{
-		walkerResult = query_tree_walker((Query *) node, ExtractRangeTableRelationWalker,
+		walkerResult = query_tree_walker((Query *) node, ExtractRangeTableEntryWalker,
 										 rangeTableList, QTW_EXAMINE_RTES);
 	}
 	else
 	{
-		walkerResult = expression_tree_walker(node, ExtractRangeTableRelationWalker,
+		walkerResult = expression_tree_walker(node, ExtractRangeTableEntryWalker,
 											  rangeTableList);
 	}
 
@@ -251,12 +251,12 @@ PlanDistributedModify(Query *query)
 	Const *partitionValue = NULL;
 	List *targetShardList = NIL;
 
-	/* Reject queries with a returning list */
+	/* reject queries with a returning list */
 	if (list_length(query->returningList) > 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded INSERT that uses a "
-							   "RETURNING clause")));
+						errmsg("cannot plan INSERT to a distributed table that "
+								"uses a RETURNING clause")));
 	}
 
 	/* use values of partition columns to determine shards, then build plan */
@@ -277,7 +277,7 @@ PlanDistributedModify(Query *query)
 static Const *
 ExtractPartitionValue(Query *query, Var *partitionColumn)
 {
-	Const *value = NULL;
+	Const *partitionValue = NULL;
 	TargetEntry *targetEntry = get_tle_by_resno(query->targetList,
 												partitionColumn->varattno);
 	if (targetEntry != NULL)
@@ -285,21 +285,21 @@ ExtractPartitionValue(Query *query, Var *partitionColumn)
 		if (!IsA(targetEntry->expr, Const))
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot plan sharded INSERT using a non-"
-								   "constant partition column value")));
+							errmsg("cannot plan INSERT to a distributed table "
+									"using a non-constant partition column value")));
 		}
 
-		value = (Const *) targetEntry->expr;
+		partitionValue = (Const *) targetEntry->expr;
 	}
 
-	if (value == NULL || value->constisnull)
+	if (partitionValue == NULL || partitionValue->constisnull)
 	{
 		ereport(ERROR, (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
 						errmsg("cannot plan INSERT using row with NULL value "
 							   "in partition column")));
 	}
 
-	return value;
+	return partitionValue;
 }
 
 
@@ -327,23 +327,24 @@ FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partiti
 
 /*
  * BuildDistributedPlan simply creates the DistributedPlan instance from the
- * provided query and target shard list.
+ * provided query and shard interval list.
  */
 static DistributedPlan *
-BuildDistributedPlan(Query *query, List *targetShardList)
+BuildDistributedPlan(Query *query, List *shardIntervalList)
 {
 	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
-	ListCell *targetShardCell = NULL;
+	ListCell *shardIntervalCell = NULL;
 	List *taskList = NIL;
 
-	foreach(targetShardCell, targetShardList)
+	foreach(shardIntervalCell, shardIntervalList)
 	{
-		ShardInterval *targetShard = (ShardInterval *) lfirst(targetShardCell);
-		List *finalizedPlacementList = LoadFinalizedShardPlacementList(targetShard->id);
+		ShardInterval *shardInterval = (ShardInterval *) lfirst(shardIntervalCell);
+		int64 shardId = shardInterval->id;
+		List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
 		Task *task = NULL;
 
 		StringInfo queryString = makeStringInfo();
-		deparse_shard_query(query, targetShard->id, queryString);
+		deparse_shard_query(query, shardId, queryString);
 
 		task = (Task *) palloc0(sizeof(Task));
 		task->queryString = queryString;
@@ -365,7 +366,7 @@ BuildDistributedPlan(Query *query, List *targetShardList)
 static void
 UpdateRightOpConst(const OpExpr *clause, Const *constNode)
 {
-	Node *rightOp = get_rightop((Expr *)clause);
+	Node *rightOp = get_rightop((Expr *) clause);
 	Const *rightConst = NULL;
 
 	Assert(IsA(rightOp, Const));

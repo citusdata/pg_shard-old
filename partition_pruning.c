@@ -109,7 +109,6 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
 		constraintList = list_make1(baseConstraint);
 
 		shardPruned = predicate_refuted_by(constraintList, restrictInfoList);
-
 		if (shardPruned)
 		{
 			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
@@ -188,8 +187,6 @@ UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval)
 	Const *maxConstant = NULL;
 
 	Assert(shardInterval != NULL);
-	Assert(shardInterval->minValueExists);
-	Assert(shardInterval->maxValueExists);
 	Assert(IsA(minNode, Const));
 	Assert(IsA(maxNode, Const));
 
@@ -532,4 +529,3 @@ MakeOpExpressionWithZeroConst()
 
 	return operatorExpression;
 }
-
