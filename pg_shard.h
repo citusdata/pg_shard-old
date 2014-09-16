@@ -14,18 +14,10 @@
 #ifndef PG_SHARD_H
 #define PG_SHARD_H
 
-#include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
 
-
-/*
- * Wrap newNode to force a cast of its second argument to NodeTag. This avoids
- * warnings when the macro expansion assigns a DistributedNodeTag value to a
- * field with type NodeTag.
- */
-#define makeDistNode(_type_) ((_type_ *) newNode(sizeof(_type_), (NodeTag) T_##_type_))
 
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of

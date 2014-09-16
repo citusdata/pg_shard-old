@@ -332,9 +332,10 @@ FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partiti
 static DistributedPlan *
 BuildDistributedPlan(Query *query, List *shardIntervalList)
 {
-	DistributedPlan *distributedPlan = makeDistNode(DistributedPlan);
 	ListCell *shardIntervalCell = NULL;
 	List *taskList = NIL;
+	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
+	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
