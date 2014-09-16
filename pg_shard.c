@@ -50,7 +50,6 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static List * FindTargetShardList(Oid distributedTableId, Var *partitionColumn,
 								  Const *partitionValue);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
-static void UpdateRightOpConst(const OpExpr *clause, Const *constNode);
 
 
 /* declarations for dynamic loading */
@@ -316,7 +315,16 @@ FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partiti
 
 	/* build equality expression based on partition column value for row */
 	OpExpr *equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
-	UpdateRightOpConst(equalityExpr, partitionValue);
+
+	Node *rightOp = get_rightop((Expr *) equalityExpr);
+	Const *rightConst = (Const *) rightOp;
+
+	Assert(IsA(rightOp, Const));
+
+	rightConst->constvalue = partitionValue->constvalue;
+	rightConst->constisnull = partitionValue->constisnull;
+	rightConst->constbyval = partitionValue->constbyval;
+
 	whereClauseList = list_make1(equalityExpr);
 
 	targetShardList = PruneShardList(distributedTableId, whereClauseList, shardList);
@@ -357,24 +365,4 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	distributedPlan->taskList = taskList;
 
 	return distributedPlan;
-}
-
-
-/*
- * UpdateRightOpValue updates the provided clause (in-place) by replacing its
- * right-hand side with the provided value.
- */
-static void
-UpdateRightOpConst(const OpExpr *clause, Const *constNode)
-{
-	Node *rightOp = get_rightop((Expr *) clause);
-	Const *rightConst = NULL;
-
-	Assert(IsA(rightOp, Const));
-
-	rightConst = (Const *) rightOp;
-
-	rightConst->constvalue = constNode->constvalue;
-	rightConst->constisnull = constNode->constisnull;
-	rightConst->constbyval = constNode->constbyval;
 }
