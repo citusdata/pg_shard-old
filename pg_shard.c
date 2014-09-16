@@ -19,7 +19,7 @@
 
 #include "pg_shard.h"
 #include "distribution_metadata.h"
-#include "partition_pruning.h"
+#include "prune_shard_list.h"
 #include "ruleutils.h"
 
 #include <stddef.h>

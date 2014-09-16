@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
- * partition_pruning.c
+ * prune_shard_list.c
  *			Pruning function implementations for pg_shard extension
  *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  *
  * IDENTIFICATION
- *			partition_pruning.c
+ *			prune_shard_list.c
  *
  *-------------------------------------------------------------------------
  */
@@ -18,7 +18,7 @@
 #include "postgres_ext.h"
 
 #include "distribution_metadata.h"
-#include "partition_pruning.h"
+#include "prune_shard_list.h"
 
 #include <stddef.h>
 
