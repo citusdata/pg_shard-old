@@ -111,18 +111,21 @@ typedef struct ShardInterval
  */
 typedef struct ShardPlacement
 {
-	int64 id;		/* unique identifier for the shard placement */
-	int64 shardId;	/* identifies shard for this shard placement */
-	char *nodeName;	/* hostname of machine hosting this shard */
-	int32 nodePort;	/* port number for connecting to host */
+	int64 id;				/* unique identifier for the shard placement */
+	int64 shardId;			/* identifies shard for this shard placement */
+	ShardState shardState;	/* represents last known state of this placement */
+	char *nodeName;			/* hostname of machine hosting this shard */
+	int32 nodePort;			/* port number for connecting to host */
 } ShardPlacement;
 
 
 extern List * LoadShardList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
+extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
 extern char PartitionType(Oid distributedTableId);
+extern bool IsDistributedTable(Oid tableId);
 extern void InsertPartitionRow(Oid distributedTableId, char partitionType,
 							   text *partitionKeyText);
 extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
