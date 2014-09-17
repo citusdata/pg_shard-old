@@ -24,7 +24,6 @@
 
 #include "access/skey.h"
 #include "catalog/pg_am.h"
-#include "catalog/pg_dist_partition.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
 #include "nodes/makefuncs.h"
