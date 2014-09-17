@@ -42,6 +42,7 @@
 #include "utils/typcache.h"
 
 
+/* local function forward declarations */
 static Oid GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber);
 static bool SimpleOpExpression(Expr *clause);
 static Node * HashableClauseMutator(Node *originalNode, Var *partitionColumn);

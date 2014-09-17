@@ -16,7 +16,6 @@
 #include "fmgr.h"
 #include "postgres_ext.h"
 
-
 #include "pg_shard.h"
 #include "distribution_metadata.h"
 #include "prune_shard_list.h"
@@ -40,7 +39,7 @@
 #include "utils/palloc.h"
 
 
-/* local forward declarations */
+/* local function forward declarations */
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static bool NeedsDistributedPlanning(Query *queryTree);
@@ -158,17 +157,20 @@ NeedsDistributedPlanning(Query *queryTree)
 	{
 		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
 
-		if (rangeTableEntry->rtekind == RTE_VALUES)
+		if (rangeTableEntry->rtekind == RTE_RELATION)
+		{
+			if (IsDistributedTable(rangeTableEntry->relid))
+			{
+				hasDistributedRelation = true;
+			}
+			else
+			{
+				hasLocalRelation = true;
+			}
+		}
+		else if (rangeTableEntry->rtekind == RTE_VALUES)
 		{
 			hasValuesScan = true;
-		}
-		else if (IsDistributedTable(rangeTableEntry->relid))
-		{
-			hasDistributedRelation = true;
-		}
-		else
-		{
-			hasLocalRelation = true;
 		}
 	}
 
@@ -318,7 +320,6 @@ FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partiti
 
 	Node *rightOp = get_rightop((Expr *) equalityExpr);
 	Const *rightConst = (Const *) rightOp;
-
 	Assert(IsA(rightOp, Const));
 
 	rightConst->constvalue = partitionValue->constvalue;

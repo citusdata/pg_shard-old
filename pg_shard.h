@@ -48,7 +48,8 @@ typedef struct DistributedPlan
  * executed on all placements, but a SELECT might view subsequent placements as
  * fallbacks to be used only if the first placement fails to respond.
  */
-typedef struct Task {
+typedef struct Task
+{
 	StringInfo queryString;		/* SQL string suitable for immediate remote execution */
 	List *taskPlacementList;	/* ShardPlacements on which the task can be executed */
 } Task;
