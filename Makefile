@@ -22,10 +22,21 @@ else
      SHLIB_LINK = $(libpq)
 endif
 
+PGPORT ?= 5432
+
 EXTENSION = pg_shard
 DATA = pg_shard--develop.sql
 
+sql/%: sql/%.tmpl
+	sed -e 's/$$PGPORT/${PGPORT}/g' $^ > $@
+
+expected/%: expected/%.tmpl
+	sed -e 's/$$PGPORT/${PGPORT}/g' $^ > $@
+
 REGRESS = init connection distribution_metadata
+REGRESS_PREP = sql/connection.sql expected/connection.out
+
+EXTRA_CLEAN += ${REGRESS_PREP}
 
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)

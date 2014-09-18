@@ -22,25 +22,25 @@ CREATE FUNCTION get_and_purge_connection(text, integer)
 -- ===================================================================
 
 -- connect to non-existant host
-SELECT populate_temp_table('dummyhost', 5432);
+SELECT populate_temp_table('dummyhost', $PGPORT);
 
 -- try to use hostname over 255 characters
-SELECT populate_temp_table(repeat('a', 256), 5432);
+SELECT populate_temp_table(repeat('a', 256), $PGPORT);
 
 -- connect to localhost and build a temp table
-SELECT populate_temp_table('localhost', 5432);
+SELECT populate_temp_table('localhost', $PGPORT);
 
 -- table should still be visible since session is reused
-SELECT count_temp_table('localhost', 5432);
+SELECT count_temp_table('localhost', $PGPORT);
 
 -- purge existing connection to localhost
-SELECT get_and_purge_connection('localhost', 5432);
+SELECT get_and_purge_connection('localhost', $PGPORT);
 
 -- should not be able to see table anymore
-SELECT count_temp_table('localhost', 5432);
+SELECT count_temp_table('localhost', $PGPORT);
 
 -- recreate once more
-SELECT populate_temp_table('localhost', 5432);
+SELECT populate_temp_table('localhost', $PGPORT);
 
 -- kill backend to disconnect
 SELECT pg_terminate_backend(pid)
@@ -48,7 +48,7 @@ SELECT pg_terminate_backend(pid)
 	WHERE application_name = 'pg_shard';
 
 -- should get connection failure (cached connection bad)
-SELECT count_temp_table('localhost', 5432);
+SELECT count_temp_table('localhost', $PGPORT);
 
 -- should get result failure (reconnected, so no temp table)
-SELECT count_temp_table('localhost', 5432);
+SELECT count_temp_table('localhost', $PGPORT);
