@@ -16,11 +16,12 @@ CREATE FUNCTION get_and_purge_connection(text, integer)
 -- ===================================================================
 -- test connection hash functionality
 -- ===================================================================
+\set VERBOSITY terse
 -- connect to non-existant host
 SELECT populate_temp_table('dummyhost', $PGPORT);
 WARNING:  Connection failed to dummyhost:$PGPORT
-DETAIL:  Remote message: could not translate host name "dummyhost" to address: nodename nor servname provided, or not known
 ERROR:  could not connect to dummyhost:$PGPORT
+\set VERBOSITY default
 -- try to use hostname over 255 characters
 SELECT populate_temp_table(repeat('a', 256), $PGPORT);
 ERROR:  hostnames may not exceed 255 characters

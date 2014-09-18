@@ -21,8 +21,12 @@ CREATE FUNCTION get_and_purge_connection(text, integer)
 -- test connection hash functionality
 -- ===================================================================
 
+\set VERBOSITY terse
+
 -- connect to non-existant host
 SELECT populate_temp_table('dummyhost', $PGPORT);
+
+\set VERBOSITY default
 
 -- try to use hostname over 255 characters
 SELECT populate_temp_table(repeat('a', 256), $PGPORT);
