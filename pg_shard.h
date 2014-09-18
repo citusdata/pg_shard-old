@@ -31,6 +31,20 @@ typedef enum DistributedNodeTag
 
 
 /*
+ * PlannerType identifies the type of planner which should be used for a given
+ * query.
+ */
+typedef enum PlannerType
+{
+	PLANNER_INVALID_FIRST = 0,
+	PLANNER_TYPE_CITUSDB = 1,
+	PLANNER_TYPE_PG_SHARD = 2,
+	PLANNER_TYPE_HOOK = 3,
+	PLANNER_TYPE_STANDARD = 4
+} PlannerType;
+
+
+/*
  * DistributedPlan contains a set of tasks to be executed remotely as part of a
  * distributed query.
  */

@@ -36,18 +36,25 @@
 #include "parser/parsetree.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
+#include "utils/guc.h"
 #include "utils/palloc.h"
+
+
+/* informs pg_shard to use the CitusDB planner */
+bool UseCitusDBSelectLogic = false;
 
 
 /* local function forward declarations */
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
-static bool NeedsDistributedPlanning(Query *queryTree);
+static PlannerType DeterminePlannerType(Query *query);
+static Oid DistributedTableId(Query *query);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
-static DistributedPlan * PlanDistributedModify(Query *query);
+static void ErrorIfQueryNotSupported(Query *queryTree);
+static DistributedPlan * PlanDistributedQuery(Query *query);
+static List * QueryRestrictList(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
-static List * FindTargetShardList(Oid distributedTableId, Var *partitionColumn,
-								  Const *partitionValue);
+static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 
 
@@ -69,6 +76,11 @@ _PG_init(void)
 {
 	PreviousPlannerHook = planner_hook;
 	planner_hook = PgShardPlannerHook;
+
+	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
+							 "Informs pg_shard to use CitusDB's select logic.",
+							 NULL, &UseCitusDBSelectLogic, false, PGC_USERSET, 0,
+							 NULL, NULL, NULL);
 }
 
 
@@ -94,35 +106,40 @@ static PlannedStmt *
 PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
+	PlannerType plannerType = PLANNER_INVALID_FIRST;
 
-	if (NeedsDistributedPlanning(query))
+	plannerType = DeterminePlannerType(query);
+	if (plannerType == PLANNER_TYPE_CITUSDB)
 	{
+		Assert(PreviousPlannerHook != NULL);
+		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
+	}
+	else if (plannerType == PLANNER_TYPE_HOOK)
+	{
+		Assert(PreviousPlannerHook != NULL);
+		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
+	}
+	else if (plannerType == PLANNER_TYPE_STANDARD)
+	{
+		plannedStatement = standard_planner(query, cursorOptions, boundParams);
+	}
+	else if (plannerType == PLANNER_TYPE_PG_SHARD)
+	{
+		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
-		CmdType cmdType = query->commandType;
 
 		/* call standard planner on copy to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
 											boundParams);
 
-		if (cmdType == CMD_INSERT)
-		{
-			DistributedPlan *distributedPlan = PlanDistributedModify(distributedQuery);
+		ErrorIfQueryNotSupported(distributedQuery);			
 
-			plannedStatement->planTree = (Plan *) distributedPlan;
-		}
+		distributedPlan = PlanDistributedQuery(distributedQuery);
+		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
-
-	/* if we weren't able to plan the query, use previous hook or standard */
-	if (plannedStatement == NULL)
+	else
 	{
-		if (PreviousPlannerHook != NULL)
-		{
-			plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
-		}
-		else
-		{
-			plannedStatement = standard_planner(query, cursorOptions, boundParams);
-		}
+		ereport(ERROR, (errmsg("unknown planner type:%d", plannerType)));
 	}
 
 	return plannedStatement;
@@ -130,68 +147,64 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 
 /*
- * NeedsDistributedPlanning checks if the passed in Query is an INSERT command
- * running on distributed tables. If it is, we start distributed planning.
- *
- * This function throws an error if the query represents a multi-row INSERT or
- * mixes distributed and local tables.
+ * DeterminePlannerType chooses the appropriate planner to use in order to plan
+ * the given query.
  */
-static bool
-NeedsDistributedPlanning(Query *queryTree)
+static PlannerType
+DeterminePlannerType(Query *query)
+{
+	PlannerType plannerType = PLANNER_INVALID_FIRST;
+	Oid distributedTableId = DistributedTableId(query);
+	CmdType cmdType = query->commandType;
+
+	if (cmdType == CMD_SELECT && UseCitusDBSelectLogic)
+	{
+		plannerType = PLANNER_TYPE_CITUSDB;
+	}
+	else if (distributedTableId != InvalidOid)
+	{
+		plannerType = PLANNER_TYPE_PG_SHARD;
+	}
+	else if (PreviousPlannerHook != NULL)
+	{
+		plannerType = PLANNER_TYPE_HOOK; 
+	}
+	else
+	{
+		plannerType = PLANNER_TYPE_STANDARD;
+	}
+
+	return plannerType;
+}
+
+
+/*
+ * DistributedTableId returns the relationId of the first distributed table the
+ * function finds in the given query. If no distributed table is found, the
+ * function returns InvalidOid.
+ */
+static Oid
+DistributedTableId(Query *query)
 {
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
-	bool hasLocalRelation = false;
-	bool hasDistributedRelation = false;
-	bool hasValuesScan = false;
+	Oid distributedTableId = InvalidOid;
 
-	if (queryTree->commandType != CMD_INSERT)
-	{
-		return false;
-	}
-
-	/* extract range table entries for simple relations only */
-	ExtractRangeTableEntryWalker((Node *) queryTree, &rangeTableList);
+	/* extract range table entries */
+	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
 
 	foreach(rangeTableCell, rangeTableList)
 	{
 		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
 
-		if (rangeTableEntry->rtekind == RTE_RELATION)
+		if (IsDistributedTable(rangeTableEntry->relid))
 		{
-			if (IsDistributedTable(rangeTableEntry->relid))
-			{
-				hasDistributedRelation = true;
-			}
-			else
-			{
-				hasLocalRelation = true;
-			}
-		}
-		else if (rangeTableEntry->rtekind == RTE_VALUES)
-		{
-			hasValuesScan = true;
+			distributedTableId = rangeTableEntry->relid;
+			break;
 		}
 	}
 
-	if (hasDistributedRelation)
-	{
-		/* users can't mix local and distributed relations in one query */
-		if (hasLocalRelation)
-		{
-			ereport(ERROR, (errmsg("cannot plan queries that include both regular and "
-								   "distributed tables")));
-		}
-
-		if (hasValuesScan)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("multi-row INSERTs to distributed tables "
-								   "are not supported")));
-		}
-	}
-
-	return hasDistributedRelation;
+	return distributedTableId;
 }
 
 
@@ -238,35 +251,130 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 
 
 /*
- * PlanDistributedModify is the main entry point when planning a modification of
- * a distributed table. A DistributedPlan for the query in question is returned,
- * unless the query uses unsupported features, in which case this function will
- * throw an error.
+ * ErrorIfQueryNotSupported checks that we can perform distributed planning for
+ * the given query. The checks in this function will be removed as we support
+ * more functionality in our distributed planning.
  */
-static DistributedPlan *
-PlanDistributedModify(Query *query)
+static void
+ErrorIfQueryNotSupported(Query *queryTree)
 {
-	DistributedPlan *distributedPlan = NULL;
-	Oid resultTableId = getrelid(query->resultRelation, query->rtable);
-	Var *partitionColumn = PartitionColumn(resultTableId);
-	Const *partitionValue = NULL;
-	List *targetShardList = NIL;
+	List *rangeTableList = NIL;
+	ListCell *rangeTableCell = NULL;
+	bool hasValuesScan = false;
+	uint32 queryTableCount = 0;
 
-	/* reject queries with a returning list */
-	if (list_length(query->returningList) > 0)
+	CmdType commandType = queryTree->commandType;
+	if (queryTree->commandType != CMD_INSERT && queryTree->commandType != CMD_SELECT)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan INSERT to a distributed table that "
-								"uses a RETURNING clause")));
+						errmsg("unsupported query type: %d", commandType)));
 	}
 
-	/* use values of partition columns to determine shards, then build plan */
-	partitionValue = ExtractPartitionValue(query, partitionColumn);
-	targetShardList = FindTargetShardList(resultTableId, partitionColumn,
-										  partitionValue);
-	distributedPlan = BuildDistributedPlan(query, targetShardList);
+	/* extract range table entries */
+	ExtractRangeTableEntryWalker((Node *) queryTree, &rangeTableList);
+
+	foreach(rangeTableCell, rangeTableList)
+	{
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
+
+		if (rangeTableEntry->rtekind == RTE_RELATION)
+		{
+			queryTableCount++;
+		}
+		else if (rangeTableEntry->rtekind == RTE_VALUES)
+		{
+			hasValuesScan = true;
+		}
+	}
+
+	/* reject queries which involve joins */
+	if (queryTableCount != 1)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot perform distributed planning on this query"),
+						errdetail("Joins are currently unsupported")));
+	}
+
+	/* reject queries which involve multi-row inserts */
+	if (hasValuesScan)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("multi-row INSERTs to distributed tables "
+							   "are not supported")));
+	}
+
+	if (commandType == CMD_INSERT)
+	{
+		/* reject queries with a returning list */
+		if (list_length(queryTree->returningList) > 0)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("cannot plan sharded INSERT that uses a "
+								   "RETURNING clause")));
+		}
+	}
+}
+
+
+/*
+ * PlanDistributedQuery is the main entry point when planning a query involving
+ * a distributed table. The function prunes the shards for the table in the
+ * query based on the query's restriction qualifiers, and then builds a
+ * distributed plan with those shards.
+ */
+static DistributedPlan *
+PlanDistributedQuery(Query *query)
+{
+	DistributedPlan *distributedPlan = NULL;
+	Oid distributedTableId = DistributedTableId(query);
+
+	List *restrictClauseList = QueryRestrictList(query);
+	List *shardList = LoadShardList(distributedTableId);
+	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
+										   shardList);
+
+	distributedPlan = BuildDistributedPlan(query, prunedShardList);
 
 	return distributedPlan;
+}
+
+
+/*
+ * QueryRestrictList returns the restriction clauses for the query. For a SELECT
+ * statement these are the where-clause expressions. For INSERT statements we
+ * build an equality clause based on the partition-column and its supplied
+ * insert value.
+ */
+static List *
+QueryRestrictList(Query *query)
+{
+	List *queryRestrictList = NIL;
+
+	if (query->commandType == CMD_INSERT)
+	{
+		/* build equality expression based on partition column value for row */
+		Oid distributedTableId = DistributedTableId(query);
+		Var *partitionColumn = PartitionColumn(distributedTableId);
+		Const *partitionValue = ExtractPartitionValue(query, partitionColumn);
+
+		OpExpr *equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
+
+		Node *rightOp = get_rightop((Expr *) equalityExpr);
+		Const *rightConst = (Const *) rightOp;
+		Assert(IsA(rightOp, Const));
+
+		rightConst->constvalue = partitionValue->constvalue;
+		rightConst->constisnull = partitionValue->constisnull;
+		rightConst->constbyval = partitionValue->constbyval;
+
+		queryRestrictList = list_make1(equalityExpr);
+	}
+	else if (query->commandType == CMD_SELECT)
+	{
+		query_tree_walker(query, ExtractFromExpressionWalker, &queryRestrictList, 0);
+	}
+
+	return queryRestrictList;
 }
 
 
@@ -305,32 +413,29 @@ ExtractPartitionValue(Query *query, Var *partitionColumn)
 
 
 /*
- * FindTargetShardInterval locates shards capable of receiving rows with the
- * provided partition value. If no such shards exist, this method returns NIL.
+ * ExtractFromExpressionWalker walks over a FROM expression, and finds all
+ * explicit qualifiers in the expression.
  */
-static List *
-FindTargetShardList(Oid distributedTableId, Var *partitionColumn, Const *partitionValue)
+static bool
+ExtractFromExpressionWalker(Node *node, List **qualifierList)
 {
-	List *shardList = LoadShardList(distributedTableId);
-	List *whereClauseList = NIL;
-	List *targetShardList = NIL;
+	bool walkerResult = false;
+	if (node == NULL)
+	{
+		return false;
+	}
 
-	/* build equality expression based on partition column value for row */
-	OpExpr *equalityExpr = MakeOpExpression(partitionColumn, BTEqualStrategyNumber);
+	if (IsA(node, FromExpr))
+	{
+		FromExpr *fromExpression = (FromExpr *) node;
+		List *fromQualifierList = (List *) fromExpression->quals;
+		(*qualifierList) = list_concat(*qualifierList, fromQualifierList);
+	}
 
-	Node *rightOp = get_rightop((Expr *) equalityExpr);
-	Const *rightConst = (Const *) rightOp;
-	Assert(IsA(rightOp, Const));
+	walkerResult = expression_tree_walker(node, ExtractFromExpressionWalker,
+										  (void *) qualifierList);
 
-	rightConst->constvalue = partitionValue->constvalue;
-	rightConst->constisnull = partitionValue->constisnull;
-	rightConst->constbyval = partitionValue->constbyval;
-
-	whereClauseList = list_make1(equalityExpr);
-
-	targetShardList = PruneShardList(distributedTableId, whereClauseList, shardList);
-
-	return targetShardList;
+	return walkerResult;
 }
 
 
