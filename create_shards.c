@@ -149,9 +149,10 @@ create_shards(PG_FUNCTION_ARGS)
 	}
 
 	/* if we have enough nodes, add an extra placement attempt for backup */
+	placementAttemptCount = replicationFactor;
 	if (workerNodeCount > replicationFactor)
 	{
-		placementAttemptCount = replicationFactor + 1;
+		placementAttemptCount++;
 	}
 
 	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
