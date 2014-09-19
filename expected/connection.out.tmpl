@@ -52,7 +52,7 @@ WARNING:  Bad result from localhost:$PGPORT
 DETAIL:  Remote message: relation "numbers" does not exist
  count_temp_table 
 ------------------
-                0
+               -1
 (1 row)
 
 -- recreate once more
@@ -77,7 +77,7 @@ WARNING:  Bad result from localhost:$PGPORT
 DETAIL:  Remote message: terminating connection due to administrator command
  count_temp_table 
 ------------------
-                0
+               -1
 (1 row)
 
 -- should get result failure (reconnected, so no temp table)
@@ -86,6 +86,6 @@ WARNING:  Bad result from localhost:$PGPORT
 DETAIL:  Remote message: relation "numbers" does not exist
  count_temp_table 
 ------------------
-                0
+               -1
 (1 row)
 

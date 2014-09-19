@@ -80,7 +80,7 @@ PopulateTempTable(PG_FUNCTION_ARGS)
 /*
  * CountTempTable just returns the integer count of rows in the table created
  * by PopulateTempTable. If no such table exists, this function emits a warning
- * and returns 0.
+ * and returns -1.
  */
 Datum
 CountTempTable(PG_FUNCTION_ARGS)
@@ -94,7 +94,7 @@ CountTempTable(PG_FUNCTION_ARGS)
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ReportRemoteError(connection, result);
-		count = Int32GetDatum(0);
+		count = Int32GetDatum(-1);
 	}
 	else
 	{
@@ -151,16 +151,16 @@ GetConnectionOrRaiseError(text *nodeText, int32 nodePort)
 static Datum
 ExtractIntegerDatum(char *input)
 {
-	Oid typiofunc = InvalidOid;
-	Oid typioparam = InvalidOid;
+	Oid typIoFunc = InvalidOid;
+	Oid typIoParam = InvalidOid;
 	Datum intDatum = 0;
 	FmgrInfo fmgrInfo;
 	memset(&fmgrInfo, 0, sizeof(fmgrInfo));
 
-	getTypeInputInfo(INT4OID, &typiofunc, &typioparam);
-	fmgr_info(typiofunc, &fmgrInfo);
+	getTypeInputInfo(INT4OID, &typIoFunc, &typIoParam);
+	fmgr_info(typIoFunc, &fmgrInfo);
 
-	intDatum = InputFunctionCall(&fmgrInfo, input, typiofunc, -1);
+	intDatum = InputFunctionCall(&fmgrInfo, input, typIoFunc, -1);
 
 	return intDatum;
 }
@@ -177,23 +177,22 @@ LoadShardIdArray(PG_FUNCTION_ARGS)
 	ArrayType *shardIdArrayType = NULL;
 	List *shardList = LoadShardIntervalList(distributedTableId);
 	ListCell *shardCell = NULL;
-	int datumCount = list_length(shardList);
-	int datumIndex = 0;
-	Datum *shardIdDatums = palloc0(datumCount * sizeof(Datum));
-	Oid datumTypeId = INT8OID;
+	int shardIdCount = list_length(shardList);
+	int shardIdIndex = 0;
+	Datum *shardIdDatumArray = palloc0(shardIdCount * sizeof(Datum));
+	Oid shardIdTypeId = INT8OID;
 
 	foreach(shardCell, shardList)
 	{
 		ShardInterval *shardId = (ShardInterval *) lfirst(shardCell);
 		Datum shardIdDatum = Int64GetDatum(shardId->id);
 
-		shardIdDatums[datumIndex] = shardIdDatum;
-		datumIndex++;
+		shardIdDatumArray[shardIdIndex] = shardIdDatum;
+		shardIdIndex++;
 	}
 
-	shardIdArrayType = DatumArrayToArrayType(shardIdDatums, datumCount, datumTypeId);
-
-	pfree(shardIdDatums);
+	shardIdArrayType = DatumArrayToArrayType(shardIdDatumArray, shardIdCount,
+											 shardIdTypeId);
 
 	PG_RETURN_ARRAYTYPE_P(shardIdArrayType);
 }
@@ -236,10 +235,10 @@ LoadShardPlacementArray(PG_FUNCTION_ARGS)
 	ArrayType *placementArrayType = NULL;
 	List *placementList = LoadShardPlacementList(shardId);
 	ListCell *placementCell = NULL;
-	int datumCount = list_length(placementList);
-	int datumIndex = 0;
-	Datum *placementDatums = palloc0(datumCount * sizeof(Datum));
-	Oid datumTypeId = TEXTOID;
+	int placementCount = list_length(placementList);
+	int placementIndex = 0;
+	Datum *placementDatumArray = palloc0(placementCount * sizeof(Datum));
+	Oid placementTypeId = TEXTOID;
 	StringInfo placementInfo = makeStringInfo();
 
 	foreach(placementCell, placementList)
@@ -248,14 +247,13 @@ LoadShardPlacementArray(PG_FUNCTION_ARGS)
 		appendStringInfo(placementInfo, "%s:%d", placement->nodeName,
 						 placement->nodePort);
 
-		placementDatums[datumIndex] = CStringGetTextDatum(placementInfo->data);
-		datumIndex++;
+		placementDatumArray[placementIndex] = CStringGetTextDatum(placementInfo->data);
+		placementIndex++;
 		resetStringInfo(placementInfo);
 	}
 
-	placementArrayType = DatumArrayToArrayType(placementDatums, datumCount, datumTypeId);
-
-	pfree(placementDatums);
+	placementArrayType = DatumArrayToArrayType(placementDatumArray, placementCount,
+											   placementTypeId);
 
 	PG_RETURN_ARRAYTYPE_P(placementArrayType);
 }
