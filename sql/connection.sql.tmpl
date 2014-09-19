@@ -2,12 +2,12 @@
 -- create test functions
 -- ===================================================================
 
-CREATE FUNCTION populate_temp_table(text, integer)
+CREATE FUNCTION initialize_remote_temp_table(text, integer)
 	RETURNS void
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION count_temp_table(text, integer)
+CREATE FUNCTION count_remote_temp_table_rows(text, integer)
 	RETURNS integer
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
@@ -24,27 +24,27 @@ CREATE FUNCTION get_and_purge_connection(text, integer)
 \set VERBOSITY terse
 
 -- connect to non-existant host
-SELECT populate_temp_table('dummyhost', $PGPORT);
+SELECT initialize_remote_temp_table('dummyhost', $PGPORT);
 
 \set VERBOSITY default
 
 -- try to use hostname over 255 characters
-SELECT populate_temp_table(repeat('a', 256), $PGPORT);
+SELECT initialize_remote_temp_table(repeat('a', 256), $PGPORT);
 
 -- connect to localhost and build a temp table
-SELECT populate_temp_table('localhost', $PGPORT);
+SELECT initialize_remote_temp_table('localhost', $PGPORT);
 
 -- table should still be visible since session is reused
-SELECT count_temp_table('localhost', $PGPORT);
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
 
 -- purge existing connection to localhost
 SELECT get_and_purge_connection('localhost', $PGPORT);
 
 -- should not be able to see table anymore
-SELECT count_temp_table('localhost', $PGPORT);
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
 
 -- recreate once more
-SELECT populate_temp_table('localhost', $PGPORT);
+SELECT initialize_remote_temp_table('localhost', $PGPORT);
 
 -- kill backend to disconnect
 SELECT pg_terminate_backend(pid)
@@ -52,7 +52,7 @@ SELECT pg_terminate_backend(pid)
 	WHERE application_name = 'pg_shard';
 
 -- should get connection failure (cached connection bad)
-SELECT count_temp_table('localhost', $PGPORT);
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);
 
 -- should get result failure (reconnected, so no temp table)
-SELECT count_temp_table('localhost', $PGPORT);
+SELECT count_remote_temp_table_rows('localhost', $PGPORT);

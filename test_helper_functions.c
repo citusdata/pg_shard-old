@@ -36,8 +36,8 @@
 
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(populate_temp_table);
-PG_FUNCTION_INFO_V1(count_temp_table);
+PG_FUNCTION_INFO_V1(initialize_remote_temp_table);
+PG_FUNCTION_INFO_V1(count_remote_temp_table_rows);
 PG_FUNCTION_INFO_V1(get_and_purge_connection);
 PG_FUNCTION_INFO_V1(load_shard_id_array);
 PG_FUNCTION_INFO_V1(load_shard_interval_array);
@@ -53,13 +53,13 @@ static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
 
 
 /*
- * populate_temp_table connects to a specified host on a specified port and
- * creates a temporary table with 100 rows. Because the table is temporary, it
- * will be visible if a connection is reused but not if a new connection is
+ * initialize_remote_temp_table connects to a specified host on a specified port
+ * and creates a temporary table with 100 rows. Because the table is temporary,
+ * it will be visible if a connection is reused but not if a new connection is
  * opened to the node.
  */
 Datum
-populate_temp_table(PG_FUNCTION_ARGS)
+initialize_remote_temp_table(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
@@ -78,12 +78,12 @@ populate_temp_table(PG_FUNCTION_ARGS)
 
 
 /*
- * count_temp_table just returns the integer count of rows in the table created
- * by populate_temp_table. If no such table exists, this function emits a warning
- * and returns -1.
+ * count_remote_temp_table_rows just returns the integer count of rows in the
+ * table created by initialize_remote_temp_table. If no such table exists, this
+ * function emits a warning and returns -1.
  */
 Datum
-count_temp_table(PG_FUNCTION_ARGS)
+count_remote_temp_table_rows(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);

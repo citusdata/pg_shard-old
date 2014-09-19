@@ -24,8 +24,8 @@
 #define COUNT_TEMP_TABLE	"SELECT COUNT(*) FROM numbers;"
 
 
-extern Datum populate_temp_table(PG_FUNCTION_ARGS);
-extern Datum count_temp_table(PG_FUNCTION_ARGS);
+extern Datum initialize_remote_temp_table(PG_FUNCTION_ARGS);
+extern Datum count_remote_temp_table_rows(PG_FUNCTION_ARGS);
 extern Datum get_and_purge_connection(PG_FUNCTION_ARGS);
 extern Datum load_shard_id_array(PG_FUNCTION_ARGS);
 extern Datum load_shard_interval_array(PG_FUNCTION_ARGS);
