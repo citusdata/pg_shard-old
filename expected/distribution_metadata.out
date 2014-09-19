@@ -3,19 +3,19 @@
 -- ===================================================================
 CREATE FUNCTION load_shard_id_array(oid)
 	RETURNS bigint[]
-	AS 'pg_shard', 'LoadShardIdArray'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION load_shard_interval_array(bigint)
 	RETURNS integer[]
-	AS 'pg_shard', 'LoadShardIntervalArray'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION load_shard_placement_array(bigint)
 	RETURNS text[]
-	AS 'pg_shard', 'LoadShardPlacementArray'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION partition_column_attribute_number(oid)
 	RETURNS smallint
-	AS 'pg_shard', 'PartitionColumnAttributeNumber'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 -- ===================================================================
 -- test distribution metadata functionality

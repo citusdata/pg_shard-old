@@ -36,13 +36,13 @@
 
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(PopulateTempTable);
-PG_FUNCTION_INFO_V1(CountTempTable);
-PG_FUNCTION_INFO_V1(GetAndPurgeConnection);
-PG_FUNCTION_INFO_V1(LoadShardIdArray);
-PG_FUNCTION_INFO_V1(LoadShardIntervalArray);
-PG_FUNCTION_INFO_V1(LoadShardPlacementArray);
-PG_FUNCTION_INFO_V1(PartitionColumnAttributeNumber);
+PG_FUNCTION_INFO_V1(populate_temp_table);
+PG_FUNCTION_INFO_V1(count_temp_table);
+PG_FUNCTION_INFO_V1(get_and_purge_connection);
+PG_FUNCTION_INFO_V1(load_shard_id_array);
+PG_FUNCTION_INFO_V1(load_shard_interval_array);
+PG_FUNCTION_INFO_V1(load_shard_placement_array);
+PG_FUNCTION_INFO_V1(partition_column_attribute_number);
 
 
 /* local function forward declarations */
@@ -53,13 +53,13 @@ static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
 
 
 /*
- * PopulateTempTable connects to a specified host on a specified port and
+ * populate_temp_table connects to a specified host on a specified port and
  * creates a temporary table with 100 rows. Because the table is temporary, it
  * will be visible if a connection is reused but not if a new connection is
  * opened to the node.
  */
 Datum
-PopulateTempTable(PG_FUNCTION_ARGS)
+populate_temp_table(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
@@ -78,12 +78,12 @@ PopulateTempTable(PG_FUNCTION_ARGS)
 
 
 /*
- * CountTempTable just returns the integer count of rows in the table created
- * by PopulateTempTable. If no such table exists, this function emits a warning
+ * count_temp_table just returns the integer count of rows in the table created
+ * by populate_temp_table. If no such table exists, this function emits a warning
  * and returns -1.
  */
 Datum
-CountTempTable(PG_FUNCTION_ARGS)
+count_temp_table(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
@@ -109,12 +109,12 @@ CountTempTable(PG_FUNCTION_ARGS)
 
 
 /*
- * GetAndPurgeConnection first gets a connection using the provided hostname and
+ * get_and_purge_connection first gets a connection using the provided hostname and
  * port before immediately passing that connection to PurgeConnection. Simply a
  * wrapper around PurgeConnection that uses hostname/port rather than PGconn.
  */
 Datum
-GetAndPurgeConnection(PG_FUNCTION_ARGS)
+get_and_purge_connection(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
@@ -167,11 +167,11 @@ ExtractIntegerDatum(char *input)
 
 
 /*
- * LoadShardIdArray returns the shard identifiers for a particular distributed
- * table as a bigint array.
+ * load_shard_id_array returns the shard identifiers for a particular
+ * distributed table as a bigint array.
  */
 Datum
-LoadShardIdArray(PG_FUNCTION_ARGS)
+load_shard_id_array(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	ArrayType *shardIdArrayType = NULL;
@@ -199,13 +199,13 @@ LoadShardIdArray(PG_FUNCTION_ARGS)
 
 
 /*
- * LoadShardIntervalArray loads a shard interval using a provided identifier and
- * returns a two-element array consisting of the min and max values contained in
+ * load_shard_interval_array loads a shard interval using a provided identifier
+ * and returns a two-element array consisting of min/max values contained in
  * that shard interval (currently always integer values). If no such interval
  * can be found, this function raises an error instead.
  */
 Datum
-LoadShardIntervalArray(PG_FUNCTION_ARGS)
+load_shard_interval_array(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
 	ArrayType *shardIntervalArrayType = NULL;
@@ -223,13 +223,13 @@ LoadShardIntervalArray(PG_FUNCTION_ARGS)
 
 
 /*
- * LoadShardPlacementArray loads a shard interval using a provided identifier
+ * load_shard_placement_array loads a shard interval using the provided ID
  * and returns an array of strings containing the node name and port for each
  * placement of the specified shard interval. If no such shard interval can be
  * found, this function raises an error instead.
  */
 Datum
-LoadShardPlacementArray(PG_FUNCTION_ARGS)
+load_shard_placement_array(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
 	ArrayType *placementArrayType = NULL;
@@ -260,12 +260,12 @@ LoadShardPlacementArray(PG_FUNCTION_ARGS)
 
 
 /*
- * PartitionColumnAttributeNumber simply finds a distributed table using the
+ * partition_column_attribute_number simply finds a distributed table using the
  * provided Oid and returns the attribute number of its partition column. If the
  * specified table is not distributed, this function raises an error instead.
  */
 Datum
-PartitionColumnAttributeNumber(PG_FUNCTION_ARGS)
+partition_column_attribute_number(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	Var *partitionColumn = PartitionColumn(distributedTableId);

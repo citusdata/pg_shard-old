@@ -24,13 +24,13 @@
 #define COUNT_TEMP_TABLE	"SELECT COUNT(*) FROM numbers;"
 
 
-extern Datum PopulateTempTable(PG_FUNCTION_ARGS);
-extern Datum CountTempTable(PG_FUNCTION_ARGS);
-extern Datum GetAndPurgeConnection(PG_FUNCTION_ARGS);
-extern Datum LoadShardIdArray(PG_FUNCTION_ARGS);
-extern Datum LoadShardIntervalArray(PG_FUNCTION_ARGS);
-extern Datum LoadShardPlacementArray(PG_FUNCTION_ARGS);
-extern Datum PartitionColumnAttributeNumber(PG_FUNCTION_ARGS);
+extern Datum populate_temp_table(PG_FUNCTION_ARGS);
+extern Datum count_temp_table(PG_FUNCTION_ARGS);
+extern Datum get_and_purge_connection(PG_FUNCTION_ARGS);
+extern Datum load_shard_id_array(PG_FUNCTION_ARGS);
+extern Datum load_shard_interval_array(PG_FUNCTION_ARGS);
+extern Datum load_shard_placement_array(PG_FUNCTION_ARGS);
+extern Datum partition_column_attribute_number(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_TEST_HELPER_H */

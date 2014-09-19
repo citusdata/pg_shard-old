@@ -3,15 +3,15 @@
 -- ===================================================================
 CREATE FUNCTION populate_temp_table(text, integer)
 	RETURNS void
-	AS 'pg_shard', 'PopulateTempTable'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION count_temp_table(text, integer)
 	RETURNS integer
-	AS 'pg_shard', 'CountTempTable'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION get_and_purge_connection(text, integer)
 	RETURNS void
-	AS 'pg_shard', 'GetAndPurgeConnection'
+	AS 'pg_shard'
 	LANGUAGE C STRICT;
 -- ===================================================================
 -- test connection hash functionality
