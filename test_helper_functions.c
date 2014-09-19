@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
- * test.c
+ * test_helper_functions.c
  *		  Test wrapper functions for pg_shard
  *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  *
  * IDENTIFICATION
- *		  test.c
+ *		  test_helper_functions.c
  *
  *-------------------------------------------------------------------------
  */
@@ -19,7 +19,7 @@
 
 #include "connection.h"
 #include "distribution_metadata.h"
-#include "test.h"
+#include "test_helper_functions.h"
 
 #include <stddef.h>
 #include <string.h>

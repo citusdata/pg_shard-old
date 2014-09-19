@@ -1,18 +1,18 @@
 /*-------------------------------------------------------------------------
  *
- * test.h
+ * test_helper_functions.h
  *		  Test wrapper functions for pg_shard
  *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  *
  * IDENTIFICATION
- *		  test.h
+ *		  test_helper_functions.h
  *
  *-------------------------------------------------------------------------
  */
 
-#ifndef PG_SHARD_TEST_H
-#define PG_SHARD_TEST_H
+#ifndef PG_SHARD_TEST_HELPER_H
+#define PG_SHARD_TEST_HELPER_H
 
 #include "postgres.h"
 #include "fmgr.h"
@@ -21,7 +21,7 @@
 /* SQL statements for testing */
 #define POPULATE_TEMP_TABLE "CREATE TEMPORARY TABLE numbers " \
 							"AS SELECT * FROM generate_series(1, 100);"
-#define COUNT_TEMP_TABLE "SELECT COUNT(*) FROM numbers;"
+#define COUNT_TEMP_TABLE	"SELECT COUNT(*) FROM numbers;"
 
 
 extern Datum PopulateTempTable(PG_FUNCTION_ARGS);
@@ -33,4 +33,4 @@ extern Datum LoadShardPlacementArray(PG_FUNCTION_ARGS);
 extern Datum PartitionColumnAttributeNumber(PG_FUNCTION_ARGS);
 
 
-#endif /* PG_SHARD_TEST_H */
+#endif /* PG_SHARD_TEST_HELPER_H */
