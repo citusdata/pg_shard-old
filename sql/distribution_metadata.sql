@@ -26,8 +26,8 @@ CREATE FUNCTION partition_column_attribute_number(oid)
 -- test distribution metadata functionality
 -- ===================================================================
 
-
-CREATE TEMPORARY TABLE events (
+-- set up a table and "distribute" it manually
+CREATE TABLE events (
 	id bigint,
 	name text
 );
@@ -79,3 +79,6 @@ SELECT partition_column_attribute_number('events'::regclass);
 
 -- should see error (catalog is not distributed)
 SELECT partition_column_attribute_number('pg_type'::regclass);
+
+-- clean up after ourselves
+DROP TABLE events;
