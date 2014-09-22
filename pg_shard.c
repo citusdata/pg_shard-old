@@ -48,7 +48,7 @@ bool UseCitusDBSelectLogic = false;
 static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static PlannerType DeterminePlannerType(Query *query);
-static Oid DistributedTableId(Query *query);
+static Oid ExtractFirstDistributedTableId(Query *query);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
@@ -106,24 +106,9 @@ static PlannedStmt *
 PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
-	PlannerType plannerType = PLANNER_INVALID_FIRST;
 
-	plannerType = DeterminePlannerType(query);
-	if (plannerType == PLANNER_TYPE_CITUSDB)
-	{
-		Assert(PreviousPlannerHook != NULL);
-		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
-	}
-	else if (plannerType == PLANNER_TYPE_HOOK)
-	{
-		Assert(PreviousPlannerHook != NULL);
-		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
-	}
-	else if (plannerType == PLANNER_TYPE_STANDARD)
-	{
-		plannedStatement = standard_planner(query, cursorOptions, boundParams);
-	}
-	else if (plannerType == PLANNER_TYPE_PG_SHARD)
+	PlannerType plannerType = DeterminePlannerType(query);
+	if (plannerType == PLANNER_TYPE_PG_SHARD)
 	{
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
@@ -137,9 +122,25 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		distributedPlan = PlanDistributedQuery(distributedQuery);
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
+	else if (plannerType == PLANNER_TYPE_CITUSDB)
+	{
+		Assert(PreviousPlannerHook != NULL);
+		plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
+	}
+	else if (plannerType == PLANNER_TYPE_POSTGRES)
+	{
+		if (PreviousPlannerHook != NULL)
+		{
+			plannedStatement = PreviousPlannerHook(query, cursorOptions, boundParams);
+		}
+		else
+		{
+			plannedStatement = standard_planner(query, cursorOptions, boundParams);
+		}
+	}
 	else
 	{
-		ereport(ERROR, (errmsg("unknown planner type:%d", plannerType)));
+		ereport(ERROR, (errmsg("unknown planner type: %d", plannerType)));
 	}
 
 	return plannedStatement;
@@ -154,7 +155,7 @@ static PlannerType
 DeterminePlannerType(Query *query)
 {
 	PlannerType plannerType = PLANNER_INVALID_FIRST;
-	Oid distributedTableId = DistributedTableId(query);
+	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 	CmdType cmdType = query->commandType;
 
 	if (cmdType == CMD_SELECT && UseCitusDBSelectLogic)
@@ -165,13 +166,9 @@ DeterminePlannerType(Query *query)
 	{
 		plannerType = PLANNER_TYPE_PG_SHARD;
 	}
-	else if (PreviousPlannerHook != NULL)
-	{
-		plannerType = PLANNER_TYPE_HOOK; 
-	}
 	else
 	{
-		plannerType = PLANNER_TYPE_STANDARD;
+		plannerType = PLANNER_TYPE_POSTGRES;
 	}
 
 	return plannerType;
@@ -179,12 +176,12 @@ DeterminePlannerType(Query *query)
 
 
 /*
- * DistributedTableId returns the relationId of the first distributed table the
- * function finds in the given query. If no distributed table is found, the
- * function returns InvalidOid.
+ * ExtractFirstDistributedTableId returns the relationId of the first
+ * distributed table the function finds in the given query. If no distributed
+ * table is found, the function returns InvalidOid.
  */
 static Oid
-DistributedTableId(Query *query)
+ExtractFirstDistributedTableId(Query *query)
 {
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
@@ -221,7 +218,7 @@ DistributedTableId(Query *query)
 static bool
 ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 {
-	bool walkerResult = false;
+	bool walkIsComplete = false;
 	if (node == NULL)
 	{
 		return false;
@@ -237,23 +234,22 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 	}
 	else if (IsA(node, Query))
 	{
-		walkerResult = query_tree_walker((Query *) node, ExtractRangeTableEntryWalker,
+		walkIsComplete = query_tree_walker((Query *) node, ExtractRangeTableEntryWalker,
 										 rangeTableList, QTW_EXAMINE_RTES);
 	}
 	else
 	{
-		walkerResult = expression_tree_walker(node, ExtractRangeTableEntryWalker,
+		walkIsComplete = expression_tree_walker(node, ExtractRangeTableEntryWalker,
 											  rangeTableList);
 	}
 
-	return walkerResult;
+	return walkIsComplete;
 }
 
 
 /*
- * ErrorIfQueryNotSupported checks that we can perform distributed planning for
- * the given query. The checks in this function will be removed as we support
- * more functionality in our distributed planning.
+ * ErrorIfQueryNotSupported checks if the query contains unsupported features,
+ * and errors out if it does.
  */
 static void
 ErrorIfQueryNotSupported(Query *queryTree)
@@ -276,7 +272,6 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	foreach(rangeTableCell, rangeTableList)
 	{
 		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
-
 		if (rangeTableEntry->rtekind == RTE_RELATION)
 		{
 			queryTableCount++;
@@ -303,15 +298,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 							   "are not supported")));
 	}
 
-	if (commandType == CMD_INSERT)
+	/* reject queries with a returning list */
+	if (list_length(queryTree->returningList) > 0)
 	{
-		/* reject queries with a returning list */
-		if (list_length(queryTree->returningList) > 0)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("cannot plan sharded INSERT that uses a "
-								   "RETURNING clause")));
-		}
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot plan sharded INSERT that uses a "
+							   "RETURNING clause")));
 	}
 }
 
@@ -326,7 +318,7 @@ static DistributedPlan *
 PlanDistributedQuery(Query *query)
 {
 	DistributedPlan *distributedPlan = NULL;
-	Oid distributedTableId = DistributedTableId(query);
+	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 
 	List *restrictClauseList = QueryRestrictList(query);
 	List *shardList = LoadShardList(distributedTableId);
@@ -353,7 +345,7 @@ QueryRestrictList(Query *query)
 	if (query->commandType == CMD_INSERT)
 	{
 		/* build equality expression based on partition column value for row */
-		Oid distributedTableId = DistributedTableId(query);
+		Oid distributedTableId = ExtractFirstDistributedTableId(query);
 		Var *partitionColumn = PartitionColumn(distributedTableId);
 		Const *partitionValue = ExtractPartitionValue(query, partitionColumn);
 
@@ -419,7 +411,7 @@ ExtractPartitionValue(Query *query, Var *partitionColumn)
 static bool
 ExtractFromExpressionWalker(Node *node, List **qualifierList)
 {
-	bool walkerResult = false;
+	bool walkIsComplete = false;
 	if (node == NULL)
 	{
 		return false;
@@ -432,10 +424,10 @@ ExtractFromExpressionWalker(Node *node, List **qualifierList)
 		(*qualifierList) = list_concat(*qualifierList, fromQualifierList);
 	}
 
-	walkerResult = expression_tree_walker(node, ExtractFromExpressionWalker,
+	walkIsComplete = expression_tree_walker(node, ExtractFromExpressionWalker,
 										  (void *) qualifierList);
 
-	return walkerResult;
+	return walkIsComplete;
 }
 
 
