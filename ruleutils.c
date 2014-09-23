@@ -5811,8 +5811,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				/* Normal relation RTE */
 				appendStringInfo(buf, "%s%s",
 								 only_marker(rte),
-								 generate_relation_name(rte->relid,
-														context->namespaces));
+								 generate_shard_name(rte->relid, context->shardid, NIL));
 				break;
 			case RTE_SUBQUERY:
 				/* Subquery RTE */
