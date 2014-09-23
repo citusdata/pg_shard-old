@@ -106,18 +106,18 @@ static PlannedStmt *
 PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
-
 	PlannerType plannerType = DeterminePlannerType(query);
+
 	if (plannerType == PLANNER_TYPE_PG_SHARD)
 	{
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
 
-		/* call standard planner on copy to have Query transformations performed */
+		/* call standard planner first to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
 											boundParams);
 
-		ErrorIfQueryNotSupported(distributedQuery);			
+		ErrorIfQueryNotSupported(distributedQuery);
 
 		distributedPlan = PlanDistributedQuery(distributedQuery);
 		plannedStatement->planTree = (Plan *) distributedPlan;
@@ -156,13 +156,12 @@ DeterminePlannerType(Query *query)
 {
 	PlannerType plannerType = PLANNER_INVALID_FIRST;
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
-	CmdType cmdType = query->commandType;
 
-	if (cmdType == CMD_SELECT && UseCitusDBSelectLogic)
+	if (query->commandType == CMD_SELECT && UseCitusDBSelectLogic)
 	{
 		plannerType = PLANNER_TYPE_CITUSDB;
 	}
-	else if (distributedTableId != InvalidOid)
+	else if (OidIsValid(distributedTableId))
 	{
 		plannerType = PLANNER_TYPE_PG_SHARD;
 	}
@@ -176,9 +175,9 @@ DeterminePlannerType(Query *query)
 
 
 /*
- * ExtractFirstDistributedTableId returns the relationId of the first
- * distributed table the function finds in the given query. If no distributed
- * table is found, the function returns InvalidOid.
+ * ExtractFirstDistributedTableId takes a given query, and finds the relationId
+ * for the first distributed table in that query. If the function cannot find a
+ * distributed table, it returns InvalidOid.
  */
 static Oid
 ExtractFirstDistributedTableId(Query *query)
@@ -210,10 +209,6 @@ ExtractFirstDistributedTableId(Query *query)
  * table entries that are plain relations or values scans. For recursing into
  * the query tree, this function uses the query tree walker since the expression
  * tree walker doesn't recurse into sub-queries.
- *
- * Values scans are not supported, but there is no field on the Query that can
- * be easily checked to detect them, so we collect them here and let the logic
- * in NeedsDistributedPlanning sort it out.
  */
 static bool
 ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
@@ -235,12 +230,12 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 	else if (IsA(node, Query))
 	{
 		walkIsComplete = query_tree_walker((Query *) node, ExtractRangeTableEntryWalker,
-										 rangeTableList, QTW_EXAMINE_RTES);
+										   rangeTableList, QTW_EXAMINE_RTES);
 	}
 	else
 	{
 		walkIsComplete = expression_tree_walker(node, ExtractRangeTableEntryWalker,
-											  rangeTableList);
+												rangeTableList);
 	}
 
 	return walkIsComplete;
@@ -260,7 +255,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	uint32 queryTableCount = 0;
 
 	CmdType commandType = queryTree->commandType;
-	if (queryTree->commandType != CMD_INSERT && queryTree->commandType != CMD_SELECT)
+	if (commandType != CMD_INSERT && commandType != CMD_SELECT)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("unsupported query type: %d", commandType)));
@@ -425,7 +420,7 @@ ExtractFromExpressionWalker(Node *node, List **qualifierList)
 	}
 
 	walkIsComplete = expression_tree_walker(node, ExtractFromExpressionWalker,
-										  (void *) qualifierList);
+											(void *) qualifierList);
 
 	return walkIsComplete;
 }
