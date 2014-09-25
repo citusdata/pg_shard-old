@@ -30,6 +30,7 @@
 #include "access/skey.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
+#include "nodes/makeFuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
@@ -39,6 +40,7 @@
 #include "nodes/primnodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
+#include "optimizer/var.h"
 #include "parser/parsetree.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
@@ -61,6 +63,9 @@ static DistributedPlan * PlanDistributedQuery(Query *query);
 static List * QueryRestrictList(Query *query);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
+static Query * BuildFilterQuery(Query *query);
+static List * QueryFromList(List *rangeTableList);
+static List * TargetEntryList(List *expressionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction,
@@ -355,7 +360,14 @@ PlanDistributedQuery(Query *query)
 	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
 										   shardList);
 
-	distributedPlan = BuildDistributedPlan(query, prunedShardList);
+	Query *workerQuery = copyObject(query);
+
+	if (list_length(prunedShardList) > 1)
+	{
+		workerQuery = BuildFilterQuery(query);
+	}
+
+	distributedPlan = BuildDistributedPlan(workerQuery, prunedShardList);
 
 	return distributedPlan;
 }
@@ -458,6 +470,97 @@ ExtractFromExpressionWalker(Node *node, List **qualifierList)
 											(void *) qualifierList);
 
 	return walkIsComplete;
+}
+
+
+/*
+ * BuildFilterQuery builds a query which contains the filter clauses from the
+ * original query. The filter query also only selects columns needed for the
+ * original query, which can then be pushed down to the worker nodes.
+ */
+static Query *
+BuildFilterQuery(Query *query)
+{
+	Query *filterQuery = NULL;
+	List *rangeTableList = NIL;
+	List *whereClauseList = NIL;
+	List *selectColumnList = NIL;
+	List *projectColumnList = NIL;
+	List *columnList = NIL;
+	List *targetList = NIL;
+	FromExpr *fromExpr = NULL;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+
+	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
+	Assert(list_length(rangeTableList) == 1);
+
+	/* build the where-clause expression */
+	whereClauseList = QueryRestrictList(query);
+	fromExpr = makeNode(FromExpr);
+	fromExpr->quals = (Node *) make_ands_explicit((List *) whereClauseList);
+	fromExpr->fromlist = QueryFromList(rangeTableList);
+
+	/* build the target list */
+	selectColumnList = pull_var_clause(fromExpr, aggregateBehavior, placeHolderBehavior);
+	projectColumnList = pull_var_clause(query->targetList, aggregateBehavior,
+										placeHolderBehavior);
+	columnList = list_union(selectColumnList, projectColumnList);
+	targetList = TargetEntryList(columnList);
+
+	filterQuery = makeNode(Query);
+	filterQuery->commandType = CMD_SELECT;
+	filterQuery->rtable = rangeTableList;
+	filterQuery->targetList = targetList;
+	filterQuery->jointree = fromExpr;
+
+	return filterQuery;
+}
+
+
+/*
+ * QueryFromList creates the from list construct that is used for building the
+ * query's join tree. The function creates the from list by making a range table
+ * reference for each entry in the given range table list.
+ */
+static List *
+QueryFromList(List *rangeTableList)
+{
+	List *fromList = NIL;
+	Index rangeTableIndex = 1;
+	int rangeTableCount = list_length(rangeTableList);
+
+	for (rangeTableIndex = 1; rangeTableIndex <= rangeTableCount; rangeTableIndex++)
+	{
+		RangeTblRef *rangeTableReference = makeNode(RangeTblRef);
+		rangeTableReference->rtindex = rangeTableIndex;
+
+		fromList = lappend(fromList, rangeTableReference);
+	}
+
+	return fromList;
+}
+
+
+/*
+ * TargetEntryList creates a target entry for each expression in the given list,
+ * and returns the newly created target entries in a list.
+ */
+static List *
+TargetEntryList(List *expressionList)
+{
+	List *targetEntryList = NIL;
+	ListCell *expressionCell = NULL;
+
+	foreach(expressionCell, expressionList)
+	{
+		Expr *expression = (Expr *) lfirst(expressionCell);
+
+		TargetEntry *targetEntry = makeTargetEntry(expression, -1, NULL, false);
+		targetEntryList = lappend(targetEntryList, targetEntry);
+	}
+
+	return targetEntryList;
 }
 
 
