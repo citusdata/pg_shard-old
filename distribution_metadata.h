@@ -45,6 +45,7 @@
 
 /* table and index names for shard placement information */
 #define SHARD_PLACEMENT_TABLE_NAME "shard_placement"
+#define SHARD_PLACEMENT_PKEY_INDEX_NAME "shard_placement_pkey"
 #define SHARD_PLACEMENT_SHARD_INDEX_NAME "shard_placement_shard_index"
 
 /* human-readable names for addressing columns of shard placement table */
@@ -133,6 +134,7 @@ extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardSto
 extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 									ShardState shardState, char *nodeName,
 									uint32 nodePort);
+extern void UpdateShardPlacementState(uint64 shardPlacementId, ShardState shardState);
 extern uint64 NextSequenceId(char *sequenceName);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 

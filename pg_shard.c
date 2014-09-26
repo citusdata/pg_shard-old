@@ -15,6 +15,7 @@
 #include "c.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
+#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -627,9 +628,13 @@ ExecDistributedModify(DistributedPlan *plan)
 				ereport(ERROR, (errmsg("query execution failed on %s:%d. Failing fast",
 								placement->nodeName, placement->nodePort)));
 			}
-			else if (placementModified)
+			else if (!placementModified)
 			{
-				/* TODO: time to update the placement health! */
+				ereport(WARNING, (errmsg("query execution failed on %s:%d. Marking shard "
+										"placement " INT64_FORMAT " as unhealthy",
+										placement->nodeName, placement->nodePort,
+										placement->id)));
+				UpdateShardPlacementState(placement->id, STATE_INACTIVE);
 			}
 		}
 
