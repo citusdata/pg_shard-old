@@ -495,83 +495,85 @@ QueryRestrictList(Query *query)
 
 /*
  * ExecDistributedModify is the main entry point for modifying any distributed
- * table. A distributed modification is successful if and only if all shards
- * of the distributed table are successfully modified. ExecDistributedModify
- * returns the number of modified rows in that case and errors in all others.
+ * table. A distributed modification is successful if any placement of the
+ * distributed table is successful. ExecDistributedModify returns the number of
+ * modified rows in that case and errors in all others. This function will also
+ * generate warnings for individual placement failures.
  */
 static int32
 ExecDistributedModify(DistributedPlan *plan)
 {
-	int32 affectedShardTupleCount = 0;
+	int32 affectedShardTupleCount = -1;
 	Task *task = (Task *) linitial(plan->taskList);
 	ListCell *taskPlacementCell = NULL;
-	bool shardDirty = false;
+	List *failedPlacementList = NIL;
+	ListCell *failedPlacementCell = NULL;
 
 	/* we only support a single modification to a single shard */
 	if (list_length(plan->taskList) != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan INSERT to more than one shard")));
-
 	}
 
 	foreach(taskPlacementCell, task->taskPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
 		PGconn *connection = NULL;
-		bool placementModified = false;
+		PGresult *result = NULL;
+		char *affectedTupleString = NULL;
+		int32 affectedTupleCount = -1;
 
 		Assert(taskPlacement->shardState == STATE_FINALIZED);
 
 		connection = GetConnection(taskPlacement->nodeName, taskPlacement->nodePort);
-		if (connection != NULL)
-		{
-			PGresult *result = PQexec(connection, task->queryString->data);
-			placementModified = (PQresultStatus(result) == PGRES_COMMAND_OK);
-			if (placementModified)
-			{
-				char *tuplesAffectedString = PQcmdTuples(result);
-				int32 tuplesAffected = pg_atoi(tuplesAffectedString, sizeof(int32), 0);
-
-				if (shardDirty && (tuplesAffected != affectedShardTupleCount))
-				{
-					ereport(WARNING, (errmsg("%d tuples affected on %s:%d. "
-											 "Expected %d", tuplesAffected,
-											 taskPlacement->nodeName,
-											 taskPlacement->nodePort,
-											 affectedShardTupleCount)));
-				}
-
-				affectedShardTupleCount = tuplesAffected;
-				shardDirty = true;
-			}
-			else
-			{
-				ReportRemoteError(connection, result);
-			}
-
-			PQclear(result);
-		}
-		else
+		if (connection == NULL)
 		{
 			ereport(WARNING, (errmsg("could not connect to %s:%d",
 									 taskPlacement->nodeName,
 									 taskPlacement->nodePort)));
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+			continue;
 		}
 
-		if (!shardDirty)
+		result = PQexec(connection, task->queryString->data);
+		if (PQresultStatus(result) != PGRES_COMMAND_OK)
 		{
-			ereport(ERROR, (errmsg("query execution failed on %s:%d. Failing fast",
-							taskPlacement->nodeName, taskPlacement->nodePort)));
+			ReportRemoteError(connection, result);
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+			continue;
 		}
-		else if (!placementModified)
+
+		affectedTupleString = PQcmdTuples(result);
+		affectedTupleCount = pg_atoi(affectedTupleString, sizeof(int32), 0);
+		if ((affectedShardTupleCount >= 0) &&
+			(affectedTupleCount != affectedShardTupleCount))
 		{
-			ereport(WARNING, (errmsg("query execution failed on %s:%d. Marking shard "
-									"placement " INT64_FORMAT " as unhealthy",
-									taskPlacement->nodeName, taskPlacement->nodePort,
-									taskPlacement->id)));
-			UpdateShardPlacementState(taskPlacement->id, STATE_INACTIVE);
+			ereport(WARNING, (errmsg("%d tuples affected on %s:%d. "
+									 "Expected %d", affectedTupleCount,
+									 taskPlacement->nodeName,
+									 taskPlacement->nodePort,
+									 affectedShardTupleCount)));
 		}
+		else
+		{
+			affectedShardTupleCount = affectedTupleCount;
+		}
+
+		PQclear(result);
+	}
+
+	/* if all placements failed, error out */
+	if (list_length(failedPlacementList) == list_length(task->taskPlacementList))
+	{
+		ereport(ERROR, (errmsg("could not modify any active placements")));
+	}
+
+	/* otherwise, mark failed placements as inactive: they're stale */
+	foreach(failedPlacementCell, failedPlacementList)
+	{
+		ShardPlacement *failedPlacement = (ShardPlacement *) lfirst(failedPlacementCell);
+		UpdateShardPlacementState(taskPlacement->id, STATE_INACTIVE);
 	}
 
 	return affectedShardTupleCount;
