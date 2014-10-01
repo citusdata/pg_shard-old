@@ -28,6 +28,7 @@
 
 #include "access/sdir.h"
 #include "access/skey.h"
+#include "access/xact.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
@@ -220,8 +221,13 @@ PgShardExecutorStartHook(QueryDesc *queryDesc, int eflags)
 
 	if (pgShardExecution)
 	{
+		EState *estate = NULL;
+		bool topLevel = true; /* possibly a lie for some simple protocol query cases */
+
+		PreventTransactionChain(topLevel, "distributed commands");
+
 		/* build empty executor state to obtain per-query memory context */
-		EState *estate = CreateExecutorState();
+		estate = CreateExecutorState();
 
 		/* fill out executor state as far as is reasonable */
 		/* TODO: Call RegisterSnapshot? (Probably not) */
