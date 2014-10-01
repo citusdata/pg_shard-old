@@ -71,6 +71,7 @@ static int32 ExecDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
+static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 
 
 /* declarations for dynamic loading */
@@ -217,7 +218,7 @@ static void
 PgShardExecutorStartHook(QueryDesc *queryDesc, int eflags)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
-	bool pgShardExecution = IsAPgShardPlan(plannedStatement);
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
 
 	if (pgShardExecution)
 	{
@@ -290,7 +291,7 @@ void
 PgShardExecutorRunHook(QueryDesc *queryDesc, ScanDirection direction, long count)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
-	bool pgShardExecution = IsAPgShardPlan(plannedStatement);
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
 
 	if (pgShardExecution)
 	{
@@ -313,8 +314,8 @@ PgShardExecutorRunHook(QueryDesc *queryDesc, ScanDirection direction, long count
 		{
 			if (operation == CMD_INSERT)
 			{
-				int32 rowsAffected = ExecDistributedModify(plan);
-				estate->es_processed = rowsAffected;
+				int32 affectedRowCount = ExecDistributedModify(plan);
+				estate->es_processed = affectedRowCount;
 			}
 		}
 
@@ -385,7 +386,7 @@ void
 PgShardExecutorFinishHook(QueryDesc *queryDesc)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
-	bool pgShardExecution = IsAPgShardPlan(plannedStatement);
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
 
 	if (pgShardExecution)
 	{
@@ -418,7 +419,7 @@ void
 PgShardExecutorEndHook(QueryDesc *queryDesc)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
-	bool pgShardExecution = IsAPgShardPlan(plannedStatement);
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
 
 	if (pgShardExecution)
 	{
@@ -577,80 +578,79 @@ QueryRestrictList(Query *query)
 static int32
 ExecDistributedModify(DistributedPlan *plan)
 {
-	int32 shardTuplesAffected = 0;
+	int32 affectedShardTupleCount = 0;
+	Task *task = (Task *) linitial(plan->taskList);
+	ListCell *taskPlacementCell = NULL;
+	bool shardDirty = false;
 
 	/* we only support a single modification to a single shard */
-	if (list_length(plan->taskList) == 1)
-	{
-		Task *task = (Task *) linitial(plan->taskList);
-		ListCell *placementCell = NULL;
-		bool shardDirty = false;
-
-		foreach(placementCell, task->taskPlacementList)
-		{
-			ShardPlacement *placement = (ShardPlacement *) lfirst(placementCell);
-			PGconn *connection = NULL;
-			bool placementModified = false;
-
-			Assert(placement->shardState == STATE_FINALIZED);
-
-			connection = GetConnection(placement->nodeName, placement->nodePort);
-			if (connection != NULL)
-			{
-				PGresult *result = PQexec(connection, task->queryString->data);
-				placementModified = (PQresultStatus(result) == PGRES_COMMAND_OK);
-				if (placementModified)
-				{
-					char *tuplesAffectedString = PQcmdTuples(result);
-					int32 tuplesAffected = pg_atoi(tuplesAffectedString, sizeof(int32), 0);
-
-					if (shardDirty && (tuplesAffected != shardTuplesAffected))
-					{
-						ereport(WARNING, (errmsg("%d tuples affected on %s:%d. "
-												 "Expected %d", tuplesAffected,
-												 placement->nodeName,
-												 placement->nodePort,
-												 shardTuplesAffected)));
-					}
-
-					shardTuplesAffected = tuplesAffected;
-					shardDirty = true;
-				}
-				else
-				{
-					ReportRemoteError(connection, result);
-				}
-
-				PQclear(result);
-			}
-			else
-			{
-				ereport(WARNING, (errmsg("could not connect to %s:%d",
-										 placement->nodeName, placement->nodePort)));
-			}
-
-			if (!shardDirty)
-			{
-				ereport(ERROR, (errmsg("query execution failed on %s:%d. Failing fast",
-								placement->nodeName, placement->nodePort)));
-			}
-			else if (!placementModified)
-			{
-				ereport(WARNING, (errmsg("query execution failed on %s:%d. Marking shard "
-										"placement " INT64_FORMAT " as unhealthy",
-										placement->nodeName, placement->nodePort,
-										placement->id)));
-				UpdateShardPlacementState(placement->id, STATE_INACTIVE);
-			}
-		}
-
-		return shardTuplesAffected;
-	}
-	else
+	if (list_length(plan->taskList) != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan INSERT to more than one shard")));
+
 	}
+
+	foreach(taskPlacementCell, task->taskPlacementList)
+	{
+		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		PGconn *connection = NULL;
+		bool placementModified = false;
+
+		Assert(taskPlacement->shardState == STATE_FINALIZED);
+
+		connection = GetConnection(taskPlacement->nodeName, taskPlacement->nodePort);
+		if (connection != NULL)
+		{
+			PGresult *result = PQexec(connection, task->queryString->data);
+			placementModified = (PQresultStatus(result) == PGRES_COMMAND_OK);
+			if (placementModified)
+			{
+				char *tuplesAffectedString = PQcmdTuples(result);
+				int32 tuplesAffected = pg_atoi(tuplesAffectedString, sizeof(int32), 0);
+
+				if (shardDirty && (tuplesAffected != affectedShardTupleCount))
+				{
+					ereport(WARNING, (errmsg("%d tuples affected on %s:%d. "
+											 "Expected %d", tuplesAffected,
+											 taskPlacement->nodeName,
+											 taskPlacement->nodePort,
+											 affectedShardTupleCount)));
+				}
+
+				affectedShardTupleCount = tuplesAffected;
+				shardDirty = true;
+			}
+			else
+			{
+				ReportRemoteError(connection, result);
+			}
+
+			PQclear(result);
+		}
+		else
+		{
+			ereport(WARNING, (errmsg("could not connect to %s:%d",
+									 taskPlacement->nodeName,
+									 taskPlacement->nodePort)));
+		}
+
+		if (!shardDirty)
+		{
+			ereport(ERROR, (errmsg("query execution failed on %s:%d. Failing fast",
+							taskPlacement->nodeName, taskPlacement->nodePort)));
+		}
+		else if (!placementModified)
+		{
+			ereport(WARNING, (errmsg("query execution failed on %s:%d. Marking shard "
+									"placement " INT64_FORMAT " as unhealthy",
+									taskPlacement->nodeName, taskPlacement->nodePort,
+									taskPlacement->id)));
+			UpdateShardPlacementState(taskPlacement->id, STATE_INACTIVE);
+		}
+	}
+
+	return affectedShardTupleCount;
 }
 
 
@@ -747,4 +747,19 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	distributedPlan->taskList = taskList;
 
 	return distributedPlan;
+}
+
+
+/*
+ * IsPgShardPlan determines whether the provided plannedStmt contains a plan
+ * suitable for execution by PgShard.
+ */
+static bool
+IsPgShardPlan(PlannedStmt *plannedStmt)
+{
+	Plan *plan = plannedStmt->planTree;
+	NodeTag nodeTag = nodeTag(plan);
+	bool isPgShardPlan = ((DistributedNodeTag) nodeTag == T_DistributedPlan);
+
+	return isPgShardPlan;
 }

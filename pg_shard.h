@@ -21,12 +21,6 @@
 
 
 /*
- * IsAPgShardPlan tests if pg_shard should execute a given planned statement.
- */
-#define IsAPgShardPlan(plannedStmt) \
-	((DistributedNodeTag) nodeTag((plannedStmt)->planTree) == T_DistributedPlan)
-
-/*
  * DistributedNodeTag identifies nodes used in the planning and execution of
  * queries interacting with distributed tables.
  */
