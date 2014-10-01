@@ -711,12 +711,11 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 
 
 /*
- * UpdateShardPlacementState updates the state of an existing shard placement. Useful for
- * modifying shard state in reaction to failed queries or corrective action. This method
- * throws an error when it cannot find the specified placement using the provided id.
+ * DeleteShardPlacementRow removes the row corresponding to the provided shard
+ * placement identifier, erroring out if it cannot find such a row.
  */
 void
-UpdateShardPlacementState(uint64 shardPlacementId, ShardState shardState)
+DeleteShardPlacementRow(uint64 shardPlacementId)
 {
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
@@ -744,29 +743,13 @@ UpdateShardPlacementState(uint64 shardPlacementId, ShardState shardState)
 	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
 	{
-		HeapTuple updatedTuple = NULL;
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		Datum shardStateDatum = Int32GetDatum((int32) shardState);
-
-		Datum *values = (Datum *) palloc0(tupleDescriptor->natts * sizeof(Datum));
-		bool *isnull = (bool *) palloc0(tupleDescriptor->natts * sizeof(bool));
-		bool *replace = (bool *) palloc0(tupleDescriptor->natts * sizeof(bool));
-
-		values[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = shardStateDatum;
-		isnull[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = false;
-		replace[ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE - 1] = true;
-
-		updatedTuple = heap_modify_tuple(heapTuple, tupleDescriptor, values,
-										 isnull, replace);
-		simple_heap_update(heapRelation, &heapTuple->t_self, updatedTuple);
+		simple_heap_delete(heapRelation, &heapTuple->t_self);
 	}
 	else
 	{
 		ereport(ERROR, (errmsg("could not find entry for shard placement " INT64_FORMAT,
 							   shardPlacementId)));
 	}
-
-	/* TODO: Do I need to do anything with the index? */
 
 	index_endscan(indexScanDesc);
 	index_close(indexRelation, AccessShareLock);

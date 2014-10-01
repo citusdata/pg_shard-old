@@ -134,7 +134,7 @@ extern void InsertShardRow(Oid distributedTableId, uint64 shardId, char shardSto
 extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 									ShardState shardState, char *nodeName,
 									uint32 nodePort);
-extern void UpdateShardPlacementState(uint64 shardPlacementId, ShardState shardState);
+extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 
