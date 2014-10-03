@@ -59,8 +59,8 @@ static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static PlannerType DeterminePlannerType(Query *query);
 static Oid ExtractFirstDistributedTableId(Query *query);
-static void PgShardExecutorStartHook(QueryDesc *queryDesc, int eflags);
-void PgShardExecutorRunHook(QueryDesc *queryDesc, ScanDirection direction, long count);
+static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
+void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
@@ -94,10 +94,10 @@ _PG_init(void)
 	planner_hook = PgShardPlannerHook;
 
 	PreviousExecutorStartHook = ExecutorStart_hook;
-	ExecutorStart_hook = PgShardExecutorStartHook;
+	ExecutorStart_hook = PgShardExecutorStart;
 
 	PreviousExecutorRunHook = ExecutorRun_hook;
-	ExecutorRun_hook = PgShardExecutorRunHook;
+	ExecutorRun_hook = PgShardExecutorRun;
 
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
 							 "Informs pg_shard to use CitusDB's select logic.",
@@ -200,12 +200,12 @@ DeterminePlannerType(Query *query)
 
 
 /*
- * PgShardExecutorStartHook sets up the queryDesc so even distributed queries can benefit
+ * PgShardExecutorStart sets up the queryDesc so even distributed queries can benefit
  * from the standard ExecutorStart logic. After that hook finishes its setup work, this
  * function moves the special distributed plan back into place for our run hook.
  */
 static void
-PgShardExecutorStartHook(QueryDesc *queryDesc, int eflags)
+PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
 	bool pgShardExecution = IsPgShardPlan(plannedStatement);
@@ -276,10 +276,10 @@ ExtractFirstDistributedTableId(Query *query)
 
 
 /*
- * PgShardExecutorRunHook actually runs a distributed plan, if any.
+ * PgShardExecutorRun actually runs a distributed plan, if any.
  */
 void
-PgShardExecutorRunHook(QueryDesc *queryDesc, ScanDirection direction, long count)
+PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
 	bool pgShardExecution = IsPgShardPlan(plannedStatement);
