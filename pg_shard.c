@@ -503,7 +503,7 @@ QueryRestrictList(Query *query)
 static int32
 ExecuteDistributedModify(DistributedPlan *plan)
 {
-	int32 affectedShardTupleCount = -1;
+	int32 affectedTupleCount = -1;
 	Task *task = (Task *) linitial(plan->taskList);
 	ListCell *taskPlacementCell = NULL;
 	List *failedPlacementList = NIL;
@@ -521,6 +521,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
 		char *nodeName = taskPlacement->nodeName;
 		int32 nodePort = taskPlacement->nodePort;
+
 		PGconn *connection = NULL;
 		PGresult *result = NULL;
 		char *currentAffectedTupleString = NULL;
@@ -549,15 +550,15 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		currentAffectedTupleString = PQcmdTuples(result);
 		currentAffectedTupleCount = pg_atoi(currentAffectedTupleString, sizeof(int32), 0);
 
-		if ((affectedShardTupleCount == -1) ||
-			(affectedShardTupleCount == currentAffectedTupleCount))
+		if ((affectedTupleCount == -1) ||
+			(affectedTupleCount == currentAffectedTupleCount))
 		{
-			affectedShardTupleCount = currentAffectedTupleCount;
+			affectedTupleCount = currentAffectedTupleCount;
 		}
 		else
 		{
 			ereport(WARNING, (errmsg("modified %d tuples, but expected to modify %d",
-									 currentAffectedTupleCount, affectedShardTupleCount),
+									 currentAffectedTupleCount, affectedTupleCount),
 							  errdetail("modified placement on %s:%d",
 									    nodeName, nodePort)));
 		}
@@ -582,7 +583,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 								failedPlacement->nodePort);
 	}
 
-	return affectedShardTupleCount;
+	return affectedTupleCount;
 }
 
 
