@@ -523,8 +523,8 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
 		PGresult *result = NULL;
-		char *affectedTupleString = NULL;
-		int32 affectedTupleCount = -1;
+		char *currentAffectedTupleString = NULL;
+		int32 currentAffectedTupleCount = -1;
 
 		Assert(taskPlacement->shardState == STATE_FINALIZED);
 
@@ -546,19 +546,20 @@ ExecuteDistributedModify(DistributedPlan *plan)
 			continue;
 		}
 
-		affectedTupleString = PQcmdTuples(result);
-		affectedTupleCount = pg_atoi(affectedTupleString, sizeof(int32), 0);
-		if ((affectedShardTupleCount >= 0) &&
-			(affectedTupleCount != affectedShardTupleCount))
+		currentAffectedTupleString = PQcmdTuples(result);
+		currentAffectedTupleCount = pg_atoi(currentAffectedTupleString, sizeof(int32), 0);
+
+		if ((affectedShardTupleCount == -1) ||
+			(affectedShardTupleCount == currentAffectedTupleCount))
 		{
-			ereport(WARNING, (errmsg("%d tuples affected on %s:%d. "
-									 "Expected %d", affectedTupleCount,
-									 nodeName, nodePort,
-									 affectedShardTupleCount)));
+			affectedShardTupleCount = currentAffectedTupleCount;
 		}
 		else
 		{
-			affectedShardTupleCount = affectedTupleCount;
+			ereport(WARNING, (errmsg("modified %d tuples, but expected to modify %d",
+									 currentAffectedTupleCount, affectedShardTupleCount),
+							  errdetail("modified placement on %s:%d",
+									    nodeName, nodePort)));
 		}
 
 		PQclear(result);
