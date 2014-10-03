@@ -65,7 +65,7 @@ static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
 static List * QueryRestrictList(Query *query);
-static int32 ExecDistributedModify(DistributedPlan *distributedPlan);
+static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
@@ -296,7 +296,7 @@ PgShardExecutorRunHook(QueryDesc *queryDesc, ScanDirection direction, long count
 
 		oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
-		if (queryDesc->totaltime)
+		if (queryDesc->totaltime != NULL)
 		{
 			InstrStartNode(queryDesc->totaltime);
 		}
@@ -305,12 +305,12 @@ PgShardExecutorRunHook(QueryDesc *queryDesc, ScanDirection direction, long count
 		{
 			if (operation == CMD_INSERT)
 			{
-				int32 affectedRowCount = ExecDistributedModify(plan);
+				int32 affectedRowCount = ExecuteDistributedModify(plan);
 				estate->es_processed = affectedRowCount;
 			}
 		}
 
-		if (queryDesc->totaltime)
+		if (queryDesc->totaltime != NULL)
 		{
 			InstrStopNode(queryDesc->totaltime, estate->es_processed);
 		}
@@ -494,14 +494,14 @@ QueryRestrictList(Query *query)
 
 
 /*
- * ExecDistributedModify is the main entry point for modifying any distributed
- * table. A distributed modification is successful if any placement of the
- * distributed table is successful. ExecDistributedModify returns the number of
- * modified rows in that case and errors in all others. This function will also
- * generate warnings for individual placement failures.
+ * ExecuteDistributedModify is the main entry point for modifying distributed
+ * tables. A distributed modification is successful if any placement of the
+ * distributed table is successful. ExecuteDistributedModify returns the number
+ * of modified rows in that case and errors in all others. This function will
+ * also generate warnings for individual placement failures.
  */
 static int32
-ExecDistributedModify(DistributedPlan *plan)
+ExecuteDistributedModify(DistributedPlan *plan)
 {
 	int32 affectedShardTupleCount = -1;
 	Task *task = (Task *) linitial(plan->taskList);
@@ -519,6 +519,8 @@ ExecDistributedModify(DistributedPlan *plan)
 	foreach(taskPlacementCell, task->taskPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		char *nodeName = taskPlacement->nodeName;
+		int32 nodePort = taskPlacement->nodePort;
 		PGconn *connection = NULL;
 		PGresult *result = NULL;
 		char *affectedTupleString = NULL;
@@ -526,13 +528,12 @@ ExecDistributedModify(DistributedPlan *plan)
 
 		Assert(taskPlacement->shardState == STATE_FINALIZED);
 
-		connection = GetConnection(taskPlacement->nodeName, taskPlacement->nodePort);
+		connection = GetConnection(nodeName, nodePort);
 		if (connection == NULL)
 		{
-			ereport(WARNING, (errmsg("could not connect to %s:%d",
-									 taskPlacement->nodeName,
-									 taskPlacement->nodePort)));
+			ereport(WARNING, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+
 			continue;
 		}
 
@@ -541,6 +542,7 @@ ExecDistributedModify(DistributedPlan *plan)
 		{
 			ReportRemoteError(connection, result);
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+
 			continue;
 		}
 
@@ -551,8 +553,7 @@ ExecDistributedModify(DistributedPlan *plan)
 		{
 			ereport(WARNING, (errmsg("%d tuples affected on %s:%d. "
 									 "Expected %d", affectedTupleCount,
-									 taskPlacement->nodeName,
-									 taskPlacement->nodePort,
+									 nodeName, nodePort,
 									 affectedShardTupleCount)));
 		}
 		else
@@ -573,6 +574,7 @@ ExecDistributedModify(DistributedPlan *plan)
 	foreach(failedPlacementCell, failedPlacementList)
 	{
 		ShardPlacement *failedPlacement = (ShardPlacement *) lfirst(failedPlacementCell);
+
 		DeleteShardPlacementRow(failedPlacement->id);
 		InsertShardPlacementRow(failedPlacement->id, failedPlacement->shardId,
 								STATE_INACTIVE, failedPlacement->nodeName,
