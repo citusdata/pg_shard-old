@@ -308,10 +308,23 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 
 		if (!ScanDirectionIsNoMovement(direction))
 		{
-			if (operation == CMD_INSERT)
+			switch (operation)
 			{
-				int32 affectedRowCount = ExecuteDistributedModify(plan);
-				estate->es_processed = affectedRowCount;
+				case CMD_INSERT:
+				case CMD_DELETE:
+				case CMD_UPDATE:
+				{
+					int32 affectedRowCount = ExecuteDistributedModify(plan);
+					estate->es_processed = affectedRowCount;
+
+					break;
+				}
+				default:
+				{
+					ereport(ERROR, (errmsg("unrecognized operation code: %d",
+										  (int) operation)));
+					break;
+				}
 			}
 		}
 
