@@ -778,3 +778,32 @@ NextSequenceId(char *sequenceName)
 
 	return nextSequenceId;
 }
+
+
+/*
+ * LockShard returns after acquiring a lock for the specified shard, blocking
+ * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
+ * supported: all others will trigger an error. Locks acquired with this method
+ * are automatically released at transaction end.
+ */
+void
+LockShard(int64 shardId, LOCKMODE lockMode)
+{
+	Oid lockFunctionOid = InvalidOid;
+	Datum shardIdDatum = Int64GetDatum(shardId);
+
+	if (lockMode == ExclusiveLock)
+	{
+		lockFunctionOid = ACQUIRE_EXCLUSIVE_ADVISORY_XACT_LOCK_FUNC_ID;
+	}
+	else if (lockMode == ShareLock)
+	{
+		lockFunctionOid = ACQUIRE_SHARED_ADVISORY_XACT_LOCK_FUNC_ID;
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
+	}
+
+	(void) OidFunctionCall1(lockFunctionOid, shardIdDatum);
+}
