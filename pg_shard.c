@@ -20,6 +20,7 @@
 
 #include "pg_shard.h"
 #include "connection.h"
+#include "create_shards.h"
 #include "distribution_metadata.h"
 #include "prune_shard_list.h"
 #include "ruleutils.h"
@@ -70,6 +71,8 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
+static void AcquireExecutorShardLocks(PlannedStmt *plannedStatement);
+static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 
 
 /* declarations for dynamic loading */
@@ -241,6 +244,8 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 	{
 		/* swap back to the distributed plan for rest of query */
 		plannedStatement->planTree = (Plan *) distributedPlan;
+
+		AcquireExecutorShardLocks(plannedStatement);
 	}
 }
 
@@ -673,6 +678,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		task = (Task *) palloc0(sizeof(Task));
 		task->queryString = queryString;
 		task->taskPlacementList = finalizedPlacementList;
+		task->shardId = shardId;
 
 		taskList = lappend(taskList, task);
 	}
@@ -695,4 +701,84 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 	bool isPgShardPlan = ((DistributedNodeTag) nodeTag == T_DistributedPlan);
 
 	return isPgShardPlan;
+}
+
+
+/*
+ * AcquireExecutorShardLocks: acquire shard locks needed for execution of a
+ * distributed plan. Assumes plannedStatement->planTree is a DistributedPlan.
+ */
+static void
+AcquireExecutorShardLocks(PlannedStmt *plannedStatement)
+{
+	CmdType operation = plannedStatement->commandType;
+	DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
+	List *shardIdSortedTaskList = NIL;
+	ListCell *taskCell = NULL;
+	LOCKMODE lockMode = NoLock;
+
+	switch (operation)
+	{
+		case CMD_SELECT:
+		{
+			/* no locks needed */
+			break;
+		}
+		case CMD_INSERT:
+		{
+			lockMode = ShareLock;
+			break;
+		}
+		case CMD_DELETE:
+		case CMD_UPDATE:
+		{
+			lockMode = ExclusiveLock;
+			break;
+		}
+		default:
+		{
+			ereport(ERROR, (errmsg("unrecognized operation code: %d", (int) operation)));
+			break;
+		}
+	}
+
+	if (lockMode == NoLock)
+	{
+		return;
+	}
+
+	shardIdSortedTaskList = SortList(distributedPlan->taskList, CompareTasksByShardId);
+
+	foreach(taskCell, shardIdSortedTaskList)
+	{
+		Task *task = (Task *) lfirst(taskCell);
+		int64 shardId = task->shardId;
+
+		LockShard(shardId, lockMode);
+	}
+}
+
+
+/* Helper function to compare two tasks using their shardIds. */
+static int
+CompareTasksByShardId(const void *leftElement, const void *rightElement)
+{
+	const Task *leftTask = *((const Task **) leftElement);
+	const Task *rightTask = *((const Task **) rightElement);
+	int64 leftShardId = leftTask->shardId;
+	int64 rightShardId = rightTask->shardId;
+
+	/* we compare 64-bit integers, instead of casting their difference to int */
+	if (leftShardId > rightShardId)
+	{
+		return 1;
+	}
+	else if (leftShardId < rightShardId)
+	{
+		return -1;
+	}
+	else
+	{
+		return 0;
+	}
 }

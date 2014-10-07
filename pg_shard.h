@@ -67,6 +67,7 @@ typedef struct Task
 {
 	StringInfo queryString;		/* SQL string suitable for immediate remote execution */
 	List *taskPlacementList;	/* ShardPlacements on which the task can be executed */
+	int64 shardId;				/* Denormalized shardId of tasks for convenience */
 } Task;
 
 
