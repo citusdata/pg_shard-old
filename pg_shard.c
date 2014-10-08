@@ -395,14 +395,19 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 static void
 ErrorIfQueryNotSupported(Query *queryTree)
 {
+	Oid distributedTableId = ExtractFirstDistributedTableId(queryTree);
+	Var *partitionColumn = PartitionColumn(distributedTableId);
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
+	ListCell *tableEntryCell = NULL;
 	bool hasValuesScan = false;
 	uint32 queryTableCount = 0;
+	bool hasNonConstTargetEntryExprs = false;
+	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
 	if (commandType != CMD_INSERT && commandType != CMD_SELECT &&
-		commandType != CMD_DELETE)
+		commandType != CMD_DELETE && commandType != CMD_UPDATE)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("unsupported query type: %d", commandType)));
@@ -421,6 +426,30 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		else if (rangeTableEntry->rtekind == RTE_VALUES)
 		{
 			hasValuesScan = true;
+		}
+	}
+
+	if (commandType != CMD_SELECT)
+	{
+		foreach(tableEntryCell, queryTree->targetList)
+		{
+			TargetEntry *targetEntry = (TargetEntry *) lfirst(tableEntryCell);
+
+			/* skip resjunk entries: UPDATE adds some for ctid, etc. */
+			if (targetEntry->resjunk)
+			{
+				continue;
+			}
+
+			if (!IsA(targetEntry->expr, Const))
+			{
+				hasNonConstTargetEntryExprs = true;
+			}
+
+			if (targetEntry->resno == partitionColumn->varattno)
+			{
+				specifiesPartitionValue = true;
+			}
 		}
 	}
 
@@ -444,8 +473,21 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (list_length(queryTree->returningList) > 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded INSERT that uses a "
+						errmsg("cannot plan sharded modification that uses a "
 							   "RETURNING clause")));
+	}
+
+	if (hasNonConstTargetEntryExprs)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot plan sharded modification containing values "
+							   "which are not constants or constant expressions")));
+	}
+
+	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("modifying the partition value of rows is not allowed")));
 	}
 }
 
@@ -483,8 +525,9 @@ static List *
 QueryRestrictList(Query *query)
 {
 	List *queryRestrictList = NIL;
+	CmdType commandType = query->commandType;
 
-	if (query->commandType == CMD_INSERT)
+	if (commandType == CMD_INSERT)
 	{
 		/* build equality expression based on partition column value for row */
 		Oid distributedTableId = ExtractFirstDistributedTableId(query);
@@ -503,7 +546,8 @@ QueryRestrictList(Query *query)
 
 		queryRestrictList = list_make1(equalityExpr);
 	}
-	else if (query->commandType == CMD_SELECT || query->commandType == CMD_DELETE)
+	else if (commandType == CMD_SELECT || commandType == CMD_DELETE ||
+			 commandType == CMD_UPDATE)
 	{
 		query_tree_walker(query, ExtractFromExpressionWalker, &queryRestrictList, 0);
 	}
