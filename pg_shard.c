@@ -401,7 +401,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	uint32 queryTableCount = 0;
 
 	CmdType commandType = queryTree->commandType;
-	if (commandType != CMD_INSERT && commandType != CMD_SELECT)
+	if (commandType != CMD_INSERT && commandType != CMD_SELECT &&
+		commandType != CMD_DELETE)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("unsupported query type: %d", commandType)));
@@ -502,7 +503,7 @@ QueryRestrictList(Query *query)
 
 		queryRestrictList = list_make1(equalityExpr);
 	}
-	else if (query->commandType == CMD_SELECT)
+	else if (query->commandType == CMD_SELECT || query->commandType == CMD_DELETE)
 	{
 		query_tree_walker(query, ExtractFromExpressionWalker, &queryRestrictList, 0);
 	}
@@ -531,7 +532,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 	if (list_length(plan->taskList) != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan INSERT to more than one shard")));
+						errmsg("cannot modify multiple shards during a single query")));
 	}
 
 	foreach(taskPlacementCell, task->taskPlacementList)

@@ -2903,7 +2903,7 @@ get_delete_query_def(Query *query, deparse_context *context)
 	}
 	appendStringInfo(buf, "DELETE FROM %s%s",
 					 only_marker(rte),
-					 generate_relation_name(rte->relid, NIL));
+					 generate_shard_name(rte->relid, context->shardid, NIL));
 	if (rte->alias != NULL)
 		appendStringInfo(buf, " %s",
 						 quote_identifier(rte->alias->aliasname));
