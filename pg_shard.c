@@ -15,7 +15,6 @@
 #include "c.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
-#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -44,6 +43,7 @@
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
 #include "parser/parsetree.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
