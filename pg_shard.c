@@ -399,7 +399,6 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	Var *partitionColumn = PartitionColumn(distributedTableId);
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
-	ListCell *tableEntryCell = NULL;
 	bool hasValuesScan = false;
 	uint32 queryTableCount = 0;
 	bool hasNonConstTargetEntryExprs = false;
@@ -431,6 +430,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 
 	if (commandType != CMD_SELECT)
 	{
+		ListCell *tableEntryCell = NULL;
+
 		foreach(tableEntryCell, queryTree->targetList)
 		{
 			TargetEntry *targetEntry = (TargetEntry *) lfirst(tableEntryCell);
