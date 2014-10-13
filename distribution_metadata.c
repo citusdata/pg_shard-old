@@ -711,6 +711,55 @@ InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 
 
 /*
+ * DeleteShardPlacementRow removes the row corresponding to the provided shard
+ * placement identifier, erroring out if it cannot find such a row.
+ */
+void
+DeleteShardPlacementRow(uint64 shardPlacementId)
+{
+	RangeVar *heapRangeVar = NULL;
+	RangeVar *indexRangeVar = NULL;
+	Relation heapRelation = NULL;
+	Relation indexRelation = NULL;
+	IndexScanDesc indexScanDesc = NULL;
+	const int scanKeyCount = 1;
+	ScanKeyData scanKey[scanKeyCount];
+	HeapTuple heapTuple = NULL;
+
+	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
+	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
+								 SHARD_PLACEMENT_PKEY_INDEX_NAME, -1);
+
+	heapRelation = relation_openrv(heapRangeVar, RowExclusiveLock);
+	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
+
+	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
+				Int64GetDatum(shardPlacementId));
+
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+									scanKeyCount, 0);
+	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
+
+	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
+	if (HeapTupleIsValid(heapTuple))
+	{
+		simple_heap_delete(heapRelation, &heapTuple->t_self);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("could not find entry for shard placement " INT64_FORMAT,
+							   shardPlacementId)));
+	}
+
+	index_endscan(indexScanDesc);
+	index_close(indexRelation, AccessShareLock);
+	relation_close(heapRelation, RowExclusiveLock);
+
+	return;
+}
+
+
+/*
  * NextSequenceId allocates and returns a new unique id generated from the given
  * sequence name.
  */

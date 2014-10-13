@@ -17,6 +17,7 @@
 #include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
+#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -27,9 +28,13 @@
 
 #include <stddef.h>
 
+#include "access/sdir.h"
 #include "access/skey.h"
+#include "access/xact.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
+#include "executor/instrument.h"
+#include "nodes/execnodes.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
@@ -40,6 +45,7 @@
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
 #include "parser/parsetree.h"
+#include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/guc.h"
@@ -55,22 +61,21 @@ static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 										ParamListInfo boundParams);
 static PlannerType DeterminePlannerType(Query *query);
 static Oid ExtractFirstDistributedTableId(Query *query);
+static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
+void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
 static List * QueryRestrictList(Query *query);
+static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
-static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
-static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction,
-								   long count);
 static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
-									 EState *executorState, DestReceiver *destination);
-static Tuplestorestate * ExecuteRemoteQuery(char *nodeName, int32 nodePort,
-											StringInfo query, TupleDesc tupleDescriptor);
-static void PgShardExecutorFinish(QueryDesc *queryDesc);
-static void PgShardExecutorEnd(QueryDesc *queryDesc);
+									 EState *executorState, DestReceiver *destination,
+									 TupleDesc tupleDescriptor);
+static PGresult * ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query);
+static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 
 
 /* declarations for dynamic loading */
@@ -81,8 +86,6 @@ PG_MODULE_MAGIC;
 static planner_hook_type PreviousPlannerHook = NULL;
 static ExecutorStart_hook_type PreviousExecutorStartHook = NULL;
 static ExecutorRun_hook_type PreviousExecutorRunHook = NULL;
-static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
-static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 
 
 /*
@@ -102,12 +105,6 @@ _PG_init(void)
 	PreviousExecutorRunHook = ExecutorRun_hook;
 	ExecutorRun_hook = PgShardExecutorRun;
 
-	PreviousExecutorFinishHook = ExecutorFinish_hook;
-	ExecutorFinish_hook = PgShardExecutorFinish;
-
-	PreviousExecutorEndHook = ExecutorEnd_hook;
-	ExecutorEnd_hook = PgShardExecutorEnd;
-
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
 							 "Informs pg_shard to use CitusDB's select logic.",
 							 NULL, &UseCitusDBSelectLogic, false, PGC_USERSET, 0,
@@ -122,11 +119,9 @@ _PG_init(void)
 void
 _PG_fini(void)
 {
-	planner_hook = PreviousPlannerHook;
-	ExecutorStart_hook = PreviousExecutorStartHook;
 	ExecutorRun_hook = PreviousExecutorRunHook;
-	ExecutorFinish_hook = PreviousExecutorFinishHook;
-	ExecutorEnd_hook = PreviousExecutorEndHook;
+	ExecutorStart_hook = PreviousExecutorStartHook;
+	planner_hook = PreviousPlannerHook;
 }
 
 
@@ -155,6 +150,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		ErrorIfQueryNotSupported(distributedQuery);
 
 		distributedPlan = PlanDistributedQuery(distributedQuery);
+		distributedPlan->originalPlan = plannedStatement->planTree;
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
 	else if (plannerType == PLANNER_TYPE_CITUSDB)
@@ -210,6 +206,52 @@ DeterminePlannerType(Query *query)
 
 
 /*
+ * PgShardExecutorStart sets up the queryDesc so even distributed queries can benefit
+ * from the standard ExecutorStart logic. After that hook finishes its setup work, this
+ * function moves the special distributed plan back into place for our run hook.
+ */
+static void
+PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
+{
+	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
+	DistributedPlan *distributedPlan = NULL;
+
+	if (pgShardExecution)
+	{
+		Plan *originalPlan = NULL;
+		bool topLevel = true;
+
+		distributedPlan = (DistributedPlan *) plannedStatement->planTree;
+		originalPlan = distributedPlan->originalPlan;
+
+		/* disallow transactions and triggers during distributed commands */
+		PreventTransactionChain(topLevel, "distributed commands");
+		eflags |= EXEC_FLAG_SKIP_TRIGGERS;
+
+		/* swap in original (local) plan for compatibility with standard start hook */
+		plannedStatement->planTree = originalPlan;
+	}
+
+	/* call the next hook in the chain or the standard one, if no other hook was set */
+	if (PreviousExecutorStartHook != NULL)
+	{
+		PreviousExecutorStartHook(queryDesc, eflags);
+	}
+	else
+	{
+		standard_ExecutorStart(queryDesc, eflags);
+	}
+
+	if (pgShardExecution)
+	{
+		/* swap back to the distributed plan for rest of query */
+		plannedStatement->planTree = (Plan *) distributedPlan;
+	}
+}
+
+
+/*
  * ExtractFirstDistributedTableId takes a given query, and finds the relationId
  * for the first distributed table in that query. If the function cannot find a
  * distributed table, it returns InvalidOid.
@@ -236,6 +278,84 @@ ExtractFirstDistributedTableId(Query *query)
 	}
 
 	return distributedTableId;
+}
+
+
+/*
+ * PgShardExecutorRun actually runs a distributed plan, if any.
+ */
+void
+PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
+{
+	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
+
+	if (pgShardExecution)
+	{
+		EState *estate = queryDesc->estate;
+		CmdType operation = queryDesc->operation;
+		DistributedPlan *plan = (DistributedPlan *) plannedStatement->planTree;
+		MemoryContext oldcontext = NULL;
+
+		Assert(estate != NULL);
+		Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
+
+		oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
+
+		if (queryDesc->totaltime != NULL)
+		{
+			InstrStartNode(queryDesc->totaltime);
+		}
+
+		if (!ScanDirectionIsNoMovement(direction))
+		{
+			if (operation == CMD_INSERT)
+			{
+				int32 affectedRowCount = ExecuteDistributedModify(plan);
+				estate->es_processed = affectedRowCount;
+			}
+			else if (operation == CMD_SELECT)
+			{
+				DestReceiver *destination = queryDesc->dest;
+				List *targetList = plan->originalPlan->targetlist;
+				TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
+
+				if (count != 0)
+				{
+					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+									errmsg("selecting few tuples at a time"
+										   " is unsupported")));
+				}
+
+				/* startup the tuple receiver */
+				(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+
+				ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
+
+				/* shutdown the tuple receiver */
+				(*destination->rShutdown) (destination);
+			}
+		}
+
+		if (queryDesc->totaltime != NULL)
+		{
+			InstrStopNode(queryDesc->totaltime, estate->es_processed);
+		}
+
+		MemoryContextSwitchTo(oldcontext);
+	}
+	else
+	{
+		/* this isn't a query pg_shard handles: use previous hook or standard */
+		if (PreviousExecutorRunHook != NULL)
+		{
+			PreviousExecutorRunHook(queryDesc, direction, count);
+		}
+		else
+		{
+			standard_ExecutorRun(queryDesc, direction, count);
+		}
+	}
 }
 
 
@@ -401,6 +521,100 @@ QueryRestrictList(Query *query)
 
 
 /*
+ * ExecuteDistributedModify is the main entry point for modifying distributed
+ * tables. A distributed modification is successful if any placement of the
+ * distributed table is successful. ExecuteDistributedModify returns the number
+ * of modified rows in that case and errors in all others. This function will
+ * also generate warnings for individual placement failures.
+ */
+static int32
+ExecuteDistributedModify(DistributedPlan *plan)
+{
+	int32 affectedTupleCount = -1;
+	Task *task = (Task *) linitial(plan->taskList);
+	ListCell *taskPlacementCell = NULL;
+	List *failedPlacementList = NIL;
+	ListCell *failedPlacementCell = NULL;
+
+	/* we only support a single modification to a single shard */
+	if (list_length(plan->taskList) != 1)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot plan INSERT to more than one shard")));
+	}
+
+	foreach(taskPlacementCell, task->taskPlacementList)
+	{
+		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		char *nodeName = taskPlacement->nodeName;
+		int32 nodePort = taskPlacement->nodePort;
+
+		PGconn *connection = NULL;
+		PGresult *result = NULL;
+		char *currentAffectedTupleString = NULL;
+		int32 currentAffectedTupleCount = -1;
+
+		Assert(taskPlacement->shardState == STATE_FINALIZED);
+
+		connection = GetConnection(nodeName, nodePort);
+		if (connection == NULL)
+		{
+			ereport(WARNING, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+
+			continue;
+		}
+
+		result = PQexec(connection, task->queryString->data);
+		if (PQresultStatus(result) != PGRES_COMMAND_OK)
+		{
+			ReportRemoteError(connection, result);
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+
+			continue;
+		}
+
+		currentAffectedTupleString = PQcmdTuples(result);
+		currentAffectedTupleCount = pg_atoi(currentAffectedTupleString, sizeof(int32), 0);
+
+		if ((affectedTupleCount == -1) ||
+			(affectedTupleCount == currentAffectedTupleCount))
+		{
+			affectedTupleCount = currentAffectedTupleCount;
+		}
+		else
+		{
+			ereport(WARNING, (errmsg("modified %d tuples, but expected to modify %d",
+									 currentAffectedTupleCount, affectedTupleCount),
+							  errdetail("modified placement on %s:%d",
+									    nodeName, nodePort)));
+		}
+
+		PQclear(result);
+	}
+
+	/* if all placements failed, error out */
+	if (list_length(failedPlacementList) == list_length(task->taskPlacementList))
+	{
+		ereport(ERROR, (errmsg("could not modify any active placements")));
+	}
+
+	/* otherwise, mark failed placements as inactive: they're stale */
+	foreach(failedPlacementCell, failedPlacementList)
+	{
+		ShardPlacement *failedPlacement = (ShardPlacement *) lfirst(failedPlacementCell);
+
+		DeleteShardPlacementRow(failedPlacement->id);
+		InsertShardPlacementRow(failedPlacement->id, failedPlacement->shardId,
+								STATE_INACTIVE, failedPlacement->nodeName,
+								failedPlacement->nodePort);
+	}
+
+	return affectedTupleCount;
+}
+
+
+/*
  * ExtractPartitionValue extracts the partition column value from a the target
  * of a modification command. If a partition value is not a constant, is NULL,
  * or is missing altogether, this function throws an error.
@@ -470,12 +684,8 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 {
 	ListCell *shardIntervalCell = NULL;
 	List *taskList = NIL;
-	TupleDesc returnTupleDescriptor = NULL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
-
-	/* construct a descriptor which describes the tuples we return */
-	returnTupleDescriptor = ExecTypeFromTL(query->targetList, false);
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
@@ -495,188 +705,124 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	}
 
 	distributedPlan->taskList = taskList;
-	distributedPlan->tupleDescriptor = returnTupleDescriptor;
 
 	return distributedPlan;
 }
 
 
 /*
- * PgShardExecutorStart implements the ExecutorStart hook to enable distributed
- * execution. The function currently sets up the executor state needed in later
- * parts of the execution flow.
- */
-static void
-PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
-{
-	PlannedStmt *planStatement = queryDesc->plannedstmt;
-	NodeTag nodeType = nodeTag(planStatement->planTree);
-
-	if (nodeType == T_DistributedPlan)
-	{
-		DistributedPlan *distributedPlan = (DistributedPlan *) planStatement->planTree;
-		TupleDesc tupleDescriptor = distributedPlan->tupleDescriptor;
-
-		/* build empty executor state to obtain per-query memory context */
-		EState *executorState = CreateExecutorState();
-		queryDesc->estate = executorState;
-		queryDesc->tupDesc = tupleDescriptor;
-	}
-	else
-	{
-		/* this isn't a query pg_shard handles: use previous hook or standard */
-		if (PreviousExecutorStartHook != NULL)
-		{
-			PreviousExecutorStartHook(queryDesc, eflags);
-		}
-		else
-		{
-			standard_ExecutorStart(queryDesc, eflags);
-		}
-	}
-}
-
-
-/*
- * PgShardExecutorRun implements the ExecutorRun hook to enable distributed
- * execution. The function checks if the plan is a distributed plan, and if so
- * it runs the pgShard distributed query execution logic. If not the function
- * defers to the previous execution hooks.
- */
-static void
-PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
-{
-	PlannedStmt *planStatement = queryDesc->plannedstmt;
-	NodeTag nodeType = nodeTag(planStatement->planTree);
-
-	if (nodeType == T_DistributedPlan)
-	{
-		DistributedPlan *distributedPlan = (DistributedPlan *) planStatement->planTree;
-		EState *executorState = queryDesc->estate;
-		CmdType operation = queryDesc->operation;
-		DestReceiver *destination = queryDesc->dest;
-
-		MemoryContext oldcontext = MemoryContextSwitchTo(executorState->es_query_cxt);
-
-		if (ScanDirectionIsNoMovement(direction))
-		{
-			ereport(ERROR, (errmsg("unsupported no movement scan direction")));
-		}
-
-		if (operation == CMD_SELECT)
-		{
-			ExecuteDistributedSelect(distributedPlan, executorState, destination);
-		}
-
-		MemoryContextSwitchTo(oldcontext);
-	}
-	else
-	{
-		/* this isn't a query pg_shard handles: use previous hook or standard */
-		if (PreviousExecutorRunHook != NULL)
-		{
-			PreviousExecutorRunHook(queryDesc, direction, count);
-		}
-		else
-		{
-			standard_ExecutorRun(queryDesc, direction, count);
-		}
-	}
-}
-
-
-/*
  * ExecuteDistributedSelect executes the remote select query and sends the
- * resultant tuples to the given destination receiver. The function first
- * executes the query remotely and stores the results into a tuple store. The
- * function then iterates over the tuple store and sends the tuples to the
- * destination. If the query fails on a given placement, the function attempts
- * it on its replica.
+ * resultant tuples to the given destination receiver. If the query fails on a
+ * given placement, the function attempts it on its replica.
  */
 static void
 ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState,
-						 DestReceiver *destination)
+						 DestReceiver *destination, TupleDesc tupleDescriptor)
 {
+	uint32 rowIndex = 0;
+	uint32 rowCount = 0;
+	uint32 columnIndex = 0;
+	uint32 columnCount = 0;
+	uint32 expectedColumnCount = 0;
 	Task *task = NULL;
-	List *taskList = distributedPlan->taskList;
-	List *shardPlacementList = NIL;
-	ListCell *shardPlacementCell = NULL;
-
-	TupleDesc tupleDescriptor = distributedPlan->tupleDescriptor;
+	List *taskPlacementList = NIL;
+	ListCell *taskPlacementCell = NULL;
 	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
-	bool forwardDirection = true;
-	Tuplestorestate *tupleStore = NULL;
+	AttInMetadata *attributeInMetadata = NULL;
+	PGresult *result = NULL;
 
+	List *taskList = distributedPlan->taskList;
 	if (list_length(taskList) != 1)
 	{
 		ereport(ERROR, (errmsg("cannot execute select over multiple shards")));
 	}
 
 	task = (Task *) linitial(taskList);
-	shardPlacementList = task->taskPlacementList;
+	taskPlacementList = task->taskPlacementList;
 
 	/*
-	 * Try to run the query to completion on one placement and store the results
-	 * in a tuple store. If the query fails attempt the query on the next
-	 * placement.
+	 * Try to run the query to completion on one placement. If the query fails
+	 * attempt the query on the next placement.
 	 */
-	foreach(shardPlacementCell, shardPlacementList)
+	foreach(taskPlacementCell, taskPlacementList)
 	{
-		ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
-		tupleStore = ExecuteRemoteQuery(shardPlacement->nodeName,
-										shardPlacement->nodePort,
-										task->queryString,
-										tupleDescriptor);
+		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		result = ExecuteRemoteQuery(taskPlacement->nodeName, taskPlacement->nodePort,
+									task->queryString);
 
-		/* if the query succeeded break out of the loop */
-		if (tupleStore != NULL)
+		if (result != NULL)
 		{
 			break;
 		}
 	}
 
-	if (tupleStore == NULL)
+	if (result == NULL)
 	{
 		ereport(ERROR, (errmsg("unable to execute remote query")));
 	}
 
-	/* startup the tuple receiver */
-	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+	/* initialize the attribute input information */
+	attributeInMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 
-	/* loop and retrieve all the tuples from the tuplestore */
-	while (tuplestore_gettupleslot(tupleStore, forwardDirection, false, tupleTableSlot))
+	rowCount = PQntuples(result);
+	columnCount = PQnfields(result);
+
+	expectedColumnCount = tupleDescriptor->natts;
+	if (columnCount != expectedColumnCount)
 	{
+		ereport(ERROR, (errmsg("sql query returned unexpected number of fields")));
+	}
+
+	/* now iterate over each row and send the tuples to the given destination */
+	for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
+	{
+		Datum *columnValues = tupleTableSlot->tts_values;
+		bool *columnNulls = tupleTableSlot->tts_isnull;
+
+		/* initialize all values for this row to null */
+		memset(columnValues, 0, columnCount * sizeof(Datum));
+		memset(columnNulls, true, columnCount * sizeof(bool));
+
+		/* insert data from the result */
+		for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
+		{
+			if (!PQgetisnull(result, rowIndex, columnIndex))
+			{
+				char *columnStringValue = PQgetvalue(result, rowIndex, columnIndex);
+				columnValues[columnIndex] =
+					InputFunctionCall(&attributeInMetadata->attinfuncs[columnIndex],
+									  columnStringValue,
+									  attributeInMetadata->attioparams[columnIndex],
+									  attributeInMetadata->atttypmods[columnIndex]);
+
+				columnNulls[columnIndex] = false;
+			}
+		}
+
+		/* mark slot as containing a virtual tuple */
+		ExecStoreVirtualTuple(tupleTableSlot);
+
+		/* send the tuple to the receiver */
 		(*destination->receiveSlot) (tupleTableSlot, destination);
 		executorState->es_processed++;
 
+		/* cleanup */
 		ExecClearTuple(tupleTableSlot);
 	}
 
-	/* shutdown the tuple receiver and cleanup the tupleStore */
-	(*destination->rShutdown) (destination);
-	tuplestore_end(tupleStore);
+	PQclear(result);
 }
 
 
 /*
  * ExecuteRemoteQuery takes the given query and attempts to execute it on the
- * given node and port combination. If the query succeeds the function stores
- * the results in a tuple store and returns this store. Note that the caller
- * is expected to free the tuple store after using it.
+ * given node and port combination. If the query succeeds, the function returns
+ * the PGresult object, else it returns NULL.
+ * Note: It is the callers responsibility to clear the PGresult object.
  */
-static Tuplestorestate *
-ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
-				   TupleDesc tupleDescriptor)
+static PGresult *
+ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query)
 {
-	uint32 rowIndex = 0;
-	uint32 rowCount = 0;
-	uint32 fieldIndex = 0;
-	uint32 fieldCount = 0;
-	char **values = NULL;
-	bool randomAccess = false;
-	bool interXact = false;
-	Tuplestorestate *tupleStore = NULL;
-	AttInMetadata *attributeInMetadata = NULL;
 	PGresult *result = NULL;
 
 	PGconn *connection = GetConnection(nodeName, nodePort);
@@ -687,110 +833,29 @@ ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 		return NULL;
 	}
 
-	/* initialize the tuplestore state and attribute input information */
-	tupleStore = tuplestore_begin_heap(randomAccess, interXact, work_mem);
-	attributeInMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
-
 	/* now execute the query on the remote node */
 	result = PQexec(connection, query->data);
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ereport(WARNING, (errmsg("could not run query on \"%s:%u\"",
 								 nodeName, nodePort)));
-		tuplestore_end(tupleStore);
 		return NULL;
 	}
 
-	rowCount = PQntuples(result);
-	fieldCount = PQnfields(result);
-	values = (char **) palloc(fieldCount * sizeof(char *));
-
-	/* now create tuples for each row and store them in the tuple store */
-	for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
-	{
-		HeapTuple resultTuple = NULL;
-
-		for (fieldIndex = 0; fieldIndex < fieldCount; fieldIndex++)
-		{
-			if (PQgetisnull(result, rowIndex, fieldIndex))
-			{
-				values[fieldIndex] = NULL;
-			}
-			else
-			{
-				values[fieldIndex] = PQgetvalue(result, rowIndex, fieldIndex);
-			}
-		}
-
-		resultTuple = BuildTupleFromCStrings(attributeInMetadata, values);
-		tuplestore_puttuple(tupleStore, resultTuple);
-	}
-
-	return tupleStore;
+	return result;
 }
 
 
 /*
- * PgShardExecutorFinish implements the ExecutorFinish hook to enable
- * distributed execution.
+ * IsPgShardPlan determines whether the provided plannedStmt contains a plan
+ * suitable for execution by PgShard.
  */
-static void
-PgShardExecutorFinish(QueryDesc *queryDesc)
+static bool
+IsPgShardPlan(PlannedStmt *plannedStmt)
 {
-	PlannedStmt *planStatement = queryDesc->plannedstmt;
-	NodeTag nodeType = nodeTag(planStatement->planTree);
+	Plan *plan = plannedStmt->planTree;
+	NodeTag nodeTag = nodeTag(plan);
+	bool isPgShardPlan = ((DistributedNodeTag) nodeTag == T_DistributedPlan);
 
-	if (nodeType == T_DistributedPlan)
-	{
-		EState *executorState = queryDesc->estate;
-		executorState->es_finished = true;
-	}
-	else
-	{
-		/* this isn't a query pg_shard handles: use previous hook or standard */
-		if (PreviousExecutorFinishHook != NULL)
-		{
-			PreviousExecutorFinishHook(queryDesc);
-		}
-		else
-		{
-			standard_ExecutorFinish(queryDesc);
-		}
-	}
-}
-
-
-/*
- * PgShardExecutorEnd implements the ExecutorEnd hook to enable distributed
- * execution. The function currently performs cleanup of the executor state and
- * the query descriptor.
- */
-static void
-PgShardExecutorEnd(QueryDesc *queryDesc)
-{
-	PlannedStmt *planStatement = queryDesc->plannedstmt;
-	NodeTag nodeType = nodeTag(planStatement->planTree);
-
-	if (nodeType == T_DistributedPlan)
-	{
-		FreeExecutorState(queryDesc->estate);
-
-		/* reset queryDesc fields that no longer point to anything */
-		queryDesc->tupDesc = NULL;
-		queryDesc->estate = NULL;
-		queryDesc->planstate = NULL;
-		queryDesc->totaltime = NULL;
-	}
-	else
-	{
-		/* this isn't a query pg_shard handles: use previous hook or standard */
-		if (PreviousExecutorEndHook != NULL)
-		{
-			PreviousExecutorEndHook(queryDesc);
-		}
-		else
-		{
-			standard_ExecutorEnd(queryDesc);
-		}
-	}
+	return isPgShardPlan;
 }
