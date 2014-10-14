@@ -696,10 +696,13 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		StringInfo queryString = makeStringInfo();
 
 		/* convert the qualifiers to an explicitly and'd clause */
-		Node *whereClause = query->jointree->quals;
-		if (IsA(whereClause, List))
+		if (query->jointree && query->jointree->quals)
 		{
-			query->jointree->quals = (Node *) make_ands_explicit((List *) whereClause);
+			Node *whereClause = query->jointree->quals;
+			if (IsA(whereClause, List))
+			{
+				query->jointree->quals = (Node *) make_ands_explicit((List *) whereClause);
+			}
 		}
 
 		deparse_shard_query(query, shardId, queryString);
