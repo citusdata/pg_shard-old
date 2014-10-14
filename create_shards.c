@@ -334,6 +334,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 	}
 
 	FreeFile(workerFileStream);
+	free(workerFilePath);
+
 	return workerNodeList;
 }
 
