@@ -62,7 +62,7 @@ static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 static PlannerType DeterminePlannerType(Query *query);
 static Oid ExtractFirstDistributedTableId(Query *query);
 static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
-void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
+static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
@@ -284,7 +284,7 @@ ExtractFirstDistributedTableId(Query *query)
 /*
  * PgShardExecutorRun actually runs a distributed plan, if any.
  */
-void
+static void
 PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
