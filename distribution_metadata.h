@@ -143,7 +143,6 @@ extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);
-extern void UnlockShard(int64 shardId, LOCKMODE lockMode);
 
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */

@@ -308,23 +308,17 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 
 		if (!ScanDirectionIsNoMovement(direction))
 		{
-			switch (operation)
+			if (operation == CMD_UPDATE || operation == CMD_INSERT ||
+				operation == CMD_DELETE)
 			{
-				case CMD_INSERT:
-				case CMD_DELETE:
-				case CMD_UPDATE:
-				{
-					int32 affectedRowCount = ExecuteDistributedModify(plan);
-					estate->es_processed = affectedRowCount;
+				int32 affectedRowCount = ExecuteDistributedModify(plan);
+				estate->es_processed = affectedRowCount;
 
-					break;
-				}
-				default:
-				{
-					ereport(ERROR, (errmsg("unrecognized operation code: %d",
-										  (int) operation)));
-					break;
-				}
+			}
+			else
+			{
+				ereport(ERROR, (errmsg("unrecognized operation code: %d",
+									  (int) operation)));
 			}
 		}
 
@@ -405,8 +399,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
-	if (commandType != CMD_INSERT && commandType != CMD_SELECT &&
-		commandType != CMD_DELETE && commandType != CMD_UPDATE)
+	if (!(commandType == CMD_SELECT || commandType == CMD_UPDATE ||
+		  commandType == CMD_INSERT || commandType == CMD_DELETE))
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("unsupported query type: %d", commandType)));
@@ -425,32 +419,6 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		else if (rangeTableEntry->rtekind == RTE_VALUES)
 		{
 			hasValuesScan = true;
-		}
-	}
-
-	if (commandType != CMD_SELECT)
-	{
-		ListCell *tableEntryCell = NULL;
-
-		foreach(tableEntryCell, queryTree->targetList)
-		{
-			TargetEntry *targetEntry = (TargetEntry *) lfirst(tableEntryCell);
-
-			/* skip resjunk entries: UPDATE adds some for ctid, etc. */
-			if (targetEntry->resjunk)
-			{
-				continue;
-			}
-
-			if (!IsA(targetEntry->expr, Const))
-			{
-				hasNonConstTargetEntryExprs = true;
-			}
-
-			if (targetEntry->resno == partitionColumn->varattno)
-			{
-				specifiesPartitionValue = true;
-			}
 		}
 	}
 
@@ -476,6 +444,33 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("cannot plan sharded modification that uses a "
 							   "RETURNING clause")));
+	}
+
+	if (commandType == CMD_UPDATE || commandType == CMD_INSERT ||
+		commandType == CMD_DELETE)
+	{
+		ListCell *targetEntryCell = NULL;
+
+		foreach(targetEntryCell, queryTree->targetList)
+		{
+			TargetEntry *targetEntry = (TargetEntry *) lfirst(targetEntryCell);
+
+			/* skip resjunk entries: UPDATE adds some for ctid, etc. */
+			if (targetEntry->resjunk)
+			{
+				continue;
+			}
+
+			if (!IsA(targetEntry->expr, Const))
+			{
+				hasNonConstTargetEntryExprs = true;
+			}
+
+			if (targetEntry->resno == partitionColumn->varattno)
+			{
+				specifiesPartitionValue = true;
+			}
+		}
 	}
 
 	if (hasNonConstTargetEntryExprs)
@@ -547,8 +542,8 @@ QueryRestrictList(Query *query)
 
 		queryRestrictList = list_make1(equalityExpr);
 	}
-	else if (commandType == CMD_SELECT || commandType == CMD_DELETE ||
-			 commandType == CMD_UPDATE)
+	else if (commandType == CMD_SELECT || commandType == CMD_UPDATE ||
+			 commandType == CMD_DELETE)
 	{
 		query_tree_walker(query, ExtractFromExpressionWalker, &queryRestrictList, 0);
 	}
@@ -776,34 +771,22 @@ AcquireExecutorShardLocks(PlannedStmt *plannedStatement)
 	ListCell *taskCell = NULL;
 	LOCKMODE lockMode = NoLock;
 
-	switch (operation)
+	if (operation == CMD_SELECT)
 	{
-		case CMD_SELECT:
-		{
-			/* no locks needed */
-			break;
-		}
-		case CMD_INSERT:
-		{
-			lockMode = ShareLock;
-			break;
-		}
-		case CMD_DELETE:
-		case CMD_UPDATE:
-		{
-			lockMode = ExclusiveLock;
-			break;
-		}
-		default:
-		{
-			ereport(ERROR, (errmsg("unrecognized operation code: %d", (int) operation)));
-			break;
-		}
-	}
-
-	if (lockMode == NoLock)
-	{
+		/* no locks needed for SELECT */
 		return;
+	}
+	else if (operation == CMD_INSERT)
+	{
+		lockMode = ShareLock;
+	}
+	else if (operation == CMD_UPDATE || operation == CMD_DELETE)
+	{
+		lockMode = ExclusiveLock;
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("unrecognized operation code: %d", (int) operation)));
 	}
 
 	shardIdSortedTaskList = SortList(distributedPlan->taskList, CompareTasksByShardId);

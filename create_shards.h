@@ -20,6 +20,7 @@
 
 #include "nodes/pg_list.h"
 
+
 #define WORKER_LIST_FILENAME "pg_worker_list.conf"
 
 /* transaction related commands used in talking to the worker nodes */
@@ -37,11 +38,13 @@ typedef struct WorkerNode
 } WorkerNode;
 
 
+/* utility function declaration shared within this module */
+extern List * SortList(List *pointerList,
+					   int (*ComparisonFunction)(const void *, const void *));
+
 /* function declarations for initializing a distributed table */
 extern Datum create_distributed_table(PG_FUNCTION_ARGS);
 extern Datum create_shards(PG_FUNCTION_ARGS);
-extern List * SortList(List *pointerList,
-					   int (*ComparisonFunction)(const void *, const void *));
 
 
 #endif /* CREATE_SHARDS_H */

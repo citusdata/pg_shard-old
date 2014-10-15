@@ -13,6 +13,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "miscadmin.h"
 #include "pg_config.h"
 
 #include "distribution_metadata.h"
@@ -789,21 +790,23 @@ NextSequenceId(char *sequenceName)
 void
 LockShard(int64 shardId, LOCKMODE lockMode)
 {
-	Oid lockFunctionOid = InvalidOid;
-	Datum shardIdDatum = Int64GetDatum(shardId);
+	LOCKTAG lockTag;
+	/* locks use 32-bit identifier fields, so split shardId */
+	uint32 keyUpperHalf = (uint32) (shardId >> 32);
+	uint32 keyLowerHalf = (uint32) shardId;
+	bool sessionLock = false;	/* we want a transaction lock */
+	bool dontWait = false;		/* block indefinitely until acquired */
 
-	if (lockMode == ExclusiveLock)
+	memset(&lockTag, 0, sizeof(LOCKTAG));
+
+	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
+
+	if (lockMode == ExclusiveLock || lockMode == ShareLock)
 	{
-		lockFunctionOid = ACQUIRE_EXCLUSIVE_ADVISORY_XACT_LOCK_FUNC_ID;
-	}
-	else if (lockMode == ShareLock)
-	{
-		lockFunctionOid = ACQUIRE_SHARED_ADVISORY_XACT_LOCK_FUNC_ID;
+		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 	}
 	else
 	{
 		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
 	}
-
-	(void) OidFunctionCall1(lockFunctionOid, shardIdDatum);
 }
