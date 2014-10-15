@@ -21,7 +21,6 @@
 
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
-#include "storage/lock.h"
 
 
 /* schema for configuration related to distributed tables */
@@ -72,10 +71,6 @@
 /* sequence names to generate new shard id and shard placement id */
 #define SHARD_ID_SEQUENCE_NAME "shard_id_sequence"
 #define SHARD_PLACEMENT_ID_SEQUENCE_NAME "shard_placement_id_sequence"
-
-/* Identifiers for advisory lock functions */
-#define ACQUIRE_EXCLUSIVE_ADVISORY_XACT_LOCK_FUNC_ID 3089
-#define ACQUIRE_SHARED_ADVISORY_XACT_LOCK_FUNC_ID 3090
 
 /* ShardState represents the last known state of a shard on a given node */
 typedef enum
@@ -142,7 +137,6 @@ extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
-extern void LockShard(int64 shardId, LOCKMODE lockMode);
 
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */

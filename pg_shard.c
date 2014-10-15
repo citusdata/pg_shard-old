@@ -15,6 +15,7 @@
 #include "c.h"
 #include "fmgr.h"
 #include "libpq-fe.h"
+#include "miscadmin.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -25,6 +26,7 @@
 #include "ruleutils.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "access/sdir.h"
 #include "access/skey.h"
@@ -72,6 +74,7 @@ static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static void AcquireExecutorShardLocks(PlannedStmt *plannedStatement);
+static void LockShard(int64 shardId, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 
 
@@ -308,7 +311,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 
 		if (!ScanDirectionIsNoMovement(direction))
 		{
-			if (operation == CMD_UPDATE || operation == CMD_INSERT ||
+			if (operation == CMD_INSERT || operation == CMD_UPDATE ||
 				operation == CMD_DELETE)
 			{
 				int32 affectedRowCount = ExecuteDistributedModify(plan);
@@ -399,8 +402,8 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
-	if (!(commandType == CMD_SELECT || commandType == CMD_UPDATE ||
-		  commandType == CMD_INSERT || commandType == CMD_DELETE))
+	if (!(commandType == CMD_SELECT || commandType == CMD_INSERT ||
+		  commandType == CMD_UPDATE || commandType == CMD_DELETE))
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						errmsg("unsupported query type: %d", commandType)));
@@ -446,7 +449,7 @@ ErrorIfQueryNotSupported(Query *queryTree)
 							   "RETURNING clause")));
 	}
 
-	if (commandType == CMD_UPDATE || commandType == CMD_INSERT ||
+	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
 		commandType == CMD_DELETE)
 	{
 		ListCell *targetEntryCell = NULL;
@@ -797,6 +800,37 @@ AcquireExecutorShardLocks(PlannedStmt *plannedStatement)
 		int64 shardId = task->shardId;
 
 		LockShard(shardId, lockMode);
+	}
+}
+
+
+/*
+ * LockShard returns after acquiring a lock for the specified shard, blocking
+ * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
+ * supported: all others will trigger an error. Locks acquired with this method
+ * are automatically released at transaction end.
+ */
+void
+LockShard(int64 shardId, LOCKMODE lockMode)
+{
+	/* locks use 32-bit identifier fields, so split shardId */
+	uint32 keyUpperHalf = (uint32) (shardId >> 32);
+	uint32 keyLowerHalf = (uint32) shardId;
+	bool sessionLock = false;	/* we want a transaction lock */
+	bool dontWait = false;		/* block indefinitely until acquired */
+
+	LOCKTAG lockTag;
+	memset(&lockTag, 0, sizeof(LOCKTAG));
+
+	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
+
+	if (lockMode == ExclusiveLock || lockMode == ShareLock)
+	{
+		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
 	}
 }
 
