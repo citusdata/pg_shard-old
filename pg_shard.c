@@ -188,12 +188,14 @@ DeterminePlannerType(Query *query)
 {
 	PlannerType plannerType = PLANNER_INVALID_FIRST;
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
+	CmdType commandType = query->commandType;
 
-	if (query->commandType == CMD_SELECT && UseCitusDBSelectLogic)
+	if (commandType == CMD_SELECT && UseCitusDBSelectLogic)
 	{
 		plannerType = PLANNER_TYPE_CITUSDB;
 	}
-	else if (OidIsValid(distributedTableId))
+	else if (OidIsValid(distributedTableId) && (commandType == CMD_SELECT ||
+												commandType == CMD_INSERT))
 	{
 		plannerType = PLANNER_TYPE_PG_SHARD;
 	}
@@ -406,10 +408,13 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	uint32 queryTableCount = 0;
 
 	CmdType commandType = queryTree->commandType;
-	if (commandType != CMD_INSERT && commandType != CMD_SELECT)
+	Assert(commandType == CMD_SELECT || commandType == CMD_INSERT);
+
+	/* prevent utility statements like DECLARE CURSOR attached to selects */
+	if (commandType == CMD_SELECT && queryTree->utilityStmt != NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("unsupported query type: %d", commandType)));
+						errmsg("unsupported utility statement")));
 	}
 
 	/* extract range table entries */
@@ -840,14 +845,14 @@ ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 		return false;
 	}
 
-	*rowCount = PQntuples(result);
-	*columnCount = PQnfields(result);
-	*rowArray = (char ***) palloc0(*rowCount * sizeof(char *));
+	(*rowCount) = PQntuples(result);
+	(*columnCount) = PQnfields(result);
+	(*rowArray) = (char ***) palloc0((*rowCount) * sizeof(char *));
 
-	for (rowIndex = 0; rowIndex < *rowCount; rowIndex++)
+	for (rowIndex = 0; rowIndex < (*rowCount); rowIndex++)
 	{
-		(*rowArray)[rowIndex] = (char **) palloc0(*columnCount * sizeof(char *));
-		for (columnIndex = 0; columnIndex < *columnCount; columnIndex++)
+		(*rowArray)[rowIndex] = (char **) palloc0((*columnCount) * sizeof(char *));
+		for (columnIndex = 0; columnIndex < (*columnCount); columnIndex++)
 		{
 			if (!PQgetisnull(result, rowIndex, columnIndex))
 			{
