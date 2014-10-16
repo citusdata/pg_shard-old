@@ -73,7 +73,8 @@ static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
-static void AcquireExecutorShardLocks(PlannedStmt *plannedStatement);
+static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
+static void AcquireExecutorShardLocks(PlannedStmt *plannedStatement, LOCKMODE lockMode);
 static void LockShard(int64 shardId, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 
@@ -245,10 +246,15 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 
 	if (pgShardExecution)
 	{
+		LOCKMODE lockMode = CommutativityRuleToLockMode(plannedStatement->commandType);
+
 		/* swap back to the distributed plan for rest of query */
 		plannedStatement->planTree = (Plan *) distributedPlan;
 
-		AcquireExecutorShardLocks(plannedStatement);
+		if (lockMode != NoLock)
+		{
+			AcquireExecutorShardLocks(plannedStatement, lockMode);
+		}
 	}
 }
 
@@ -761,38 +767,43 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 }
 
 
-/*
- * AcquireExecutorShardLocks: acquire shard locks needed for execution of a
- * distributed plan. Assumes plannedStatement->planTree is a DistributedPlan.
- */
-static void
-AcquireExecutorShardLocks(PlannedStmt *plannedStatement)
+static LOCKMODE
+CommutativityRuleToLockMode(CmdType commandType)
 {
-	CmdType operation = plannedStatement->commandType;
-	DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
-	List *shardIdSortedTaskList = NIL;
-	ListCell *taskCell = NULL;
 	LOCKMODE lockMode = NoLock;
 
-	if (operation == CMD_SELECT)
+	if (commandType == CMD_SELECT)
 	{
-		/* no locks needed for SELECT */
-		return;
+		lockMode = NoLock;
 	}
-	else if (operation == CMD_INSERT)
+	else if (commandType == CMD_INSERT)
 	{
 		lockMode = ShareLock;
 	}
-	else if (operation == CMD_UPDATE || operation == CMD_DELETE)
+	else if (commandType == CMD_UPDATE || commandType == CMD_DELETE)
 	{
 		lockMode = ExclusiveLock;
 	}
 	else
 	{
-		ereport(ERROR, (errmsg("unrecognized operation code: %d", (int) operation)));
+		ereport(ERROR, (errmsg("unrecognized operation code: %d", (int) commandType)));
 	}
 
-	shardIdSortedTaskList = SortList(distributedPlan->taskList, CompareTasksByShardId);
+	return lockMode;
+}
+
+
+/*
+ * AcquireExecutorShardLocks: acquire shard locks needed for execution of a
+ * distributed plan. Assumes plannedStatement->planTree is a DistributedPlan.
+ */
+static void
+AcquireExecutorShardLocks(PlannedStmt *plannedStatement, LOCKMODE lockMode)
+{
+	DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
+	List *shardIdSortedTaskList = SortList(distributedPlan->taskList,
+										   CompareTasksByShardId);
+	ListCell *taskCell = NULL;
 
 	foreach(taskCell, shardIdSortedTaskList)
 	{
@@ -816,8 +827,6 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 	/* locks use 32-bit identifier fields, so split shardId */
 	uint32 keyUpperHalf = (uint32) (shardId >> 32);
 	uint32 keyLowerHalf = (uint32) shardId;
-	bool sessionLock = false;	/* we want a transaction lock */
-	bool dontWait = false;		/* block indefinitely until acquired */
 
 	LOCKTAG lockTag;
 	memset(&lockTag, 0, sizeof(LOCKTAG));
@@ -826,6 +835,8 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 
 	if (lockMode == ExclusiveLock || lockMode == ShareLock)
 	{
+		bool sessionLock = false;	/* we want a transaction lock */
+		bool dontWait = false;		/* block indefinitely until acquired */
 		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 	}
 	else
