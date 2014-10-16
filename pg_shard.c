@@ -74,7 +74,8 @@ static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalL
 static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, DestReceiver *destination,
 									 TupleDesc tupleDescriptor);
-static PGresult * ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query);
+static bool ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
+							   char ****rowArray, uint32 *rowCount, uint32 *columnCount);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 
 
@@ -300,6 +301,14 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		Assert(estate != NULL);
 		Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
+		/* we don't support SQL FETCH of a specified number of rows */
+		if (count != 0)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("fetching a specific number of rows"
+								   " is unsupported")));
+		}
+
 		oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
 		if (queryDesc->totaltime != NULL)
@@ -320,20 +329,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 				List *targetList = plan->originalPlan->targetlist;
 				TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
-				if (count != 0)
-				{
-					ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-									errmsg("selecting few tuples at a time"
-										   " is unsupported")));
-				}
-
-				/* startup the tuple receiver */
-				(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
-
 				ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
-
-				/* shutdown the tuple receiver */
-				(*destination->rShutdown) (destination);
 			}
 		}
 
@@ -695,7 +691,12 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		Task *task = NULL;
 		StringInfo queryString = makeStringInfo();
 
-		/* convert the qualifiers to an explicitly and'd clause */
+		/* 
+		 * Convert the qualifiers to an explicitly and'd clause, which is needed
+		 * before we deparse the query. XXX: Since this only applies to
+		 * SELECT's, we should move this bit of logic to a SELECT-specific
+		 * planning function.
+		 */
 		if (query->jointree && query->jointree->quals)
 		{
 			Node *whereClause = query->jointree->quals;
@@ -731,15 +732,14 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 {
 	uint32 rowIndex = 0;
 	uint32 rowCount = 0;
-	uint32 columnIndex = 0;
 	uint32 columnCount = 0;
 	uint32 expectedColumnCount = 0;
+	char ***rowArray = NULL;
 	Task *task = NULL;
 	List *taskPlacementList = NIL;
 	ListCell *taskPlacementCell = NULL;
 	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
 	AttInMetadata *attributeInMetadata = NULL;
-	PGresult *result = NULL;
 
 	List *taskList = distributedPlan->taskList;
 	if (list_length(taskList) != 1)
@@ -757,25 +757,22 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	foreach(taskPlacementCell, taskPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-		result = ExecuteRemoteQuery(taskPlacement->nodeName, taskPlacement->nodePort,
-									task->queryString);
+		bool querySuccessful = ExecuteRemoteQuery(taskPlacement->nodeName,
+												  taskPlacement->nodePort,
+												  task->queryString,
+												  &rowArray, &rowCount, &columnCount);
 
-		if (result != NULL)
+		if (querySuccessful)
 		{
+			Assert(rowArray != NULL);
 			break;
 		}
 	}
 
-	if (result == NULL)
+	if (rowArray == NULL)
 	{
 		ereport(ERROR, (errmsg("unable to execute remote query")));
 	}
-
-	/* initialize the attribute input information */
-	attributeInMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
-
-	rowCount = PQntuples(result);
-	columnCount = PQnfields(result);
 
 	expectedColumnCount = tupleDescriptor->natts;
 	if (columnCount != expectedColumnCount)
@@ -783,34 +780,20 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 		ereport(ERROR, (errmsg("sql query returned unexpected number of fields")));
 	}
 
+	/* initialize the attribute input information */
+	attributeInMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
+
+	/* startup the tuple receiver */
+	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+
 	/* now iterate over each row and send the tuples to the given destination */
 	for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 	{
-		Datum *columnValues = tupleTableSlot->tts_values;
-		bool *columnNulls = tupleTableSlot->tts_isnull;
+		char **valueArray = rowArray[rowIndex];
+		HeapTuple heapTuple = BuildTupleFromCStrings(attributeInMetadata, valueArray);
 
-		/* initialize all values for this row to null */
-		memset(columnValues, 0, columnCount * sizeof(Datum));
-		memset(columnNulls, true, columnCount * sizeof(bool));
-
-		/* insert data from the result */
-		for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
-		{
-			if (!PQgetisnull(result, rowIndex, columnIndex))
-			{
-				char *columnStringValue = PQgetvalue(result, rowIndex, columnIndex);
-				columnValues[columnIndex] =
-					InputFunctionCall(&attributeInMetadata->attinfuncs[columnIndex],
-									  columnStringValue,
-									  attributeInMetadata->attioparams[columnIndex],
-									  attributeInMetadata->atttypmods[columnIndex]);
-
-				columnNulls[columnIndex] = false;
-			}
-		}
-
-		/* mark slot as containing a virtual tuple */
-		ExecStoreVirtualTuple(tupleTableSlot);
+		/* store tuple in the tuple slot */
+		ExecStoreTuple(heapTuple, tupleTableSlot, InvalidBuffer, false);
 
 		/* send the tuple to the receiver */
 		(*destination->receiveSlot) (tupleTableSlot, destination);
@@ -820,7 +803,8 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 		ExecClearTuple(tupleTableSlot);
 	}
 
-	PQclear(result);
+	/* shutdown the tuple receiver */
+	(*destination->rShutdown) (destination);
 }
 
 
@@ -830,17 +814,21 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
  * the PGresult object, else it returns NULL.
  * Note: It is the callers responsibility to clear the PGresult object.
  */
-static PGresult *
-ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query)
+static bool
+ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
+				   char ****rowArray, uint32 *rowCount, uint32 *columnCount)
 {
 	PGresult *result = NULL;
+	bool querySuccessful = true;
+	uint32 rowIndex = 0;
+	uint32 columnIndex = 0;
 
 	PGconn *connection = GetConnection(nodeName, nodePort);
 	if (connection == NULL)
 	{
 		ereport(WARNING, (errmsg("could not connect to \"%s:%u\"",
 								 nodeName, nodePort)));
-		return NULL;
+		return false;
 	}
 
 	/* now execute the query on the remote node */
@@ -849,10 +837,34 @@ ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query)
 	{
 		ereport(WARNING, (errmsg("could not run query on \"%s:%u\"",
 								 nodeName, nodePort)));
-		return NULL;
+		return false;
 	}
 
-	return result;
+	*rowCount = PQntuples(result);
+	*columnCount = PQnfields(result);
+	*rowArray = (char ***) palloc0(*rowCount * sizeof(char *));
+
+	for (rowIndex = 0; rowIndex < *rowCount; rowIndex++)
+	{
+		(*rowArray)[rowIndex] = (char **) palloc0(*columnCount * sizeof(char *));
+		for (columnIndex = 0; columnIndex < *columnCount; columnIndex++)
+		{
+			if (!PQgetisnull(result, rowIndex, columnIndex))
+			{
+				/* deep copy the value into our result array */
+				char *rowValue = PQgetvalue(result, rowIndex, columnIndex);
+				(*rowArray)[rowIndex][columnIndex] = pstrdup(rowValue);
+			}
+			else
+			{
+				(*rowArray)[rowIndex][columnIndex] = NULL;
+			}
+		}
+	}
+
+	PQclear(result);
+
+	return querySuccessful;
 }
 
 
