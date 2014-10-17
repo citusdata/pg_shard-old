@@ -187,7 +187,6 @@ static PlannerType
 DeterminePlannerType(Query *query)
 {
 	PlannerType plannerType = PLANNER_INVALID_FIRST;
-	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 	CmdType commandType = query->commandType;
 
 	if (commandType == CMD_SELECT && UseCitusDBSelectLogic)
@@ -196,6 +195,7 @@ DeterminePlannerType(Query *query)
 	}
 	else if (commandType == CMD_SELECT || commandType == CMD_INSERT)
 	{
+		Oid distributedTableId = ExtractFirstDistributedTableId(query);
 		if (OidIsValid(distributedTableId))
 		{
 			plannerType = PLANNER_TYPE_PG_SHARD;
@@ -207,6 +207,11 @@ DeterminePlannerType(Query *query)
 	}
 	else
 	{
+		/*
+		 * For utility statements, we need to detect if they are operating on
+		 * distributed tables. If they are, we need to warn or error out
+		 * accordingly.
+		 */
 		plannerType = PLANNER_TYPE_POSTGRES;
 	}
 
