@@ -77,7 +77,7 @@ static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, DestReceiver *destination,
 									 TupleDesc tupleDescriptor);
 static bool ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
-							   char ****rowArray, uint32 *rowCount, uint32 *columnCount);
+							   TextRow **rowArray, uint32 *rowCount, uint32 *columnCount);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
@@ -327,19 +327,18 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		Assert(estate != NULL);
 		Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
-		/* we don't support SQL FETCH of a specified number of rows */
-		if (count != 0)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("fetching rows from a query using a cursor"
-								   " is unsupported")));
-		}
-
+		/* we only support default scan direction and row fetch count */
 		if (!ScanDirectionIsForward(direction))
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("scan directions other than forward scans"
-								   " are unsupported")));
+							errmsg("scan directions other than forward scans "
+								   "are unsupported")));
+		}
+		if (count != 0)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("fetching rows from a query using a cursor "
+								   "is unsupported")));
 		}
 
 		oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -821,12 +820,12 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	uint32 rowCount = 0;
 	uint32 columnCount = 0;
 	uint32 expectedColumnCount = 0;
-	char ***rowArray = NULL;
+	TextRow *rowArray = NULL;
 	Task *task = NULL;
 	List *taskPlacementList = NIL;
 	ListCell *taskPlacementCell = NULL;
 	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
-	AttInMetadata *attributeInMetadata = NULL;
+	AttInMetadata *attributeInputMetadata = NULL;
 
 	List *taskList = distributedPlan->taskList;
 	if (list_length(taskList) != 1)
@@ -844,12 +843,10 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	foreach(taskPlacementCell, taskPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-		bool querySuccessful = ExecuteRemoteQuery(taskPlacement->nodeName,
-												  taskPlacement->nodePort,
-												  task->queryString,
-												  &rowArray, &rowCount, &columnCount);
-
-		if (querySuccessful)
+		bool queryOK = ExecuteRemoteQuery(taskPlacement->nodeName, taskPlacement->nodePort,
+										  task->queryString,
+										  &rowArray, &rowCount, &columnCount);
+		if (queryOK)
 		{
 			Assert(rowArray != NULL);
 			break;
@@ -868,7 +865,7 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	}
 
 	/* initialize the attribute input information */
-	attributeInMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
+	attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 
 	/* startup the tuple receiver */
 	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
@@ -876,17 +873,14 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	/* now iterate over each row and send the tuples to the given destination */
 	for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 	{
-		char **valueArray = rowArray[rowIndex];
-		HeapTuple heapTuple = BuildTupleFromCStrings(attributeInMetadata, valueArray);
+		TextRow textRow = rowArray[rowIndex];
+		HeapTuple heapTuple = BuildTupleFromCStrings(attributeInputMetadata, textRow);
 
-		/* store tuple in the tuple slot */
 		ExecStoreTuple(heapTuple, tupleTableSlot, InvalidBuffer, false);
 
-		/* send the tuple to the receiver */
 		(*destination->receiveSlot) (tupleTableSlot, destination);
 		executorState->es_processed++;
 
-		/* cleanup */
 		ExecClearTuple(tupleTableSlot);
 	}
 
@@ -904,7 +898,7 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
  */
 static bool
 ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
-				   char ****rowArray, uint32 *rowCount, uint32 *columnCount)
+				   TextRow **rowArray, uint32 *rowCount, uint32 *columnCount)
 {
 	PGresult *result = NULL;
 	uint32 rowIndex = 0;
@@ -928,11 +922,11 @@ ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 
 	(*rowCount) = PQntuples(result);
 	(*columnCount) = PQnfields(result);
-	(*rowArray) = (char ***) palloc0((*rowCount) * sizeof(char *));
+	(*rowArray) = (TextRow *) palloc0((*rowCount) * sizeof(TextRow));
 
 	for (rowIndex = 0; rowIndex < (*rowCount); rowIndex++)
 	{
-		(*rowArray)[rowIndex] = (char **) palloc0((*columnCount) * sizeof(char *));
+		(*rowArray)[rowIndex] = (TextRow) palloc0((*columnCount) * sizeof(char *));
 		for (columnIndex = 0; columnIndex < (*columnCount); columnIndex++)
 		{
 			if (!PQgetisnull(result, rowIndex, columnIndex))
@@ -972,9 +966,10 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 /*
  * CommutativityRuleToLockMode determines the commutativity rule for the given
  * command and returns the appropriate lock mode to enforce that rule. The
- * function assumes SELECTs can commute with all other commands; INSERTs
- * commute with other INSERTs, but not with UPDATE/DELETE; and UPDATE/DELETE
- * cannot commute with INSERT, UPDATE, or DELETE.
+ * function assumes a SELECT doesn't modify state and therefore is commutative
+ * with all other commands. The function also assumes that an INSERT commutes
+ * with another INSERT, but not with an UPDATE/DELETE; and an UPDATE/DELETE
+ * doesn't commute with an INSERT, UPDATE, or DELETE.
  */
 static LOCKMODE
 CommutativityRuleToLockMode(CmdType commandType)
