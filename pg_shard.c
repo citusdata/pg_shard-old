@@ -194,10 +194,16 @@ DeterminePlannerType(Query *query)
 	{
 		plannerType = PLANNER_TYPE_CITUSDB;
 	}
-	else if (OidIsValid(distributedTableId) && (commandType == CMD_SELECT ||
-												commandType == CMD_INSERT))
+	else if (commandType == CMD_SELECT || commandType == CMD_INSERT)
 	{
-		plannerType = PLANNER_TYPE_PG_SHARD;
+		if (OidIsValid(distributedTableId))
+		{
+			plannerType = PLANNER_TYPE_PG_SHARD;
+		}
+		else
+		{
+			plannerType = PLANNER_TYPE_POSTGRES;
+		}
 	}
 	else
 	{
@@ -307,8 +313,15 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		if (count != 0)
 		{
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("fetching a specific number of rows"
+							errmsg("fetching rows from a query using a cursor"
 								   " is unsupported")));
+		}
+
+		if (!ScanDirectionIsForward(direction))
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("scan directions other than forward scans"
+								   " are unsupported")));
 		}
 
 		oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
@@ -318,21 +331,18 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 			InstrStartNode(queryDesc->totaltime);
 		}
 
-		if (!ScanDirectionIsNoMovement(direction))
+		if (operation == CMD_INSERT)
 		{
-			if (operation == CMD_INSERT)
-			{
-				int32 affectedRowCount = ExecuteDistributedModify(plan);
-				estate->es_processed = affectedRowCount;
-			}
-			else if (operation == CMD_SELECT)
-			{
-				DestReceiver *destination = queryDesc->dest;
-				List *targetList = plan->originalPlan->targetlist;
-				TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
+			int32 affectedRowCount = ExecuteDistributedModify(plan);
+			estate->es_processed = affectedRowCount;
+		}
+		else if (operation == CMD_SELECT)
+		{
+			DestReceiver *destination = queryDesc->dest;
+			List *targetList = plan->originalPlan->targetlist;
+			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
-				ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
-			}
+			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
 		}
 
 		if (queryDesc->totaltime != NULL)
@@ -815,16 +825,16 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 
 /*
  * ExecuteRemoteQuery takes the given query and attempts to execute it on the
- * given node and port combination. If the query succeeds, the function returns
- * the PGresult object, else it returns NULL.
- * Note: It is the callers responsibility to clear the PGresult object.
+ * given node and port combination. If the query succeeds, the function deep
+ * copies the resulting rows into the provided rowArray argument, and also sets
+ * the row and column counts. The reason we deep copy the results is because the
+ * PGresult object is free'd before we return from the function.
  */
 static bool
 ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 				   char ****rowArray, uint32 *rowCount, uint32 *columnCount)
 {
 	PGresult *result = NULL;
-	bool querySuccessful = true;
 	uint32 rowIndex = 0;
 	uint32 columnIndex = 0;
 
@@ -869,7 +879,7 @@ ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 
 	PQclear(result);
 
-	return querySuccessful;
+	return true;
 }
 
 
