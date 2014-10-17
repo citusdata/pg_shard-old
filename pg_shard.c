@@ -17,16 +17,17 @@
 #include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
-#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
 #include "connection.h"
+#include "create_shards.h"
 #include "distribution_metadata.h"
 #include "prune_shard_list.h"
 #include "ruleutils.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "access/sdir.h"
 #include "access/skey.h"
@@ -45,6 +46,7 @@
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
 #include "parser/parsetree.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
@@ -77,6 +79,10 @@ static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
 static bool ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 							   char ****rowArray, uint32 *rowCount, uint32 *columnCount);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
+static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
+static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
+static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
+static void LockShard(int64 shardId, LOCKMODE lockMode);
 
 
 /* declarations for dynamic loading */
@@ -193,7 +199,8 @@ DeterminePlannerType(Query *query)
 	{
 		plannerType = PLANNER_TYPE_CITUSDB;
 	}
-	else if (commandType == CMD_SELECT || commandType == CMD_INSERT)
+	else if (commandType == CMD_SELECT || commandType == CMD_INSERT ||
+			 commandType == CMD_UPDATE || commandType == CMD_DELETE)
 	{
 		Oid distributedTableId = ExtractFirstDistributedTableId(query);
 		if (OidIsValid(distributedTableId))
@@ -259,6 +266,12 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 
 	if (pgShardExecution)
 	{
+		LOCKMODE lockMode = CommutativityRuleToLockMode(plannedStatement->commandType);
+		if (lockMode != NoLock)
+		{
+			AcquireExecutorShardLocks(distributedPlan->taskList, lockMode);
+		}
+
 		/* swap back to the distributed plan for rest of query */
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -336,7 +349,8 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 			InstrStartNode(queryDesc->totaltime);
 		}
 
-		if (operation == CMD_INSERT)
+		if (operation == CMD_INSERT || operation == CMD_UPDATE ||
+			operation == CMD_DELETE)
 		{
 			int32 affectedRowCount = ExecuteDistributedModify(plan);
 			estate->es_processed = affectedRowCount;
@@ -348,6 +362,11 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
 			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
+		}
+		else
+		{
+			ereport(ERROR, (errmsg("unrecognized operation code: %d",
+								   (int) operation)));
 		}
 
 		if (queryDesc->totaltime != NULL)
@@ -417,13 +436,18 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 static void
 ErrorIfQueryNotSupported(Query *queryTree)
 {
+	Oid distributedTableId = ExtractFirstDistributedTableId(queryTree);
+	Var *partitionColumn = PartitionColumn(distributedTableId);
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
 	bool hasValuesScan = false;
 	uint32 queryTableCount = 0;
+	bool hasNonConstTargetEntryExprs = false;
+	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
-	Assert(commandType == CMD_SELECT || commandType == CMD_INSERT);
+	Assert(commandType == CMD_SELECT || commandType == CMD_INSERT ||
+		   commandType == CMD_UPDATE || commandType == CMD_DELETE);
 
 	/* prevent utility statements like DECLARE CURSOR attached to selects */
 	if (commandType == CMD_SELECT && queryTree->utilityStmt != NULL)
@@ -468,8 +492,48 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	if (list_length(queryTree->returningList) > 0)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan sharded INSERT that uses a "
+						errmsg("cannot plan sharded modification that uses a "
 							   "RETURNING clause")));
+	}
+
+	if (commandType == CMD_INSERT || commandType == CMD_UPDATE ||
+		commandType == CMD_DELETE)
+	{
+		ListCell *targetEntryCell = NULL;
+
+		foreach(targetEntryCell, queryTree->targetList)
+		{
+			TargetEntry *targetEntry = (TargetEntry *) lfirst(targetEntryCell);
+
+			/* skip resjunk entries: UPDATE adds some for ctid, etc. */
+			if (targetEntry->resjunk)
+			{
+				continue;
+			}
+
+			if (!IsA(targetEntry->expr, Const))
+			{
+				hasNonConstTargetEntryExprs = true;
+			}
+
+			if (targetEntry->resno == partitionColumn->varattno)
+			{
+				specifiesPartitionValue = true;
+			}
+		}
+	}
+
+	if (hasNonConstTargetEntryExprs)
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("cannot plan sharded modification containing values "
+							   "which are not constants or constant expressions")));
+	}
+
+	if (specifiesPartitionValue && (commandType == CMD_UPDATE))
+	{
+		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+						errmsg("modifying the partition value of rows is not allowed")));
 	}
 }
 
@@ -507,8 +571,9 @@ static List *
 QueryRestrictList(Query *query)
 {
 	List *queryRestrictList = NIL;
+	CmdType commandType = query->commandType;
 
-	if (query->commandType == CMD_INSERT)
+	if (commandType == CMD_INSERT)
 	{
 		/* build equality expression based on partition column value for row */
 		Oid distributedTableId = ExtractFirstDistributedTableId(query);
@@ -527,7 +592,8 @@ QueryRestrictList(Query *query)
 
 		queryRestrictList = list_make1(equalityExpr);
 	}
-	else if (query->commandType == CMD_SELECT)
+	else if (commandType == CMD_SELECT || commandType == CMD_UPDATE ||
+			 commandType == CMD_DELETE)
 	{
 		query_tree_walker(query, ExtractFromExpressionWalker, &queryRestrictList, 0);
 	}
@@ -556,7 +622,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 	if (list_length(plan->taskList) != 1)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("cannot plan INSERT to more than one shard")));
+						errmsg("cannot modify multiple shards during a single query")));
 	}
 
 	foreach(taskPlacementCell, task->taskPlacementList)
@@ -731,6 +797,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		task = (Task *) palloc0(sizeof(Task));
 		task->queryString = queryString;
 		task->taskPlacementList = finalizedPlacementList;
+		task->shardId = shardId;
 
 		taskList = lappend(taskList, task);
 	}
@@ -855,8 +922,7 @@ ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
 	result = PQexec(connection, query->data);
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
-		ereport(WARNING, (errmsg("could not run query on \"%s:%u\"",
-								 nodeName, nodePort)));
+		ReportRemoteError(connection, result);
 		return false;
 	}
 
@@ -900,4 +966,114 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 	bool isPgShardPlan = ((DistributedNodeTag) nodeTag == T_DistributedPlan);
 
 	return isPgShardPlan;
+}
+
+
+/*
+ * CommutativityRuleToLockMode determines the commutativity rule for the given
+ * command and returns the appropriate lock mode to enforce that rule. The
+ * function assumes SELECTs can commute with all other commands; INSERTs
+ * commute with other INSERTs, but not with UPDATE/DELETE; and UPDATE/DELETE
+ * cannot commute with INSERT, UPDATE, or DELETE.
+ */
+static LOCKMODE
+CommutativityRuleToLockMode(CmdType commandType)
+{
+	LOCKMODE lockMode = NoLock;
+
+	if (commandType == CMD_SELECT)
+	{
+		lockMode = NoLock;
+	}
+	else if (commandType == CMD_INSERT)
+	{
+		lockMode = ShareLock;
+	}
+	else if (commandType == CMD_UPDATE || commandType == CMD_DELETE)
+	{
+		lockMode = ExclusiveLock;
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("unrecognized operation code: %d", (int) commandType)));
+	}
+
+	return lockMode;
+}
+
+
+/*
+ * AcquireExecutorShardLocks: acquire shard locks needed for execution of tasks
+ * within a distributed plan.
+ */
+static void
+AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode)
+{
+	List *shardIdSortedTaskList = SortList(taskList, CompareTasksByShardId);
+	ListCell *taskCell = NULL;
+
+	foreach(taskCell, shardIdSortedTaskList)
+	{
+		Task *task = (Task *) lfirst(taskCell);
+		int64 shardId = task->shardId;
+
+		LockShard(shardId, lockMode);
+	}
+}
+
+
+/* Helper function to compare two tasks using their shardIds. */
+static int
+CompareTasksByShardId(const void *leftElement, const void *rightElement)
+{
+	const Task *leftTask = *((const Task **) leftElement);
+	const Task *rightTask = *((const Task **) rightElement);
+	int64 leftShardId = leftTask->shardId;
+	int64 rightShardId = rightTask->shardId;
+
+	/* we compare 64-bit integers, instead of casting their difference to int */
+	if (leftShardId > rightShardId)
+	{
+		return 1;
+	}
+	else if (leftShardId < rightShardId)
+	{
+		return -1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+
+/*
+ * LockShard returns after acquiring a lock for the specified shard, blocking
+ * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
+ * supported: all others will trigger an error. Locks acquired with this method
+ * are automatically released at transaction end.
+ */
+void
+LockShard(int64 shardId, LOCKMODE lockMode)
+{
+	/* locks use 32-bit identifier fields, so split shardId */
+	uint32 keyUpperHalf = (uint32) (shardId >> 32);
+	uint32 keyLowerHalf = (uint32) shardId;
+
+	LOCKTAG lockTag;
+	memset(&lockTag, 0, sizeof(LOCKTAG));
+
+	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
+
+	if (lockMode == ExclusiveLock || lockMode == ShareLock)
+	{
+		bool sessionLock = false;	/* we want a transaction lock */
+		bool dontWait = false;		/* block indefinitely until acquired */
+
+		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
+	}
 }

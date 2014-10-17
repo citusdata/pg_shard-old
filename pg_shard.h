@@ -14,7 +14,8 @@
 #ifndef PG_SHARD_H
 #define PG_SHARD_H
 
-#include "nodes/nodes.h"
+#include "c.h"
+
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
@@ -67,6 +68,7 @@ typedef struct Task
 {
 	StringInfo queryString;		/* SQL string suitable for immediate remote execution */
 	List *taskPlacementList;	/* ShardPlacements on which the task can be executed */
+	int64 shardId;				/* Denormalized shardId of tasks for convenience */
 } Task;
 
 

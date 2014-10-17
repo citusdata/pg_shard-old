@@ -47,8 +47,6 @@
 static Oid ResolveRelationId(text *relationName);
 static void CheckHashPartitionedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
-static List * SortList(List *pointerList,
-					   int (*ComparisonFunction)(const void *, const void *));
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
 static bool WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
@@ -345,7 +343,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
  * values they point to) by applying the given comparison function. The function
  * then returns the sorted list of pointers.
  */
-static List *
+List *
 SortList(List *pointerList, int (*ComparisonFunction)(const void *, const void *))
 {
 	List *sortedList = NIL;
