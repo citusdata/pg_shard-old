@@ -74,9 +74,9 @@ static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
-static void AcquireExecutorShardLocks(PlannedStmt *plannedStatement, LOCKMODE lockMode);
-static void LockShard(int64 shardId, LOCKMODE lockMode);
+static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
+static void LockShard(int64 shardId, LOCKMODE lockMode);
 
 
 /* declarations for dynamic loading */
@@ -247,14 +247,13 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 	if (pgShardExecution)
 	{
 		LOCKMODE lockMode = CommutativityRuleToLockMode(plannedStatement->commandType);
+		if (lockMode != NoLock)
+		{
+			AcquireExecutorShardLocks(distributedPlan->taskList, lockMode);
+		}
 
 		/* swap back to the distributed plan for rest of query */
 		plannedStatement->planTree = (Plan *) distributedPlan;
-
-		if (lockMode != NoLock)
-		{
-			AcquireExecutorShardLocks(plannedStatement, lockMode);
-		}
 	}
 }
 
@@ -767,6 +766,13 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 }
 
 
+/*
+ * CommutativityRuleToLockMode determines the commutativity rule for the given
+ * command and returns the appropriate lock mode to enforce that rule. The
+ * function assumes SELECTs can commute with all other commands; INSERTs
+ * commute with other INSERTs, but not with UPDATE/DELETE; and UPDATE/DELETE
+ * cannot commute with INSERT, UPDATE, or DELETE.
+ */
 static LOCKMODE
 CommutativityRuleToLockMode(CmdType commandType)
 {
@@ -794,15 +800,13 @@ CommutativityRuleToLockMode(CmdType commandType)
 
 
 /*
- * AcquireExecutorShardLocks: acquire shard locks needed for execution of a
- * distributed plan. Assumes plannedStatement->planTree is a DistributedPlan.
+ * AcquireExecutorShardLocks: acquire shard locks needed for execution of tasks
+ * within a distributed plan.
  */
 static void
-AcquireExecutorShardLocks(PlannedStmt *plannedStatement, LOCKMODE lockMode)
+AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode)
 {
-	DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
-	List *shardIdSortedTaskList = SortList(distributedPlan->taskList,
-										   CompareTasksByShardId);
+	List *shardIdSortedTaskList = SortList(taskList, CompareTasksByShardId);
 	ListCell *taskCell = NULL;
 
 	foreach(taskCell, shardIdSortedTaskList)
@@ -811,6 +815,31 @@ AcquireExecutorShardLocks(PlannedStmt *plannedStatement, LOCKMODE lockMode)
 		int64 shardId = task->shardId;
 
 		LockShard(shardId, lockMode);
+	}
+}
+
+
+/* Helper function to compare two tasks using their shardIds. */
+static int
+CompareTasksByShardId(const void *leftElement, const void *rightElement)
+{
+	const Task *leftTask = *((const Task **) leftElement);
+	const Task *rightTask = *((const Task **) rightElement);
+	int64 leftShardId = leftTask->shardId;
+	int64 rightShardId = rightTask->shardId;
+
+	/* we compare 64-bit integers, instead of casting their difference to int */
+	if (leftShardId > rightShardId)
+	{
+		return 1;
+	}
+	else if (leftShardId < rightShardId)
+	{
+		return -1;
+	}
+	else
+	{
+		return 0;
 	}
 }
 
@@ -837,35 +866,11 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 	{
 		bool sessionLock = false;	/* we want a transaction lock */
 		bool dontWait = false;		/* block indefinitely until acquired */
+
 		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
 	}
 	else
 	{
 		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
-	}
-}
-
-
-/* Helper function to compare two tasks using their shardIds. */
-static int
-CompareTasksByShardId(const void *leftElement, const void *rightElement)
-{
-	const Task *leftTask = *((const Task **) leftElement);
-	const Task *rightTask = *((const Task **) rightElement);
-	int64 leftShardId = leftTask->shardId;
-	int64 rightShardId = rightTask->shardId;
-
-	/* we compare 64-bit integers, instead of casting their difference to int */
-	if (leftShardId > rightShardId)
-	{
-		return 1;
-	}
-	else if (leftShardId < rightShardId)
-	{
-		return -1;
-	}
-	else
-	{
-		return 0;
 	}
 }
