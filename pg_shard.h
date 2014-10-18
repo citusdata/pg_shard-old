@@ -73,7 +73,7 @@ typedef struct Task
 
 
 /* TextRow represents a row that holds column values in text-format */
-typedef char **TextRow;
+typedef char** TextRow;
 
 
 /* Function declarations for extension loading and unloading */
