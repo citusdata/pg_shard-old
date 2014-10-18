@@ -54,6 +54,9 @@
 #include "utils/palloc.h"
 
 
+/* controls use of locks to enforce safe commutativity */
+bool AllModificationsCommutative = false;
+
 /* informs pg_shard to use the CitusDB planner */
 bool UseCitusDBSelectLogic = false;
 
@@ -112,10 +115,17 @@ _PG_init(void)
 	PreviousExecutorRunHook = ExecutorRun_hook;
 	ExecutorRun_hook = PgShardExecutorRun;
 
+	DefineCustomBoolVariable("pg_shard.all_modifications_commutative",
+							 "Controls enforcement of safe commutativity rules", NULL,
+							 &AllModificationsCommutative, false, PGC_USERSET,
+							 GUC_NOT_IN_SAMPLE, NULL, NULL, NULL);
+
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
-							 "Informs pg_shard to use CitusDB's select logic.",
-							 NULL, &UseCitusDBSelectLogic, false, PGC_USERSET, 0,
-							 NULL, NULL, NULL);
+							 "Informs pg_shard to use CitusDB's select logic", NULL,
+							 &UseCitusDBSelectLogic, false, PGC_USERSET,
+							 GUC_NOT_IN_SAMPLE, NULL, NULL, NULL);
+
+	EmitWarningsOnPlaceholders("pg_shard");
 }
 
 
@@ -970,11 +980,20 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
  * with all other commands. The function also assumes that an INSERT commutes
  * with another INSERT, but not with an UPDATE/DELETE; and an UPDATE/DELETE
  * doesn't commute with an INSERT, UPDATE, or DELETE.
+ *
+ * The above mapping is overridden entirely when all_modifications_commutative
+ * is set to true. In that case, no commands use any locks whatsoever, meaning
+ * all commands may commute with all others.
  */
 static LOCKMODE
 CommutativityRuleToLockMode(CmdType commandType)
 {
 	LOCKMODE lockMode = NoLock;
+
+	if (AllModificationsCommutative)
+	{
+		return NoLock;
+	}
 
 	if (commandType == CMD_SELECT)
 	{
