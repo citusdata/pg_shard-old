@@ -52,17 +52,17 @@ should be applied only on the master node.
 Before using pg_shard you need to add it to `shared_preload_libraries` in your
 `postgresql.conf` and restart Postgres:
 
-shared_preload_libraries = 'pg_shard.so'    # (change requires restart)
+  shared_preload_libraries = 'pg_shard.so'    # (change requires restart)
 
 The master node in `pg_shard` reads worker host information from a file called
 `pg_worker_list.conf` in the data directory. We need to add the hostname and
 port number information for each worker node in our cluster. The below example
 adds two example worker databases running on the local host.
 
-emacs -nw $PGDATA/pg_worker_list.conf
+  emacs -nw $PGDATA/pg_worker_list.conf
 
-localhost   9700
-localhost   9701
+  localhost   9700
+  localhost   9701
 
 Save and restart the master node.
 
