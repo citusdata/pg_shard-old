@@ -61,8 +61,8 @@ adds two example worker databases running on the local host.
 
     $ emacs -nw $PGDATA/pg_worker_list.conf
 
-    localhost   9700
-    localhost   9701
+    worker-101  5432
+    worker-102  5432
 
 Save and restart the master node.
 
@@ -111,7 +111,7 @@ SELECT create_shards('customer_reviews', 16, 2);
 
 This function does a number of things to set up your distributed table:
 
-  1. `shard_count` shards are recorded in `pgs_distribution_metadata.shards`
+  1. `shard_count` shards are recorded in `pgs_distribution_metadata.shard`
   2. For each shard, `replication_factor` nodes are selected. On each node, a table is created whose structure is identical to the prototype table
   3. These shard placements are recorded in `pgs_distribution_metadata.shard_placement`
 
