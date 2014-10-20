@@ -37,28 +37,39 @@ You can find information on obtaining PostgreSQL on their [download page](http:/
 
 Once you have PostgreSQL or CitusDB installed and have downloaded a copy of `pg_shard`, installing the extension is straightforward:
 
-  1. Ensure `pg_config` is on your `PATH`
-  2. `cd` to the root of your copy of `pg_shard`
-  3. Run `make install`
+  1. PATH=/usr/local/pgsql/bin/:$PATH make
+  2. sudo PATH=/usr/local/pgsql/bin/:$PATH make install
 
 `pg_shard` includes comprehensive regression tests. To verify your installation, just run `make installcheck`.
 
 ## Setup
 
-`pg_shard` stores configuration data in some tables within the `pg_shard` schema. The most interesting one for users is `nodes`, which contains the list of known worker nodes within the cluster. To get started with `pg_shard` you'll need to add some rows. The schema is:
+`pg_shard` uses a master node to store the metadata and act as the interface
+for all queries to the cluster. Before setup, pick one of your cluster nodes as
+the master. The rest of the nodes then are your workers. The instructions below
+should be applied only on the master node.
 
-| Column     | Type      | Modifiers   |
-| ---------- | --------- | ----------- |
-| `hostname` | `text`    | `not null`  |
-| `port`     | `integer` | `not null`  |
+Before using pg_shard you need to add it to `shared_preload_libraries` in your
+`postgresql.conf` and restart Postgres:
 
-**Indexes**:
-  `"nodes_pkey" PRIMARY KEY, btree (hostname, port)`
+shared_preload_libraries = 'pg_shard.so'    # (change requires restart)
 
-Assuming you have nodes named `bohr` and `einstein` running PostgreSQL on the default port:
+The master node in `pg_shard` reads worker host information from a file called
+`pg_worker_list.conf` in the data directory. We need to add the hostname and
+port number information for each worker node in our cluster. The below example
+adds two example worker databases running on the local host.
+
+emacs -nw $PGDATA/pg_worker_list.conf
+
+localhost   9700
+localhost   9701
+
+Save and restart the master node.
+
+Now, lets log into the master node and first create the extension:
 
 ```sql
-INSERT INTO nodes VALUES ('bohr', 5432), ('einstein', 5432);
+CREATE EXTENSION pg_shard;
 ```
 
 At this point you're ready to distribute a table. To let `pg_shard` know the structure of your table, define its schema as you would with a normal table:
@@ -66,7 +77,7 @@ At this point you're ready to distribute a table. To let `pg_shard` know the str
 ```sql
 CREATE TABLE customer_reviews
 (
-    customer_id TEXT,
+    customer_id INTEGER,
     review_date DATE,
     review_rating INTEGER,
     review_votes INTEGER,
@@ -84,55 +95,48 @@ CREATE TABLE customer_reviews
 This table will not be used to store any data on the master but rather serves as a _prototype_ of what a `customer_reviews` table should look like on worker nodes. After you're happy with your schema, tell `pg_shard` to distribute your table:
 
 ```sql
--- Pass table name, hash key column, shard count, and replication factor
-SELECT pg_shard.create_distributed_table_using('customer_reviews', 'customer_id', 16, 2);
+-- Pass table name and the column name on which you want to distribute your data
+SELECT create_distributed_table('customer_reviews', 'customer_id');
+```
+
+This function informs `pg_shard` that the given table is to be hash partitioned
+the customer_id column.
+
+Now create shards for this table on the worker nodes:
+
+```sql
+-- Pass the table name, desired shard count and the replication factor
+SELECT create_shards('customer_reviews', 16, 2);
 ```
 
 This function does a number of things to set up your distributed table:
 
-  1. `shard_count` shards are recorded in `pg_shard.shards`
+  1. `shard_count` shards are recorded in `pgs_distribution_metadata.shards`
   2. For each shard, `replication_factor` nodes are selected. On each node, a table is created whose structure is identical to the prototype table
-  3. These shard placements are recorded in `pg_shard.placements`
-  4. The prototype table is moved into the `pg_shard_prototypes` schema
-  5. A `FOREIGN TABLE` is created in the `public` schema whose name and structure match the prototype table
+  3. These shard placements are recorded in `pgs_distribution_metadata.shard_placement`
 
 ## Usage
 
-Issuing `INSERT` and `SELECT` commands against the foreign table will transparently route your requests to the correct shard. If a suitable `WHERE` clause is present, only relevant shards will be queried.
-
-    customer_id TEXT,
-    review_date DATE,
-    review_rating INTEGER,
-    review_votes INTEGER,
-    review_helpful_votes INTEGER,
-    product_id CHAR(10),
-    product_title TEXT,
-    product_sales_rank BIGINT,
-    product_group TEXT,
-    product_category TEXT,
-    product_subcategory TEXT,
-    similar_product_ids CHAR(10)[]
+Issuing `INSERT` and `SELECT` commands against the table will transparently
+route your requests to the correct shard. Currently, `SELECT`, `UPDATE` and
+`DELETE` commands require the partition column in the where-clause.
 
 
 ```sql
-EXPLAIN INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4687, 5);
+INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4687, 5);
+INSERT INTO customer_reviews (customer_id, review_rating, product_title) VALUES (4687, 5, 'Harry Potter');
+INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4700, 10);
+```
 
---                           QUERY PLAN
--- --------------------------------------------------------------------
---  Insert on customer_reviews shard 4 (cost=0.00..0.01 rows=1 width=0)
---    ->  Result  (cost=0.00..0.01 rows=1 width=0)
+```sql
+SELECT count(*) FROM customer_reviews WHERE customer_id = 4687;
+SELECT * FROM customer_reviews WHERE customer_id = 4687;
+```
 
-EXPLAIN SELECT * FROM customer_reviews;
-
---                                 QUERY PLAN
--- --------------------------------------------------------------------------
---  Foreign Scan on customer_reviews  (cost=100.00..132.74 rows=758 width=84)
-
-EXPLAIN SELECT * FROM customer_reviews WHERE customer_id=4687;
-
---                                QUERY PLAN
--- -------------------------------------------------------------------------------------
---  Foreign Scan on customer_reviews (shard_id 4)  (cost=100.00..119.56 rows=4 width=84)
+You can also issue `UPDATE` or `DELETE` commands on the distributed table.
+```sql
+UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 4687;
+DELETE FROM customer_reviews WHERE customer_id = 4700;
 ```
 
 ## Troubleshooting
@@ -151,7 +155,6 @@ If a node is unreachable, queries to it will fail immediately. Application opera
 
 Given enough demand, these features may be included in future releases:
 
-  * `UPDATE` and `DELETE` support
   * Eventual consistency
   * Marking nodes as unhealthy after a number of failures
   * Retries to unhealthy nodes
