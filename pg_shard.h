@@ -72,6 +72,10 @@ typedef struct Task
 } Task;
 
 
+/* TextRow represents a row that holds column values in text-format */
+typedef char** TextRow;
+
+
 /* Function declarations for extension loading and unloading */
 extern void _PG_init(void);
 extern void _PG_fini(void);

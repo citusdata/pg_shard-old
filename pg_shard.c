@@ -14,6 +14,7 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
+#include "funcapi.h"
 #include "libpq-fe.h"
 #include "miscadmin.h"
 #include "postgres_ext.h"
@@ -63,7 +64,7 @@ static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
 static PlannerType DeterminePlannerType(Query *query);
 static Oid ExtractFirstDistributedTableId(Query *query);
 static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
-void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
+static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static DistributedPlan * PlanDistributedQuery(Query *query);
@@ -72,6 +73,11 @@ static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
+static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
+									 EState *executorState, DestReceiver *destination,
+									 TupleDesc tupleDescriptor);
+static bool ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
+							   TextRow **rowArray, uint32 *rowCount, uint32 *columnCount);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
@@ -187,18 +193,32 @@ static PlannerType
 DeterminePlannerType(Query *query)
 {
 	PlannerType plannerType = PLANNER_INVALID_FIRST;
-	Oid distributedTableId = ExtractFirstDistributedTableId(query);
+	CmdType commandType = query->commandType;
 
-	if (query->commandType == CMD_SELECT && UseCitusDBSelectLogic)
+	if (commandType == CMD_SELECT && UseCitusDBSelectLogic)
 	{
 		plannerType = PLANNER_TYPE_CITUSDB;
 	}
-	else if (OidIsValid(distributedTableId))
+	else if (commandType == CMD_SELECT || commandType == CMD_INSERT ||
+			 commandType == CMD_UPDATE || commandType == CMD_DELETE)
 	{
-		plannerType = PLANNER_TYPE_PG_SHARD;
+		Oid distributedTableId = ExtractFirstDistributedTableId(query);
+		if (OidIsValid(distributedTableId))
+		{
+			plannerType = PLANNER_TYPE_PG_SHARD;
+		}
+		else
+		{
+			plannerType = PLANNER_TYPE_POSTGRES;
+		}
 	}
 	else
 	{
+		/*
+		 * For utility statements, we need to detect if they are operating on
+		 * distributed tables. If they are, we need to warn or error out
+		 * accordingly.
+		 */
 		plannerType = PLANNER_TYPE_POSTGRES;
 	}
 
@@ -291,7 +311,7 @@ ExtractFirstDistributedTableId(Query *query)
 /*
  * PgShardExecutorRun actually runs a distributed plan, if any.
  */
-void
+static void
 PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
@@ -307,6 +327,20 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		Assert(estate != NULL);
 		Assert(!(estate->es_top_eflags & EXEC_FLAG_EXPLAIN_ONLY));
 
+		/* we only support default scan direction and row fetch count */
+		if (!ScanDirectionIsForward(direction))
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("scan directions other than forward scans "
+								   "are unsupported")));
+		}
+		if (count != 0)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("fetching rows from a query using a cursor "
+								   "is unsupported")));
+		}
+
 		oldcontext = MemoryContextSwitchTo(estate->es_query_cxt);
 
 		if (queryDesc->totaltime != NULL)
@@ -314,20 +348,24 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 			InstrStartNode(queryDesc->totaltime);
 		}
 
-		if (!ScanDirectionIsNoMovement(direction))
+		if (operation == CMD_INSERT || operation == CMD_UPDATE ||
+			operation == CMD_DELETE)
 		{
-			if (operation == CMD_INSERT || operation == CMD_UPDATE ||
-				operation == CMD_DELETE)
-			{
-				int32 affectedRowCount = ExecuteDistributedModify(plan);
-				estate->es_processed = affectedRowCount;
+			int32 affectedRowCount = ExecuteDistributedModify(plan);
+			estate->es_processed = affectedRowCount;
+		}
+		else if (operation == CMD_SELECT)
+		{
+			DestReceiver *destination = queryDesc->dest;
+			List *targetList = plan->originalPlan->targetlist;
+			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
-			}
-			else
-			{
-				ereport(ERROR, (errmsg("unrecognized operation code: %d",
-									  (int) operation)));
-			}
+			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
+		}
+		else
+		{
+			ereport(ERROR, (errmsg("unrecognized operation code: %d",
+								   (int) operation)));
 		}
 
 		if (queryDesc->totaltime != NULL)
@@ -407,11 +445,14 @@ ErrorIfQueryNotSupported(Query *queryTree)
 	bool specifiesPartitionValue = false;
 
 	CmdType commandType = queryTree->commandType;
-	if (!(commandType == CMD_SELECT || commandType == CMD_INSERT ||
-		  commandType == CMD_UPDATE || commandType == CMD_DELETE))
+	Assert(commandType == CMD_SELECT || commandType == CMD_INSERT ||
+		   commandType == CMD_UPDATE || commandType == CMD_DELETE);
+
+	/* prevent utility statements like DECLARE CURSOR attached to selects */
+	if (commandType == CMD_SELECT && queryTree->utilityStmt != NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("unsupported query type: %d", commandType)));
+						errmsg("unsupported utility statement")));
 	}
 
 	/* extract range table entries */
@@ -733,8 +774,23 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		int64 shardId = shardInterval->id;
 		List *finalizedPlacementList = LoadFinalizedShardPlacementList(shardId);
 		Task *task = NULL;
-
 		StringInfo queryString = makeStringInfo();
+
+		/* 
+		 * Convert the qualifiers to an explicitly and'd clause, which is needed
+		 * before we deparse the query. XXX: Since this only applies to
+		 * SELECT's, we should move this bit of logic to a SELECT-specific
+		 * planning function.
+		 */
+		if (query->jointree && query->jointree->quals)
+		{
+			Node *whereClause = query->jointree->quals;
+			if (IsA(whereClause, List))
+			{
+				query->jointree->quals = (Node *) make_ands_explicit((List *) whereClause);
+			}
+		}
+
 		deparse_shard_query(query, shardId, queryString);
 
 		task = (Task *) palloc0(sizeof(Task));
@@ -748,6 +804,147 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	distributedPlan->taskList = taskList;
 
 	return distributedPlan;
+}
+
+
+/*
+ * ExecuteDistributedSelect executes the remote select query and sends the
+ * resultant tuples to the given destination receiver. If the query fails on a
+ * given placement, the function attempts it on its replica.
+ */
+static void
+ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState,
+						 DestReceiver *destination, TupleDesc tupleDescriptor)
+{
+	uint32 rowIndex = 0;
+	uint32 rowCount = 0;
+	uint32 columnCount = 0;
+	uint32 expectedColumnCount = 0;
+	TextRow *rowArray = NULL;
+	Task *task = NULL;
+	List *taskPlacementList = NIL;
+	ListCell *taskPlacementCell = NULL;
+	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
+	AttInMetadata *attributeInputMetadata = NULL;
+
+	List *taskList = distributedPlan->taskList;
+	if (list_length(taskList) != 1)
+	{
+		ereport(ERROR, (errmsg("cannot execute select over multiple shards")));
+	}
+
+	task = (Task *) linitial(taskList);
+	taskPlacementList = task->taskPlacementList;
+
+	/*
+	 * Try to run the query to completion on one placement. If the query fails
+	 * attempt the query on the next placement.
+	 */
+	foreach(taskPlacementCell, taskPlacementList)
+	{
+		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		bool queryOK = ExecuteRemoteQuery(taskPlacement->nodeName, taskPlacement->nodePort,
+										  task->queryString,
+										  &rowArray, &rowCount, &columnCount);
+		if (queryOK)
+		{
+			Assert(rowArray != NULL);
+			break;
+		}
+	}
+
+	if (rowArray == NULL)
+	{
+		ereport(ERROR, (errmsg("unable to execute remote query")));
+	}
+
+	expectedColumnCount = tupleDescriptor->natts;
+	if (columnCount != expectedColumnCount)
+	{
+		ereport(ERROR, (errmsg("sql query returned unexpected number of fields")));
+	}
+
+	/* initialize the attribute input information */
+	attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
+
+	/* startup the tuple receiver */
+	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+
+	/* now iterate over each row and send the tuples to the given destination */
+	for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
+	{
+		TextRow textRow = rowArray[rowIndex];
+		HeapTuple heapTuple = BuildTupleFromCStrings(attributeInputMetadata, textRow);
+
+		ExecStoreTuple(heapTuple, tupleTableSlot, InvalidBuffer, false);
+
+		(*destination->receiveSlot) (tupleTableSlot, destination);
+		executorState->es_processed++;
+
+		ExecClearTuple(tupleTableSlot);
+	}
+
+	/* shutdown the tuple receiver */
+	(*destination->rShutdown) (destination);
+}
+
+
+/*
+ * ExecuteRemoteQuery takes the given query and attempts to execute it on the
+ * given node and port combination. If the query succeeds, the function deep
+ * copies the resulting rows into the provided rowArray argument, and also sets
+ * the row and column counts. The reason we deep copy the results is because the
+ * PGresult object is free'd before we return from the function.
+ */
+static bool
+ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
+				   TextRow **rowArray, uint32 *rowCount, uint32 *columnCount)
+{
+	PGresult *result = NULL;
+	uint32 rowIndex = 0;
+	uint32 columnIndex = 0;
+
+	PGconn *connection = GetConnection(nodeName, nodePort);
+	if (connection == NULL)
+	{
+		ereport(WARNING, (errmsg("could not connect to \"%s:%u\"",
+								 nodeName, nodePort)));
+		return false;
+	}
+
+	/* now execute the query on the remote node */
+	result = PQexec(connection, query->data);
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		return false;
+	}
+
+	(*rowCount) = PQntuples(result);
+	(*columnCount) = PQnfields(result);
+	(*rowArray) = (TextRow *) palloc0((*rowCount) * sizeof(TextRow));
+
+	for (rowIndex = 0; rowIndex < (*rowCount); rowIndex++)
+	{
+		(*rowArray)[rowIndex] = (TextRow) palloc0((*columnCount) * sizeof(char *));
+		for (columnIndex = 0; columnIndex < (*columnCount); columnIndex++)
+		{
+			if (!PQgetisnull(result, rowIndex, columnIndex))
+			{
+				/* deep copy the value into our result array */
+				char *rowValue = PQgetvalue(result, rowIndex, columnIndex);
+				(*rowArray)[rowIndex][columnIndex] = pstrdup(rowValue);
+			}
+			else
+			{
+				(*rowArray)[rowIndex][columnIndex] = NULL;
+			}
+		}
+	}
+
+	PQclear(result);
+
+	return true;
 }
 
 
@@ -769,9 +966,10 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
 /*
  * CommutativityRuleToLockMode determines the commutativity rule for the given
  * command and returns the appropriate lock mode to enforce that rule. The
- * function assumes SELECTs can commute with all other commands; INSERTs
- * commute with other INSERTs, but not with UPDATE/DELETE; and UPDATE/DELETE
- * cannot commute with INSERT, UPDATE, or DELETE.
+ * function assumes a SELECT doesn't modify state and therefore is commutative
+ * with all other commands. The function also assumes that an INSERT commutes
+ * with another INSERT, but not with an UPDATE/DELETE; and an UPDATE/DELETE
+ * doesn't commute with an INSERT, UPDATE, or DELETE.
  */
 static LOCKMODE
 CommutativityRuleToLockMode(CmdType commandType)
