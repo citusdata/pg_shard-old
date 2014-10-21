@@ -36,8 +36,8 @@ You can find information on obtaining PostgreSQL on their [download page](http:/
 
 Once you have PostgreSQL or CitusDB installed and have downloaded a copy of `pg_shard`, installing the extension is straightforward:
 
-    1. `PATH=/usr/local/pgsql/bin/:$PATH make`
-    2. `sudo PATH=/usr/local/pgsql/bin/:$PATH make install`
+    `1. PATH=/usr/local/pgsql/bin/:$PATH make`
+    `2. sudo PATH=/usr/local/pgsql/bin/:$PATH make install`
 
 `pg_shard` includes comprehensive regression tests. To verify your installation, just run `make installcheck`.
 
