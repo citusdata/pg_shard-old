@@ -117,13 +117,13 @@ _PG_init(void)
 
 	DefineCustomBoolVariable("pg_shard.all_modifications_commutative",
 							 "Controls enforcement of safe commutativity rules", NULL,
-							 &AllModificationsCommutative, false, PGC_USERSET,
-							 GUC_NOT_IN_SAMPLE, NULL, NULL, NULL);
+							 &AllModificationsCommutative, false, PGC_USERSET, 0, NULL,
+							 NULL, NULL);
 
 	DefineCustomBoolVariable("pg_shard.use_citusdb_select_logic",
 							 "Informs pg_shard to use CitusDB's select logic", NULL,
-							 &UseCitusDBSelectLogic, false, PGC_USERSET,
-							 GUC_NOT_IN_SAMPLE, NULL, NULL, NULL);
+							 &UseCitusDBSelectLogic, false, PGC_USERSET, 0, NULL,
+							 NULL, NULL);
 
 	EmitWarningsOnPlaceholders("pg_shard");
 }
