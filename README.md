@@ -18,7 +18,6 @@
 Features not yet available but under consideration for future releases:
 
   * Eventual consistency
-  * `UPDATE` and `DELETE` support
   * Range-based partitioning
   * Modification of schema of existing distributed tables
   * Identically partitioning sets of tables to ensure their data is colocated
@@ -37,8 +36,8 @@ You can find information on obtaining PostgreSQL on their [download page](http:/
 
 Once you have PostgreSQL or CitusDB installed and have downloaded a copy of `pg_shard`, installing the extension is straightforward:
 
-    1. PATH=/usr/local/pgsql/bin/:$PATH make
-    2. sudo PATH=/usr/local/pgsql/bin/:$PATH make install
+    1. `PATH=/usr/local/pgsql/bin/:$PATH make`
+    2. `sudo PATH=/usr/local/pgsql/bin/:$PATH make install`
 
 `pg_shard` includes comprehensive regression tests. To verify your installation, just run `make installcheck`.
 
@@ -67,7 +66,7 @@ adds two example worker nodes running on port 5432
 
 Save and restart the master node.
 
-Now, lets log into the master node and first create the extension:
+Now, let's log into the master node and first create the extension:
 
 ```sql
 CREATE EXTENSION pg_shard;
@@ -101,7 +100,7 @@ SELECT create_distributed_table('customer_reviews', 'customer_id');
 ```
 
 This function informs `pg_shard` that the given table is to be hash partitioned
-the customer_id column.
+the `customer_id` column.
 
 Now create shards for this table on the worker nodes:
 
