@@ -14,7 +14,8 @@
 #ifndef PG_SHARD_H
 #define PG_SHARD_H
 
-#include "access/tupdesc.h"
+#include "c.h"
+
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
@@ -50,9 +51,9 @@ typedef enum PlannerType
  */
 typedef struct DistributedPlan
 {
-	Plan plan;		/* this is a "subclass" of Plan */
-	List *taskList;	/* list of tasks to run as part of this plan */
-	TupleDesc tupleDescriptor; /* description of output tuple */
+	Plan plan;			/* this is a "subclass" of Plan */
+	Plan *originalPlan;	/* we save a copy of standard_planner's output */
+	List *taskList;		/* list of tasks to run as part of this plan */
 } DistributedPlan;
 
 
@@ -67,7 +68,12 @@ typedef struct Task
 {
 	StringInfo queryString;		/* SQL string suitable for immediate remote execution */
 	List *taskPlacementList;	/* ShardPlacements on which the task can be executed */
+	int64 shardId;				/* Denormalized shardId of tasks for convenience */
 } Task;
+
+
+/* TextRow represents a row that holds column values in text-format */
+typedef char** TextRow;
 
 
 /* Function declarations for extension loading and unloading */
