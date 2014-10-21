@@ -116,7 +116,7 @@ _PG_init(void)
 	ExecutorRun_hook = PgShardExecutorRun;
 
 	DefineCustomBoolVariable("pg_shard.all_modifications_commutative",
-							 "Controls enforcement of safe commutativity rules", NULL,
+							 "Bypasses commutativity checks when enabled", NULL,
 							 &AllModificationsCommutative, false, PGC_USERSET, 0, NULL,
 							 NULL, NULL);
 
@@ -990,6 +990,7 @@ CommutativityRuleToLockMode(CmdType commandType)
 {
 	LOCKMODE lockMode = NoLock;
 
+	/* bypass commutativity checks when flag enabled */
 	if (AllModificationsCommutative)
 	{
 		return NoLock;
