@@ -54,6 +54,7 @@
 #include "utils/errcodes.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
+#include "utils/rel.h"
 
 
 /* informs pg_shard to use the CitusDB planner */
@@ -69,12 +70,12 @@ static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
-static DistributedPlan * PlanDistributedQuery(Query *query);
+static List * DistributedQueryShardList(Query *query);
 static List * QueryRestrictList(Query *query);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
-static Query * BuildFilterQuery(Query *query);
+static Query * FilterAndProjectQuery(Query *query);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
@@ -154,6 +155,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 	{
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
+		List *queryShardList = NIL;
 
 		/* call standard planner first to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
@@ -161,7 +163,20 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		ErrorIfQueryNotSupported(distributedQuery);
 
-		distributedPlan = PlanDistributedQuery(distributedQuery);
+		/* compute the list of shards this query needs to access */
+		queryShardList = DistributedQueryShardList(distributedQuery);
+
+		/*
+		 * If a select query touches multiple shards, we don't push down the
+		 * query as-is, and instead only push down the filter clauses and select
+		 * needed columns.
+		 */
+		if ((query->commandType == CMD_SELECT) && (list_length(queryShardList) > 1))
+		{
+			distributedQuery = FilterAndProjectQuery(distributedQuery);
+		}
+
+		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -543,15 +558,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 
 
 /*
- * PlanDistributedQuery is the main entry point when planning a query involving
- * a distributed table. The function prunes the shards for the table in the
- * query based on the query's restriction qualifiers, and then builds a
- * distributed plan with those shards.
+ * DistributedQueryShardList prunes the shards for the table in the query based
+ * on the query's restriction qualifiers, and returns this list.
  */
-static DistributedPlan *
-PlanDistributedQuery(Query *query)
+static List *
+DistributedQueryShardList(Query *query)
 {
-	DistributedPlan *distributedPlan = NULL;
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 
 	List *restrictClauseList = QueryRestrictList(query);
@@ -559,16 +571,7 @@ PlanDistributedQuery(Query *query)
 	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
 										   shardList);
 
-	Query *workerQuery = copyObject(query);
-
-	if (list_length(prunedShardList) > 1)
-	{
-		workerQuery = BuildFilterQuery(query);
-	}
-
-	distributedPlan = BuildDistributedPlan(workerQuery, prunedShardList);
-
-	return distributedPlan;
+	return prunedShardList;
 }
 
 
@@ -769,12 +772,12 @@ ExtractFromExpressionWalker(Node *node, List **qualifierList)
 
 
 /*
- * BuildFilterQuery builds a query which contains the filter clauses from the
- * original query. The filter query also only selects columns needed for the
- * original query, which can then be pushed down to the worker nodes.
+ * FilterAndProjectQuery builds a query which contains the filter clauses from
+ * the and also only selects columns needed for the original query, which can
+ * then be pushed down to the worker nodes.
  */
 static Query *
-BuildFilterQuery(Query *query)
+FilterAndProjectQuery(Query *query)
 {
 	Query *filterQuery = NULL;
 	List *rangeTableList = NIL;
@@ -782,6 +785,8 @@ BuildFilterQuery(Query *query)
 	List *selectColumnList = NIL;
 	List *projectColumnList = NIL;
 	List *columnList = NIL;
+	ListCell *columnCell = NULL;
+	List *uniqueColumnList = NIL;
 	List *targetList = NIL;
 	FromExpr *fromExpr = NULL;
 	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
@@ -802,7 +807,45 @@ BuildFilterQuery(Query *query)
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 										placeHolderBehavior);
 	columnList = list_union(selectColumnList, projectColumnList);
-	targetList = TargetEntryList(columnList);
+
+	/* de-dupe the columns so we have a unique list */
+	foreach(columnCell, columnList)
+	{
+		Var *column = (Var *) lfirst(columnCell);
+		uniqueColumnList = list_append_unique(uniqueColumnList, column);
+	}
+
+	/*
+	 * If the column list is NIL (e.g. SELECT count(*)) default to selecting all
+	 * columns.
+	 */
+	if (uniqueColumnList == NIL)
+	{
+		Oid distributedTableId = ExtractFirstDistributedTableId(query);
+		Relation distributedTable = RelationIdGetRelation(distributedTableId);
+		TupleDesc tupleDescriptor = distributedTable->rd_att;
+		int attributeCount = tupleDescriptor->natts;
+		Index varNumber = 1;
+
+		AttrNumber varAttributeNum = 0;
+		for (varAttributeNum = 1; varAttributeNum <= attributeCount; varAttributeNum++)
+		{
+			Form_pg_attribute attribute = tupleDescriptor->attrs[varAttributeNum - 1];
+			Var *column = NULL;
+
+			if (attribute->attisdropped == true)
+			{
+				continue;
+			}
+
+			column = makeVar(varNumber, varAttributeNum, attribute->atttypid,
+							 attribute->atttypmod, attribute->attcollation, 0);
+
+			uniqueColumnList = lappend(uniqueColumnList, column);
+		}
+	}
+
+	targetList = TargetEntryList(uniqueColumnList);
 
 	filterQuery = makeNode(Query);
 	filterQuery->commandType = CMD_SELECT;
@@ -871,6 +914,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
+	distributedPlan->plan.targetlist = query->targetList;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
