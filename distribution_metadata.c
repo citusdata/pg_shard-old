@@ -202,7 +202,9 @@ LoadShardInterval(int64 shardId)
 	ShardInterval *shardInterval = NULL;
 	Datum minValue = 0;
 	Datum maxValue = 0;
-	Var *partitionColumn = NULL;
+	char partitionType = '\0';
+	Oid intervalTypeId = InvalidOid;
+	int32 intervalTypeMod = -1;
 	Oid inputFunctionId = InvalidOid;
 	Oid typeIoParam = InvalidOid;
 	Oid relationId = InvalidOid;
@@ -213,21 +215,32 @@ LoadShardInterval(int64 shardId)
 	LoadShardIntervalRow(shardId, &relationId, &minValueString, &maxValueString);
 
 	/* then find min/max values' actual types */
-	partitionColumn = PartitionColumn(relationId);
-	getTypeInputInfo(partitionColumn->vartype, &inputFunctionId, &typeIoParam);
+	partitionType = PartitionType(relationId);
+	if (partitionType == HASH_PARTITION_TYPE)
+	{
+		intervalTypeId = INT4OID;
+	}
+	else
+	{
+		Var *partitionColumn = PartitionColumn(relationId);
+		intervalTypeId = partitionColumn->vartype;
+		intervalTypeId = partitionColumn->vartypmod;
+	}
+
+	getTypeInputInfo(intervalTypeId, &inputFunctionId, &typeIoParam);
 
 	/* finally convert min/max values to their actual types */
 	minValue = OidInputFunctionCall(inputFunctionId, minValueString,
-									typeIoParam, partitionColumn->vartypmod);
+									typeIoParam, intervalTypeMod);
 	maxValue = OidInputFunctionCall(inputFunctionId, maxValueString,
-									typeIoParam, partitionColumn->vartypmod);
+									typeIoParam, intervalTypeMod);
 
 	shardInterval = (ShardInterval *) palloc0(sizeof(ShardInterval));
 	shardInterval->id = shardId;
 	shardInterval->relationId = relationId;
 	shardInterval->minValue = minValue;
 	shardInterval->maxValue = maxValue;
-	shardInterval->valueTypeId = INT4OID;	/* hardcoded for hash ranges */
+	shardInterval->valueTypeId = intervalTypeId;
 
 	return shardInterval;
 }
