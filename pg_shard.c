@@ -32,6 +32,7 @@
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "access/xact.h"
+#include "catalog/pg_type.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
@@ -377,7 +378,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		else if (operation == CMD_SELECT)
 		{
 			DestReceiver *destination = queryDesc->dest;
-			List *targetList = plan->originalPlan->targetlist;
+			List *targetList = plan->plan.targetlist;
 			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
 			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
@@ -808,41 +809,31 @@ FilterAndProjectQuery(Query *query)
 										placeHolderBehavior);
 	columnList = list_union(selectColumnList, projectColumnList);
 
-	/* de-dupe the columns so we have a unique list */
+	/*
+	 * list_union() filters duplicates, but only between the lists. As an
+	 * example, if we have a where clause like (where order_id = 1 OR order_id = 2),
+	 * we end up with two order_id columns. We therefore de-dupe the columns
+	 * here to have a unique list.
+	 */
 	foreach(columnCell, columnList)
 	{
 		Var *column = (Var *) lfirst(columnCell);
+
 		uniqueColumnList = list_append_unique(uniqueColumnList, column);
 	}
 
 	/*
-	 * If the column list is NIL (e.g. SELECT count(*)) default to selecting all
-	 * columns.
+	 * If the column list is NIL (e.g. SELECT count(*)), add a NULL constant,
+	 * which translates to (SELECT NULL FROM...). postgres_fdw generates a
+	 * similar string when no columns are selected.
 	 */
 	if (uniqueColumnList == NIL)
 	{
-		Oid distributedTableId = ExtractFirstDistributedTableId(query);
-		Relation distributedTable = RelationIdGetRelation(distributedTableId);
-		TupleDesc tupleDescriptor = distributedTable->rd_att;
-		int attributeCount = tupleDescriptor->natts;
-		Index varNumber = 1;
+		/* values for NULL const taken from parse_node.c */
+		Const *nullConst = makeConst(UNKNOWNOID, -1, InvalidOid, -2,
+									 (Datum) 0, true, false);
 
-		AttrNumber varAttributeNum = 0;
-		for (varAttributeNum = 1; varAttributeNum <= attributeCount; varAttributeNum++)
-		{
-			Form_pg_attribute attribute = tupleDescriptor->attrs[varAttributeNum - 1];
-			Var *column = NULL;
-
-			if (attribute->attisdropped == true)
-			{
-				continue;
-			}
-
-			column = makeVar(varNumber, varAttributeNum, attribute->atttypid,
-							 attribute->atttypmod, attribute->attcollation, 0);
-
-			uniqueColumnList = lappend(uniqueColumnList, column);
-		}
+		uniqueColumnList = lappend(uniqueColumnList, nullConst);
 	}
 
 	targetList = TargetEntryList(uniqueColumnList);
