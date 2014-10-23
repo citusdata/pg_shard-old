@@ -37,7 +37,7 @@
 #include "executor/executor.h"
 #include "executor/instrument.h"
 #include "nodes/execnodes.h"
-#include "nodes/makeFuncs.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
@@ -76,7 +76,7 @@ static List * QueryRestrictList(Query *query);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
-static Query * FilterAndProjectQuery(Query *query);
+static Query * RowAndColumnFilterQuery(Query *query);
 static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
@@ -174,7 +174,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		 */
 		if ((query->commandType == CMD_SELECT) && (list_length(queryShardList) > 1))
 		{
-			distributedQuery = FilterAndProjectQuery(distributedQuery);
+			distributedQuery = RowAndColumnFilterQuery(distributedQuery);
 		}
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
@@ -378,7 +378,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		else if (operation == CMD_SELECT)
 		{
 			DestReceiver *destination = queryDesc->dest;
-			List *targetList = plan->plan.targetlist;
+			List *targetList = plan->targetList;
 			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
 			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
@@ -773,17 +773,17 @@ ExtractFromExpressionWalker(Node *node, List **qualifierList)
 
 
 /*
- * FilterAndProjectQuery builds a query which contains the filter clauses from
- * the and also only selects columns needed for the original query, which can
- * then be pushed down to the worker nodes.
+ * RowAndColumnFilterQuery builds a query which contains the filter clauses from
+ * the original query and also only selects columns needed for the original
+ * query. This new query can then be pushed down to the worker nodes.
  */
 static Query *
-FilterAndProjectQuery(Query *query)
+RowAndColumnFilterQuery(Query *query)
 {
 	Query *filterQuery = NULL;
 	List *rangeTableList = NIL;
 	List *whereClauseList = NIL;
-	List *selectColumnList = NIL;
+	List *whereClauseColumnList = NIL;
 	List *projectColumnList = NIL;
 	List *columnList = NIL;
 	ListCell *columnCell = NULL;
@@ -802,18 +802,17 @@ FilterAndProjectQuery(Query *query)
 	fromExpr->quals = (Node *) make_ands_explicit((List *) whereClauseList);
 	fromExpr->fromlist = QueryFromList(rangeTableList);
 
-	/* build the target list */
-	selectColumnList = pull_var_clause((Node *) fromExpr, aggregateBehavior,
-									   placeHolderBehavior);
+	/* extract columns from both the where and projection clauses */
+	whereClauseColumnList = pull_var_clause((Node *) fromExpr, aggregateBehavior,
+											placeHolderBehavior);
 	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
 										placeHolderBehavior);
-	columnList = list_union(selectColumnList, projectColumnList);
+	columnList = list_union(whereClauseColumnList, projectColumnList);
 
 	/*
-	 * list_union() filters duplicates, but only between the lists. As an
-	 * example, if we have a where clause like (where order_id = 1 OR order_id = 2),
-	 * we end up with two order_id columns. We therefore de-dupe the columns
-	 * here to have a unique list.
+	 * list_union() filters duplicates, but only between the lists. For example,
+	 * if we have a where clause like (where order_id = 1 OR order_id = 2), we
+	 * end up with two order_id columns. We therefore de-dupe the columns here.
 	 */
 	foreach(columnCell, columnList)
 	{
@@ -823,10 +822,10 @@ FilterAndProjectQuery(Query *query)
 	}
 
 	/*
-	 * If the column list is NIL (e.g. SELECT count(*)), add a NULL constant,
-	 * which translates to (SELECT NULL FROM...). postgres_fdw generates a
-	 * similar string when no columns are selected.
-	 */
+     * If the query is a simple "SELECT count(*)", add a NULL constant. This
+     * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
+     * similar string when no columns are selected.
+     */
 	if (uniqueColumnList == NIL)
 	{
 		/* values for NULL const taken from parse_node.c */
@@ -905,7 +904,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
-	distributedPlan->plan.targetlist = query->targetList;
+	distributedPlan->targetList = query->targetList;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
@@ -920,12 +919,13 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		 * before we deparse the query. This applies to SELECT, UPDATE and
 		 * DELETE statements.
 		 */
-		if (query->jointree && query->jointree->quals)
+		FromExpr *joinTree = query->jointree;
+		if ((joinTree != NULL) && (joinTree->quals != NULL))
 		{
-			Node *whereClause = query->jointree->quals;
+			Node *whereClause = joinTree->quals;
 			if (IsA(whereClause, List))
 			{
-				query->jointree->quals = (Node *) make_ands_explicit((List *) whereClause);
+				joinTree->quals = (Node *) make_ands_explicit((List *) whereClause);
 			}
 		}
 

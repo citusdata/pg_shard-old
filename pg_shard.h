@@ -54,6 +54,7 @@ typedef struct DistributedPlan
 	Plan plan;			/* this is a "subclass" of Plan */
 	Plan *originalPlan;	/* we save a copy of standard_planner's output */
 	List *taskList;		/* list of tasks to run as part of this plan */
+	List *targetList;   /* copy of the target list for remote SELECT queries only */
 } DistributedPlan;
 
 
