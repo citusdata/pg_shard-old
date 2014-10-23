@@ -32,10 +32,12 @@
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "access/xact.h"
+#include "catalog/pg_type.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
 #include "nodes/execnodes.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "nodes/params.h"
@@ -45,6 +47,7 @@
 #include "nodes/primnodes.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
+#include "optimizer/var.h"
 #include "parser/parsetree.h"
 #include "storage/lock.h"
 #include "utils/builtins.h"
@@ -52,6 +55,7 @@
 #include "utils/errcodes.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
+#include "utils/rel.h"
 
 
 /* controls use of locks to enforce safe commutativity */
@@ -70,11 +74,14 @@ static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
-static DistributedPlan * PlanDistributedQuery(Query *query);
+static List * DistributedQueryShardList(Query *query);
 static List * QueryRestrictList(Query *query);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
 static bool ExtractFromExpressionWalker(Node *node, List **qualifierList);
+static Query * RowAndColumnFilterQuery(Query *query);
+static List * QueryFromList(List *rangeTableList);
+static List * TargetEntryList(List *expressionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, DestReceiver *destination,
@@ -159,6 +166,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 	{
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
+		List *queryShardList = NIL;
 
 		/* call standard planner first to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
@@ -166,7 +174,20 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		ErrorIfQueryNotSupported(distributedQuery);
 
-		distributedPlan = PlanDistributedQuery(distributedQuery);
+		/* compute the list of shards this query needs to access */
+		queryShardList = DistributedQueryShardList(distributedQuery);
+
+		/*
+		 * If a select query touches multiple shards, we don't push down the
+		 * query as-is, and instead only push down the filter clauses and select
+		 * needed columns.
+		 */
+		if ((query->commandType == CMD_SELECT) && (list_length(queryShardList) > 1))
+		{
+			distributedQuery = RowAndColumnFilterQuery(distributedQuery);
+		}
+
+		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
@@ -367,7 +388,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 		else if (operation == CMD_SELECT)
 		{
 			DestReceiver *destination = queryDesc->dest;
-			List *targetList = plan->originalPlan->targetlist;
+			List *targetList = plan->targetList;
 			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
 			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
@@ -548,15 +569,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 
 
 /*
- * PlanDistributedQuery is the main entry point when planning a query involving
- * a distributed table. The function prunes the shards for the table in the
- * query based on the query's restriction qualifiers, and then builds a
- * distributed plan with those shards.
+ * DistributedQueryShardList prunes the shards for the table in the query based
+ * on the query's restriction qualifiers, and returns this list.
  */
-static DistributedPlan *
-PlanDistributedQuery(Query *query)
+static List *
+DistributedQueryShardList(Query *query)
 {
-	DistributedPlan *distributedPlan = NULL;
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 
 	List *restrictClauseList = QueryRestrictList(query);
@@ -564,9 +582,7 @@ PlanDistributedQuery(Query *query)
 	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
 										   shardList);
 
-	distributedPlan = BuildDistributedPlan(query, prunedShardList);
-
-	return distributedPlan;
+	return prunedShardList;
 }
 
 
@@ -767,6 +783,127 @@ ExtractFromExpressionWalker(Node *node, List **qualifierList)
 
 
 /*
+ * RowAndColumnFilterQuery builds a query which contains the filter clauses from
+ * the original query and also only selects columns needed for the original
+ * query. This new query can then be pushed down to the worker nodes.
+ */
+static Query *
+RowAndColumnFilterQuery(Query *query)
+{
+	Query *filterQuery = NULL;
+	List *rangeTableList = NIL;
+	List *whereClauseList = NIL;
+	List *whereClauseColumnList = NIL;
+	List *projectColumnList = NIL;
+	List *columnList = NIL;
+	ListCell *columnCell = NULL;
+	List *uniqueColumnList = NIL;
+	List *targetList = NIL;
+	FromExpr *fromExpr = NULL;
+	PVCAggregateBehavior aggregateBehavior = PVC_RECURSE_AGGREGATES;
+	PVCPlaceHolderBehavior placeHolderBehavior = PVC_REJECT_PLACEHOLDERS;
+
+	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
+	Assert(list_length(rangeTableList) == 1);
+
+	/* build the where-clause expression */
+	whereClauseList = QueryRestrictList(query);
+	fromExpr = makeNode(FromExpr);
+	fromExpr->quals = (Node *) make_ands_explicit((List *) whereClauseList);
+	fromExpr->fromlist = QueryFromList(rangeTableList);
+
+	/* extract columns from both the where and projection clauses */
+	whereClauseColumnList = pull_var_clause((Node *) fromExpr, aggregateBehavior,
+											placeHolderBehavior);
+	projectColumnList = pull_var_clause((Node *) query->targetList, aggregateBehavior,
+										placeHolderBehavior);
+	columnList = list_union(whereClauseColumnList, projectColumnList);
+
+	/*
+	 * list_union() filters duplicates, but only between the lists. For example,
+	 * if we have a where clause like (where order_id = 1 OR order_id = 2), we
+	 * end up with two order_id columns. We therefore de-dupe the columns here.
+	 */
+	foreach(columnCell, columnList)
+	{
+		Var *column = (Var *) lfirst(columnCell);
+
+		uniqueColumnList = list_append_unique(uniqueColumnList, column);
+	}
+
+	/*
+     * If the query is a simple "SELECT count(*)", add a NULL constant. This
+     * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
+     * similar string when no columns are selected.
+     */
+	if (uniqueColumnList == NIL)
+	{
+		/* values for NULL const taken from parse_node.c */
+		Const *nullConst = makeConst(UNKNOWNOID, -1, InvalidOid, -2,
+									 (Datum) 0, true, false);
+
+		uniqueColumnList = lappend(uniqueColumnList, nullConst);
+	}
+
+	targetList = TargetEntryList(uniqueColumnList);
+
+	filterQuery = makeNode(Query);
+	filterQuery->commandType = CMD_SELECT;
+	filterQuery->rtable = rangeTableList;
+	filterQuery->targetList = targetList;
+	filterQuery->jointree = fromExpr;
+
+	return filterQuery;
+}
+
+
+/*
+ * QueryFromList creates the from list construct that is used for building the
+ * query's join tree. The function creates the from list by making a range table
+ * reference for each entry in the given range table list.
+ */
+static List *
+QueryFromList(List *rangeTableList)
+{
+	List *fromList = NIL;
+	Index rangeTableIndex = 1;
+	uint32 rangeTableCount = (uint32) list_length(rangeTableList);
+
+	for (rangeTableIndex = 1; rangeTableIndex <= rangeTableCount; rangeTableIndex++)
+	{
+		RangeTblRef *rangeTableReference = makeNode(RangeTblRef);
+		rangeTableReference->rtindex = rangeTableIndex;
+
+		fromList = lappend(fromList, rangeTableReference);
+	}
+
+	return fromList;
+}
+
+
+/*
+ * TargetEntryList creates a target entry for each expression in the given list,
+ * and returns the newly created target entries in a list.
+ */
+static List *
+TargetEntryList(List *expressionList)
+{
+	List *targetEntryList = NIL;
+	ListCell *expressionCell = NULL;
+
+	foreach(expressionCell, expressionList)
+	{
+		Expr *expression = (Expr *) lfirst(expressionCell);
+
+		TargetEntry *targetEntry = makeTargetEntry(expression, -1, NULL, false);
+		targetEntryList = lappend(targetEntryList, targetEntry);
+	}
+
+	return targetEntryList;
+}
+
+
+/*
  * BuildDistributedPlan simply creates the DistributedPlan instance from the
  * provided query and shard interval list.
  */
@@ -777,6 +914,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 	List *taskList = NIL;
 	DistributedPlan *distributedPlan = palloc0(sizeof(DistributedPlan));
 	distributedPlan->plan.type = (NodeTag) T_DistributedPlan;
+	distributedPlan->targetList = query->targetList;
 
 	foreach(shardIntervalCell, shardIntervalList)
 	{
@@ -788,16 +926,16 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 
 		/* 
 		 * Convert the qualifiers to an explicitly and'd clause, which is needed
-		 * before we deparse the query. XXX: Since this only applies to
-		 * SELECT's, we should move this bit of logic to a SELECT-specific
-		 * planning function.
+		 * before we deparse the query. This applies to SELECT, UPDATE and
+		 * DELETE statements.
 		 */
-		if (query->jointree && query->jointree->quals)
+		FromExpr *joinTree = query->jointree;
+		if ((joinTree != NULL) && (joinTree->quals != NULL))
 		{
-			Node *whereClause = query->jointree->quals;
+			Node *whereClause = joinTree->quals;
 			if (IsA(whereClause, List))
 			{
-				query->jointree->quals = (Node *) make_ands_explicit((List *) whereClause);
+				joinTree->quals = (Node *) make_ands_explicit((List *) whereClause);
 			}
 		}
 
