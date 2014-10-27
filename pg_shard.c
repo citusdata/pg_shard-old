@@ -86,8 +86,9 @@ static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalL
 static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, DestReceiver *destination,
 									 TupleDesc tupleDescriptor);
-static bool ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
-							   TextRow **rowArray, uint32 *rowCount, uint32 *columnCount);
+static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
+static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
+							 Tuplestorestate *tupleStore);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
@@ -964,16 +965,12 @@ static void
 ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState,
 						 DestReceiver *destination, TupleDesc tupleDescriptor)
 {
-	uint32 rowIndex = 0;
-	uint32 rowCount = 0;
-	uint32 columnCount = 0;
-	uint32 expectedColumnCount = 0;
-	TextRow *rowArray = NULL;
 	Task *task = NULL;
 	List *taskPlacementList = NIL;
 	ListCell *taskPlacementCell = NULL;
+	Tuplestorestate *tupleStore = NULL;
+	bool resultsReceived = false;
 	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
-	AttInMetadata *attributeInputMetadata = NULL;
 
 	List *taskList = distributedPlan->taskList;
 	if (list_length(taskList) != 1)
@@ -991,41 +988,50 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	foreach(taskPlacementCell, taskPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-		bool queryOK = ExecuteRemoteQuery(taskPlacement->nodeName, taskPlacement->nodePort,
-										  task->queryString,
-										  &rowArray, &rowCount, &columnCount);
-		if (queryOK)
+		bool queryOK = false;
+		bool storedOK = false;
+
+		PGconn *connection = GetConnection(taskPlacement->nodeName,
+										   taskPlacement->nodePort);
+		if (connection == NULL)
 		{
-			Assert(rowArray != NULL);
+			continue;
+		}
+
+		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
+		if (!queryOK)
+		{
+			PurgeConnection(connection);
+			continue;
+		}
+
+		tupleStore = tuplestore_begin_heap(false, false, work_mem);
+		storedOK = StoreQueryResult(connection, tupleDescriptor, tupleStore);
+		if (storedOK)
+		{
+			resultsReceived = true;
 			break;
+		}
+		else
+		{
+			tuplestore_end(tupleStore);
+			PurgeConnection(connection);
+			continue;
 		}
 	}
 
-	if (rowArray == NULL)
+	/* check if the query ran successfully on either placement */
+	if (resultsReceived == false)
 	{
 		ereport(ERROR, (errmsg("unable to execute remote query")));
 	}
 
-	expectedColumnCount = tupleDescriptor->natts;
-	if (columnCount != expectedColumnCount)
-	{
-		ereport(ERROR, (errmsg("sql query returned unexpected number of fields")));
-	}
-
-	/* initialize the attribute input information */
-	attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
-
 	/* startup the tuple receiver */
 	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
 
-	/* now iterate over each row and send the tuples to the given destination */
-	for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
+	/* iterate over each tuple in the store and send them to the given destination */
+	while (tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot) == true)
 	{
-		TextRow textRow = rowArray[rowIndex];
-		HeapTuple heapTuple = BuildTupleFromCStrings(attributeInputMetadata, textRow);
-
-		ExecStoreTuple(heapTuple, tupleTableSlot, InvalidBuffer, false);
-
 		(*destination->receiveSlot) (tupleTableSlot, destination);
 		executorState->es_processed++;
 
@@ -1034,63 +1040,108 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 
 	/* shutdown the tuple receiver */
 	(*destination->rShutdown) (destination);
+	tuplestore_end(tupleStore);
 }
 
 
 /*
- * ExecuteRemoteQuery takes the given query and attempts to execute it on the
- * given node and port combination. If the query succeeds, the function deep
- * copies the resulting rows into the provided rowArray argument, and also sets
- * the row and column counts. The reason we deep copy the results is because the
- * PGresult object is free'd before we return from the function.
+ * SendQueryInSingleRowMode sends the given query on the connection in an
+ * asynchronous way. The function also sets the single-row mode on the
+ * connection so that we receive results a row at a time.
  */
 static bool
-ExecuteRemoteQuery(char *nodeName, int32 nodePort, StringInfo query,
-				   TextRow **rowArray, uint32 *rowCount, uint32 *columnCount)
+SendQueryInSingleRowMode(PGconn *connection, StringInfo query)
+{
+	int querySent = 0;
+	int singleRowMode = 0;
+
+	querySent = PQsendQuery(connection, query->data);
+	if (querySent == 0)
+	{
+		char *errorMessage = PQerrorMessage(connection);
+		ereport(WARNING, (errmsg("could not send remote query \"%s\"", query->data),
+						  errdetail("Client error: %s", errorMessage)));
+		return false;
+	}
+
+	/* immediately set the single-row mode */
+	singleRowMode = PQsetSingleRowMode(connection);
+	if (singleRowMode == 0)
+	{
+		ereport(WARNING, (errmsg("unable to set single-row mode on connection")));
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * StoreQueryResult gets the query results from the given connection, builds
+ * tuples from the results and stores them in the given tuple-store. If the
+ * function is unable to do any of the above, it returns false.
+ * Note that the function assumes the following two things:
+ * (1) The query has already been sent on the connection by the caller.
+ * (2) The tuplestore has been initialized by the caller.
+ */
+static bool
+StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
+				 Tuplestorestate *tupleStore)
 {
 	PGresult *result = NULL;
-	uint32 rowIndex = 0;
-	uint32 columnIndex = 0;
+	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 
-	PGconn *connection = GetConnection(nodeName, nodePort);
-	if (connection == NULL)
+	Assert(tupleStore != NULL);
+
+	result = PQgetResult(connection);
+	while (result != NULL)
 	{
-		ereport(WARNING, (errmsg("could not connect to \"%s:%u\"",
-								 nodeName, nodePort)));
-		return false;
-	}
+		uint32 rowIndex = 0;
+		uint32 columnIndex = 0;
+		uint32 rowCount = 0;
+		uint32 columnCount = 0;
+		uint32 expectedColumnCount = tupleDescriptor->natts;
+		char **rowValues = NULL;
 
-	/* now execute the query on the remote node */
-	result = PQexec(connection, query->data);
-	if (PQresultStatus(result) != PGRES_TUPLES_OK)
-	{
-		ReportRemoteError(connection, result);
-		return false;
-	}
-
-	(*rowCount) = PQntuples(result);
-	(*columnCount) = PQnfields(result);
-	(*rowArray) = (TextRow *) palloc0((*rowCount) * sizeof(TextRow));
-
-	for (rowIndex = 0; rowIndex < (*rowCount); rowIndex++)
-	{
-		(*rowArray)[rowIndex] = (TextRow) palloc0((*columnCount) * sizeof(char *));
-		for (columnIndex = 0; columnIndex < (*columnCount); columnIndex++)
+		ExecStatusType resultStatus = PQresultStatus(result);
+		if ((resultStatus != PGRES_SINGLE_TUPLE) &&
+			(resultStatus != PGRES_TUPLES_OK))
 		{
-			if (!PQgetisnull(result, rowIndex, columnIndex))
-			{
-				/* deep copy the value into our result array */
-				char *rowValue = PQgetvalue(result, rowIndex, columnIndex);
-				(*rowArray)[rowIndex][columnIndex] = pstrdup(rowValue);
-			}
-			else
-			{
-				(*rowArray)[rowIndex][columnIndex] = NULL;
-			}
+			ereport(WARNING, (errmsg("unexpected result from remote connection")));
+			return false;
 		}
-	}
 
-	PQclear(result);
+		rowCount = PQntuples(result);
+		columnCount = PQnfields(result);
+		if (columnCount != expectedColumnCount)
+		{
+			ereport(ERROR, (errmsg("received unexpected number of columns from "
+								   "remote query")));
+		}
+
+		rowValues = (char **) palloc0(columnCount * sizeof(char *));
+		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
+		{
+			HeapTuple heapTuple = NULL;
+			for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
+			{
+				if (PQgetisnull(result, rowIndex, columnIndex))
+				{
+					rowValues[columnIndex] = NULL;
+				}
+				else
+				{
+					rowValues[columnIndex] = PQgetvalue(result, rowIndex, columnIndex);
+				}
+			}
+
+			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, rowValues);
+			tuplestore_puttuple(tupleStore, heapTuple);
+		}
+
+		PQclear(result);
+		result = PQgetResult(connection);
+	}
 
 	return true;
 }
