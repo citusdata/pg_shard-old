@@ -970,7 +970,7 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	ListCell *taskPlacementCell = NULL;
 	Tuplestorestate *tupleStore = NULL;
 	bool resultsReceived = false;
-	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
+	TupleTableSlot *tupleTableSlot = NULL;
 
 	List *taskList = distributedPlan->taskList;
 	if (list_length(taskList) != 1)
@@ -988,11 +988,12 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	foreach(taskPlacementCell, taskPlacementList)
 	{
 		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		char *nodeName = taskPlacement->nodeName;
+		int32 nodePort = taskPlacement->nodePort;
 		bool queryOK = false;
 		bool storedOK = false;
 
-		PGconn *connection = GetConnection(taskPlacement->nodeName,
-										   taskPlacement->nodePort);
+		PGconn *connection = GetConnection(nodeName, nodePort);
 		if (connection == NULL)
 		{
 			continue;
@@ -1016,18 +1017,19 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 		{
 			tuplestore_end(tupleStore);
 			PurgeConnection(connection);
-			continue;
 		}
 	}
 
 	/* check if the query ran successfully on either placement */
-	if (resultsReceived == false)
+	if (!resultsReceived)
 	{
-		ereport(ERROR, (errmsg("unable to execute remote query")));
+		ereport(ERROR, (errmsg("could not receive query results")));
 	}
 
 	/* startup the tuple receiver */
 	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
+
+	tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
 
 	/* iterate over each tuple in the store and send them to the given destination */
 	while (tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot) == true)
