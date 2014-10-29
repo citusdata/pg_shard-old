@@ -1026,14 +1026,21 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 		ereport(ERROR, (errmsg("could not receive query results")));
 	}
 
+	tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
+
 	/* startup the tuple receiver */
 	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
 
-	tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
-
 	/* iterate over each tuple in the store and send them to the given destination */
-	while (tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot) == true)
+	for (;;)
 	{
+		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
+
+		if (!nextTuple)
+		{
+			break;
+		}
+
 		(*destination->receiveSlot) (tupleTableSlot, destination);
 		executorState->es_processed++;
 
@@ -1042,6 +1049,9 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 
 	/* shutdown the tuple receiver */
 	(*destination->rShutdown) (destination);
+
+	ExecDropSingleTupleTableSlot(tupleTableSlot);
+
 	tuplestore_end(tupleStore);
 }
 
@@ -1060,17 +1070,14 @@ SendQueryInSingleRowMode(PGconn *connection, StringInfo query)
 	querySent = PQsendQuery(connection, query->data);
 	if (querySent == 0)
 	{
-		char *errorMessage = PQerrorMessage(connection);
-		ereport(WARNING, (errmsg("could not send remote query \"%s\"", query->data),
-						  errdetail("Client error: %s", errorMessage)));
+		ReportRemoteError(connection, NULL);
 		return false;
 	}
 
-	/* immediately set the single-row mode */
 	singleRowMode = PQsetSingleRowMode(connection);
 	if (singleRowMode == 0)
 	{
-		ereport(WARNING, (errmsg("unable to set single-row mode on connection")));
+		ReportRemoteError(connection, NULL);
 		return false;
 	}
 
@@ -1090,26 +1097,34 @@ static bool
 StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 				 Tuplestorestate *tupleStore)
 {
-	PGresult *result = NULL;
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
+	uint32 expectedColumnCount = tupleDescriptor->natts;
+
+	/* allocate memory for the column values */
+	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
 
 	Assert(tupleStore != NULL);
 
-	result = PQgetResult(connection);
-	while (result != NULL)
+	for (;;)
 	{
 		uint32 rowIndex = 0;
 		uint32 columnIndex = 0;
 		uint32 rowCount = 0;
 		uint32 columnCount = 0;
-		uint32 expectedColumnCount = tupleDescriptor->natts;
-		char **rowValues = NULL;
+		ExecStatusType resultStatus = 0;
 
-		ExecStatusType resultStatus = PQresultStatus(result);
-		if ((resultStatus != PGRES_SINGLE_TUPLE) &&
-			(resultStatus != PGRES_TUPLES_OK))
+		PGresult *result = PQgetResult(connection);
+		if (result == NULL)
 		{
-			ereport(WARNING, (errmsg("unexpected result from remote connection")));
+			break;
+		}
+
+		resultStatus = PQresultStatus(result);
+		if ((resultStatus != PGRES_SINGLE_TUPLE) && (resultStatus != PGRES_TUPLES_OK))
+		{
+			ReportRemoteError(connection, result);
+			PQclear(result);
+
 			return false;
 		}
 
@@ -1121,29 +1136,31 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 								   "remote query")));
 		}
 
-		rowValues = (char **) palloc0(columnCount * sizeof(char *));
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
 			HeapTuple heapTuple = NULL;
+			memset(columnArray, 0, columnCount * sizeof(char *));
+
 			for (columnIndex = 0; columnIndex < columnCount; columnIndex++)
 			{
 				if (PQgetisnull(result, rowIndex, columnIndex))
 				{
-					rowValues[columnIndex] = NULL;
+					columnArray[columnIndex] = NULL;
 				}
 				else
 				{
-					rowValues[columnIndex] = PQgetvalue(result, rowIndex, columnIndex);
+					columnArray[columnIndex] = PQgetvalue(result, rowIndex, columnIndex);
 				}
 			}
 
-			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, rowValues);
+			heapTuple = BuildTupleFromCStrings(attributeInputMetadata, columnArray);
 			tuplestore_puttuple(tupleStore, heapTuple);
 		}
 
 		PQclear(result);
-		result = PQgetResult(connection);
 	}
+
+	pfree(columnArray);
 
 	return true;
 }
