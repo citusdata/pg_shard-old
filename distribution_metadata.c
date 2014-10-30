@@ -224,7 +224,7 @@ LoadShardInterval(int64 shardId)
 	{
 		Var *partitionColumn = PartitionColumn(relationId);
 		intervalTypeId = partitionColumn->vartype;
-		intervalTypeId = partitionColumn->vartypmod;
+		intervalTypeMod = partitionColumn->vartypmod;
 	}
 
 	getTypeInputInfo(intervalTypeId, &inputFunctionId, &typeIoParam);
