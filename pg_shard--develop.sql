@@ -61,3 +61,6 @@ CREATE FUNCTION create_shards(tablename text, shardcount integer,
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
+
+-- create sequence for unique select jobs
+CREATE SEQUENCE job_id_sequence;

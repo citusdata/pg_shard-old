@@ -21,6 +21,9 @@
 #include "lib/stringinfo.h"
 
 
+/* sequence to distinguish between different queries */
+#define JOB_ID_SEQUENCE_NAME "job_id_sequence"
+
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of
  * queries interacting with distributed tables.
