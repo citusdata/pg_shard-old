@@ -17,7 +17,6 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
-#include "miscadmin.h"
 #include "postgres_ext.h"
 
 #include "nodes/pg_list.h"

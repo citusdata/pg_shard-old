@@ -12,22 +12,29 @@
  */
 
 #include "postgres.h"
+#include "c.h"
 #include "fmgr.h"
+#include "libpq-fe.h"
+#include "miscadmin.h"
 #include "pg_config.h"
-
-#include <unistd.h>
+#include "postgres_ext.h"
 
 #include "repair_shards.h"
 #include "connection.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
 
-#include "access/htup.h"
+#include <string.h>
+
 #include "access/htup_details.h"
-#include "access/xact.h"
+#include "access/htup.h"
 #include "catalog/pg_class.h"
+#include "lib/stringinfo.h"
+#include "nodes/pg_list.h"
 #include "postmaster/postmaster.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
+#include "utils/elog.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
 

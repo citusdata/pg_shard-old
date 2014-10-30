@@ -15,9 +15,7 @@
 #define PG_SHARD_REPAIR_SHARDS_H
 
 #include "postgres.h"
-#include "c.h"
 #include "fmgr.h"
-#include "postgres_ext.h"
 
 
 extern Datum change_placement_state(PG_FUNCTION_ARGS);
