@@ -1031,11 +1031,10 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	/* startup the tuple receiver */
 	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
 
-	/* iterate over each tuple in the store and send them to the given destination */
+	/* iterate over tuples in tuple store, and send them to destination */
 	for (;;)
 	{
 		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
-
 		if (!nextTuple)
 		{
 			break;
@@ -1088,10 +1087,9 @@ SendQueryInSingleRowMode(PGconn *connection, StringInfo query)
 /*
  * StoreQueryResult gets the query results from the given connection, builds
  * tuples from the results and stores them in the given tuple-store. If the
- * function is unable to do any of the above, it returns false.
- * Note that the function assumes the following two things:
- * (1) The query has already been sent on the connection by the caller.
- * (2) The tuplestore has been initialized by the caller.
+ * function can't receive query results, it returns false. Note that this
+ * function assumes the query has already been sent on the connection and the
+ * tuplestore has earlier been initialized.
  */
 static bool
 StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
@@ -1099,8 +1097,6 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 {
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
-
-	/* allocate memory for the column values */
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
 
 	Assert(tupleStore != NULL);
@@ -1130,11 +1126,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 
 		rowCount = PQntuples(result);
 		columnCount = PQnfields(result);
-		if (columnCount != expectedColumnCount)
-		{
-			ereport(ERROR, (errmsg("received unexpected number of columns from "
-								   "remote query")));
-		}
+		Assert(columnCount == expectedColumnCount)
 
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
