@@ -213,6 +213,8 @@ ChangeAndCommitPlacementState(int64 placementId, ShardState newState)
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ReportRemoteError(loopback, result);
+		PQclear(result);
+
 		ereport(ERROR, (errmsg("could not modify placement state")));
 	}
 
@@ -222,6 +224,7 @@ ChangeAndCommitPlacementState(int64 placementId, ShardState newState)
 	stateString = PQgetvalue(result, 0, 0);
 
 	prevState = (ShardState) pg_atoi(stateString, sizeof(int32), 0);
+	PQclear(result);
 
 	return prevState;
 }
