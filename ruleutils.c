@@ -389,7 +389,6 @@ static Node *processIndirection(Node *node, deparse_context *context,
 				   bool printit);
 static void printSubscripts(ArrayRef *aref, deparse_context *context);
 static char *get_relation_name(Oid relid);
-static char *generate_shard_name(Oid relid, int64 shardid, List *namespaces);
 static char *generate_relation_name(Oid relid, List *namespaces);
 static char *generate_function_name(Oid funcid, int nargs,
 					   List *argnames, Oid *argtypes,
@@ -2699,7 +2698,7 @@ get_insert_query_def(Query *query, deparse_context *context)
 		appendStringInfoChar(buf, ' ');
 	}
 	appendStringInfo(buf, "INSERT INTO %s ",
-					 generate_shard_name(rte->relid, context->shardid, NIL));
+					 generate_shard_name(rte->relid, context->shardid));
 
 	/*
 	 * Add the insert-column-names list.  To handle indirection properly, we
@@ -2819,7 +2818,7 @@ get_update_query_def(Query *query, deparse_context *context)
 	}
 	appendStringInfo(buf, "UPDATE %s%s",
 					 only_marker(rte),
-					 generate_shard_name(rte->relid, context->shardid, NIL));
+					 generate_shard_name(rte->relid, context->shardid));
 	if (rte->alias != NULL)
 		appendStringInfo(buf, " %s",
 						 quote_identifier(rte->alias->aliasname));
@@ -2903,7 +2902,7 @@ get_delete_query_def(Query *query, deparse_context *context)
 	}
 	appendStringInfo(buf, "DELETE FROM %s%s",
 					 only_marker(rte),
-					 generate_shard_name(rte->relid, context->shardid, NIL));
+					 generate_shard_name(rte->relid, context->shardid));
 	if (rte->alias != NULL)
 		appendStringInfo(buf, " %s",
 						 quote_identifier(rte->alias->aliasname));
@@ -5811,7 +5810,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				/* Normal relation RTE */
 				appendStringInfo(buf, "%s%s",
 								 only_marker(rte),
-								 generate_shard_name(rte->relid, context->shardid, NIL));
+								 generate_shard_name(rte->relid, context->shardid));
 				break;
 			case RTE_SUBQUERY:
 				/* Subquery RTE */
@@ -6193,8 +6192,8 @@ get_relation_name(Oid relid)
  * the relation and operates on that result to append a shard suffix. If the
  * provided shardid is non-positive, no suffix is appended.
  */
-static char *
-generate_shard_name(Oid relid, int64 shardid, List *namespaces)
+char *
+generate_shard_name(Oid relid, int64 shardid)
 {
 	char		   *relname;
 	int				len;
@@ -6203,7 +6202,7 @@ generate_shard_name(Oid relid, int64 shardid, List *namespaces)
 
 	initStringInfo(&buf);
 
-	relname = generate_relation_name(relid, namespaces);
+	relname = generate_relation_name(relid, NIL);
 
 	if (shardid <= 0)
 		return relname;

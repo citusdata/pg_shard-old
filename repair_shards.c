@@ -23,6 +23,7 @@
 #include "connection.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
+#include "ruleutils.h"
 
 #include <string.h>
 
@@ -40,14 +41,11 @@
 
 #define DROP_TABLE_COMMAND "DROP TABLE IF EXISTS %s"
 #define CHANGE_PLACEMENT_COMMAND "SELECT change_placement_state("INT64_FORMAT", %d)"
-#define SHARD_SUFFIX_SEPARATOR '_'
 
 
 /* local function forward declarations */
 static void AcquireRepairLock();
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
-static char * generate_shard_name(Oid relid, int64 shardid);
-static char * generate_relation_name(Oid relationId);
 static ShardState ChangeAndCommitPlacementState(int64 placementId, ShardState newState);
 static bool CopyDataFromFinalizedPlacement(ShardPlacement *shardPlacement, int64 shardId);
 
@@ -183,84 +181,6 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	ddlCommandList = lcons(workerDropQuery->data, ddlCommandList);
 
 	return ddlCommandList;
-}
-
-
-/*
- * TODO: Refactor
- *
- * generate_shard_name
- *		Compute the name to display for a particular shard of a given relation
- *
- * The function calls generate_relation_name to produce the standard name for
- * the relation and operates on that result to append a shard suffix. If the
- * provided shardid is non-positive, no suffix is appended.
- */
-static char *
-generate_shard_name(Oid relid, int64 shardid)
-{
-	char		   *relname;
-	int				len;
-	bool			quoted;
-	StringInfoData	buf;
-
-	initStringInfo(&buf);
-
-	relname = generate_relation_name(relid);
-
-	if (shardid <= 0)
-	{
-		return relname;
-	}
-
-	len = strlen(relname);
-	quoted = (relname[len - 1] == '"');
-
-	if (quoted)
-	{
-		relname[len - 1] = '\0';
-	}
-
-	appendStringInfo(&buf, "%s%c"INT64_FORMAT, relname, SHARD_SUFFIX_SEPARATOR, shardid);
-
-	if (quoted)
-	{
-		appendStringInfoChar(&buf, '"');
-	}
-
-	return buf.data;
-}
-
-
-/*
- * TODO: Refactor
- *
- * generate_relation_name generates a schema qualified relation name for the
- * given relationId. Note: This function is adapted from generate_relation_name
- * from postgres ruleutils.c.
- */
-static char *
-generate_relation_name(Oid relationId)
-{
-	HeapTuple	tp;
-	Form_pg_class reltup;
-	char	   *relname;
-	char	   *nspname;
-	char	   *result;
-
-	tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relationId));
-	if (!HeapTupleIsValid(tp))
-		elog(ERROR, "cache lookup failed for relation %u", relationId);
-	reltup = (Form_pg_class) GETSTRUCT(tp);
-	relname = NameStr(reltup->relname);
-
-	nspname = get_namespace_name(reltup->relnamespace);
-
-	result = quote_qualified_identifier(nspname, relname);
-
-	ReleaseSysCache(tp);
-
-	return result;
 }
 
 
