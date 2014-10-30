@@ -33,7 +33,6 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "commands/sequence.h"
-#include "nodes/bitmapset.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -43,53 +42,18 @@
 #include "utils/errcodes.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
-#include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
 #include "utils/tqual.h"
 
 
-typedef struct ShardListCacheEntry
-{
-	Oid distributedTableId;	/* cache key */
-	List *shardList;
-} ShardListCacheEntry;
-
-typedef struct PartitionCacheEntry
-{
-	Oid distributedTableId; /* cache key */
-	char partitionType;
-	char partitionColumnName[NAMEDATALEN];
-} PartitionCacheEntry;
-
-/*
- * ShardListHash memoizes lists of shard IDs for a particular table.
- */
-static HTAB *ShardListHash = NULL;
-
-/*
- * PartitionColumnHash memoizes names of partition columns. It begins
- * uninitialized. The first call to GetConnection triggers hash creation.
- */
-static HTAB *PartitionColumnHash = NULL;
-
-/*
- * ShardIntervalHash memoizes shard intervals. For funsies.
- */
-static HTAB *ShardIntervalHash = NULL;
-
 /* local function forward declarations */
-static List * LoadShardListInternal(Oid distributedTableId);
-static bool IsDistributedTableInternal(Oid tableId);
-static char * PartitionColumnName(Oid distributedTableId);
 static Var * ColumnNameToColumn(Oid relationId, char *columnName);
-static char PartitionTypeInternal(Oid distributedTableId);
 static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
 static ShardPlacement * TupleToShardPlacement(HeapTuple heapTuple,
 											  TupleDesc tupleDescriptor);
-static ShardInterval * LoadShardIntervalInternal(int64 shardId);
 
 
 /* declarations for dynamic loading */
@@ -170,52 +134,13 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 }
 
 
-List *
-LoadShardList(Oid distributedTableId)
-{
-	ShardListCacheEntry *shardListCacheEntry;
-	bool entryFound = false;
-
-	if (ShardListHash == NULL)
-	{
-		HASHCTL info;
-		int hashFlags = 0;
-
-		memset(&info, 0, sizeof(info));
-		info.keysize = sizeof(Oid);
-		info.entrysize = sizeof(ShardListCacheEntry);
-		info.hash = oid_hash;
-		info.hcxt = CacheMemoryContext;
-		hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-
-		ShardListHash = hash_create("pg_shard shard lists", 32, &info, hashFlags);
-	}
-
-	shardListCacheEntry = hash_search(ShardListHash, &distributedTableId,
-									  HASH_FIND, &entryFound);
-
-	if (!entryFound)
-	{
-		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
-		List *loadedShardList = LoadShardListInternal(distributedTableId);
-		MemoryContextSwitchTo(oldContext);
-
-		shardListCacheEntry = hash_search(ShardListHash, &distributedTableId,
-										  HASH_ENTER, &entryFound);
-		shardListCacheEntry->shardList = loadedShardList;
-	}
-
-	return shardListCacheEntry->shardList;
-}
-
-
 /*
  * LoadShardList returns a list of shard identifiers related for a given
  * distributed table. The function returns an empty list if no shards can be
  * found for the given relation.
  */
-static List *
-LoadShardListInternal(Oid distributedTableId)
+List *
+LoadShardList(Oid distributedTableId)
 {
 	List *shardList = NIL;
 	RangeVar *heapRangeVar = NULL;
