@@ -1126,7 +1126,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 
 		rowCount = PQntuples(result);
 		columnCount = PQnfields(result);
-		Assert(columnCount == expectedColumnCount)
+		Assert(columnCount == expectedColumnCount);
 
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
