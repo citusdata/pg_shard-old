@@ -16,6 +16,7 @@
 
 #include "c.h"
 #include "fmgr.h"
+#include "libpq-fe.h"
 #include "postgres_ext.h"
 
 #include "lib/stringinfo.h"
@@ -28,6 +29,7 @@ extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,
 									 List *ddlCommandList);
+extern bool WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList);
 
 
 #endif /* DDL_COMMANDS_H */

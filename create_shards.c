@@ -49,7 +49,6 @@ static Oid ResolveRelationId(text *relationName);
 static void CheckHashPartitionedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
-static bool WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
 static text * IntegerToText(int32 value);
 
@@ -413,7 +412,7 @@ CompareWorkerNodes(const void *leftElement, const void *rightElement)
  * WorkerCreateShard applies the given DDL commands to create the shard on the
  * worker node.
  */
-static bool
+bool
 WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList)
 {
 	bool shardCreated = true;

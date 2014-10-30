@@ -16,7 +16,6 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "libpq-fe.h"
-#include "miscadmin.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -113,7 +112,6 @@ static bool IsPgShardPlan(PlannedStmt *plannedStmt);
 static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
-static void LockShard(int64 shardId, LOCKMODE lockMode);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
 static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 									   RangeVar *intermediateTable);
@@ -1445,38 +1443,6 @@ CompareTasksByShardId(const void *leftElement, const void *rightElement)
 	else
 	{
 		return 0;
-	}
-}
-
-
-/*
- * LockShard returns after acquiring a lock for the specified shard, blocking
- * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
- * supported: all others will trigger an error. Locks acquired with this method
- * are automatically released at transaction end.
- */
-void
-LockShard(int64 shardId, LOCKMODE lockMode)
-{
-	/* locks use 32-bit identifier fields, so split shardId */
-	uint32 keyUpperHalf = (uint32) (shardId >> 32);
-	uint32 keyLowerHalf = (uint32) shardId;
-
-	LOCKTAG lockTag;
-	memset(&lockTag, 0, sizeof(LOCKTAG));
-
-	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
-
-	if (lockMode == ExclusiveLock || lockMode == ShareLock)
-	{
-		bool sessionLock = false;	/* we want a transaction lock */
-		bool dontWait = false;		/* block indefinitely until acquired */
-
-		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
 	}
 }
 

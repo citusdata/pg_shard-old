@@ -61,3 +61,13 @@ CREATE FUNCTION create_shards(tablename text, shardcount integer,
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
+
+CREATE FUNCTION change_placement_state(placementid bigint, shardstate integer)
+RETURNS integer
+AS 'pg_shard'
+LANGUAGE C STRICT;
+
+CREATE FUNCTION repair_shard_placement(placementid bigint)
+RETURNS void
+AS 'pg_shard'
+LANGUAGE C STRICT;

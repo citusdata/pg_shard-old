@@ -17,10 +17,12 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
+#include "miscadmin.h"
 #include "postgres_ext.h"
 
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
+#include "storage/lock.h"
 
 
 /* schema for configuration related to distributed tables */
@@ -79,7 +81,8 @@ typedef enum
 	STATE_FINALIZED = 1,
 	STATE_CACHED = 2,
 	STATE_INACTIVE = 3,
-	STATE_TO_DELETE = 4
+	STATE_TO_DELETE = 4,
+	STATE_NO_MODIFY = 5
 
 } ShardState;
 
@@ -122,6 +125,7 @@ typedef struct ShardPlacement
 
 extern List * LoadShardList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
+extern ShardPlacement * LoadShardPlacement(int64 shardPlacementId);
 extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);
@@ -136,6 +140,7 @@ extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 									uint32 nodePort);
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
+extern void LockShard(int64 shardId, LOCKMODE lockMode);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 
 
