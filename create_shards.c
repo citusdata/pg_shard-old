@@ -191,7 +191,8 @@ create_shards(PG_FUNCTION_ARGS)
 			char *nodeName = candidateNode->nodeName;
 			uint32 nodePort = candidateNode->nodePort;
 
-			bool created = WorkerCreateShard(nodeName, nodePort, extendedDDLCommands);
+			bool created = ExecuteRemoteCommandList(nodeName, nodePort,
+													extendedDDLCommands);
 			if (created)
 			{
 				uint64 shardPlacementId = NextSequenceId(SHARD_PLACEMENT_ID_SEQUENCE_NAME);
@@ -409,15 +410,15 @@ CompareWorkerNodes(const void *leftElement, const void *rightElement)
 
 
 /*
- * WorkerCreateShard applies the given DDL commands to create the shard on the
- * worker node.
+ * ExecuteRemoteCommandList executes the given commands in a single transaction on the
+ * specified node.
  */
 bool
-WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList)
+ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *commandList)
 {
 	bool shardCreated = true;
-	ListCell *ddlCommandCell = NULL;
-	bool ddlCommandIssued = false;
+	ListCell *commandCell = NULL;
+	bool commandIssued = false;
 	bool beginIssued = false;
 
 	PGconn *connection = GetConnection(nodeName, nodePort);
@@ -426,25 +427,25 @@ WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList)
 		return false;
 	}
 
-	/* begin a transaction before we start applying the ddl commands */
+	/* begin a transaction before we start executing commands */
 	beginIssued = ExecuteRemoteCommand(connection, BEGIN_COMMAND);
 	if (!beginIssued)
 	{
 		return false;
 	}
 
-	foreach(ddlCommandCell, ddlCommandList)
+	foreach(commandCell, commandList)
 	{
-		char *ddlCommand = (char *) lfirst(ddlCommandCell);
+		char *commandText = (char *) lfirst(commandCell);
 
-		ddlCommandIssued = ExecuteRemoteCommand(connection, ddlCommand);
-		if (!ddlCommandIssued)
+		commandIssued = ExecuteRemoteCommand(connection, commandText);
+		if (!commandIssued)
 		{
 			break;
 		}
 	}
 
-	if (ddlCommandIssued)
+	if (commandIssued)
 	{
 		bool commitIssued = ExecuteRemoteCommand(connection, COMMIT_COMMAND);
 		if (!commitIssued)

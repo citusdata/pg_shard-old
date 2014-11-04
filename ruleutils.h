@@ -15,6 +15,7 @@
 #define PG_SHARD_RULEUTILS_H
 
 #include "c.h"
+#include "postgres_ext.h"
 
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"

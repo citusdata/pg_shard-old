@@ -1367,8 +1367,9 @@ IsPgShardPlan(PlannedStmt *plannedStmt)
  * doesn't commute with an INSERT, UPDATE, or DELETE.
  *
  * The above mapping is overridden entirely when all_modifications_commutative
- * is set to true. In that case, no commands use any locks whatsoever, meaning
- * all commands may commute with all others.
+ * is set to true. In that case, all commands just claim a shared lock. This
+ * allows the shard repair logic to lock out modifications while permitting all
+ * commands to otherwise commute.
  */
 static LOCKMODE
 CommutativityRuleToLockMode(CmdType commandType)
@@ -1378,7 +1379,7 @@ CommutativityRuleToLockMode(CmdType commandType)
 	/* bypass commutativity checks when flag enabled */
 	if (AllModificationsCommutative)
 	{
-		return NoLock;
+		return ShareLock;
 	}
 
 	if (commandType == CMD_SELECT)

@@ -29,7 +29,8 @@ extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,
 									 List *ddlCommandList);
-extern bool WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList);
+extern bool ExecuteRemoteCommandList(char *nodeName, uint32 nodePort,
+									 List *ddlCommandList);
 
 
 #endif /* DDL_COMMANDS_H */
