@@ -543,9 +543,9 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 
 
 /*
- * pg_get_indexclusterdef_string returns the definition of a cluster statement for
- * given index. The function returns null if the table is not clustered on given
- * index.
+ * pg_get_indexclusterdef_string returns the definition of a cluster statement
+ * for a given index. The function returns null if the table is not clustered on
+ * the given index.
  */
 static char *
 pg_shard_get_indexclusterdef_string(Oid indexRelationId)

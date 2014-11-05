@@ -123,7 +123,6 @@ typedef struct ShardPlacement
 
 extern List * LoadShardList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
-extern ShardPlacement * LoadShardPlacement(int64 shardPlacementId);
 extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
 extern Var * PartitionColumn(Oid distributedTableId);

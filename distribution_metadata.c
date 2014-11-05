@@ -248,59 +248,6 @@ LoadShardInterval(int64 shardId)
 
 
 /*
- * LoadShardPlacement loads a ShardPlacement using its identifier and returns a pointer to
- * that structure. The function throws an error if no shard placement can be found using
- * the provided identifier.
- */
-ShardPlacement *
-LoadShardPlacement(int64 shardPlacementId)
-{
-	ShardPlacement *shardPlacement = NULL;
-	RangeVar *heapRangeVar = NULL;
-	RangeVar *indexRangeVar = NULL;
-	Relation heapRelation = NULL;
-	Relation indexRelation = NULL;
-	IndexScanDesc indexScanDesc = NULL;
-	const int scanKeyCount = 1;
-	ScanKeyData scanKey[scanKeyCount];
-	HeapTuple heapTuple = NULL;
-
-	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, SHARD_PLACEMENT_TABLE_NAME, -1);
-	indexRangeVar = makeRangeVar(METADATA_SCHEMA_NAME,
-								 SHARD_PLACEMENT_PKEY_INDEX_NAME, -1);
-
-	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
-	indexRelation = relation_openrv(indexRangeVar, AccessShareLock);
-
-	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
-				Int64GetDatum(shardPlacementId));
-
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
-									scanKeyCount, 0);
-	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
-
-	heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
-	if (HeapTupleIsValid(heapTuple))
-	{
-		TupleDesc tupleDescriptor = RelationGetDescr(heapRelation);
-		shardPlacement = TupleToShardPlacement(heapTuple, tupleDescriptor);
-	}
-	else
-	{
-		ereport(ERROR, (errmsg("could not find entry for shard placement " INT64_FORMAT,
-							   shardPlacementId)));
-	}
-
-	index_endscan(indexScanDesc);
-	index_close(indexRelation, AccessShareLock);
-	relation_close(heapRelation, AccessShareLock);
-
-	return shardPlacement;
-
-}
-
-
-/*
  * LoadFinalizedShardPlacementList returns all placements for a given shard that
  * are in the finalized state. Like LoadShardPlacementList, this function throws
  * an error if the specified shard has not been placed.

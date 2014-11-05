@@ -33,8 +33,6 @@
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
 
-#define DROP_TABLE_COMMAND "DROP %s TABLE IF EXISTS %s"
-
 
 /* local function forward declarations */
 static bool RepairShardPlacement(ShardPlacement *inactivePlacement,
@@ -48,10 +46,10 @@ PG_FUNCTION_INFO_V1(repair_shard);
 
 
 /*
- * repair_shard implements a user-facing UDF to repair all inactive placements within a
- * specified shard. If the shard has no healthy placements, this function throws an error.
- * If a particular placement cannot be repaired, this function prints a warning but will
- * not error out.
+ * repair_shard implements a user-facing UDF to repair all inactive placements
+ * within a specified shard. If the shard has no healthy placements, this
+ * function throws an error. If a particular placement cannot be repaired, this
+ * function prints a warning but will not error out.
  */
 Datum
 repair_shard(PG_FUNCTION_ARGS)
@@ -79,7 +77,7 @@ repair_shard(PG_FUNCTION_ARGS)
 	}
 
 	/*
-	 * By taking an exclusive lock on the shard, we both prevent all modifications
+	 * By taking an exclusive lock on the shard, we both stop all modifications
 	 * (INSERT, UPDATE, or DELETE) and prevent concurrent repair operations from
 	 * being able to operate on this shard.
 	 */
@@ -106,8 +104,8 @@ repair_shard(PG_FUNCTION_ARGS)
 
 
 /*
- * RepairShardPlacement repairs the specified inactive placement using data from the
- * specified healthy placement.
+ * RepairShardPlacement repairs the specified inactive placement using data from
+ * the specified healthy placement.
  */
 static bool
 RepairShardPlacement(ShardPlacement *inactivePlacement, ShardPlacement *healthyPlacement)
@@ -135,19 +133,15 @@ RepairShardPlacement(ShardPlacement *inactivePlacement, ShardPlacement *healthyP
 	}
 
 	HOLD_INTERRUPTS();
-	DeleteShardPlacementRow(inactivePlacement->id);
 
 	dataCopied = CopyDataFromFinalizedPlacement(inactivePlacement, healthyPlacement);
 	if (!dataCopied)
 	{
-		/* return shard to inactive state since we were unable to repair */
-		InsertShardPlacementRow(inactivePlacement->id, inactivePlacement->shardId,
-								STATE_INACTIVE, inactivePlacement->nodeName,
-								inactivePlacement->nodePort);
-
 		return false;
 	}
 
+	/* the placement is repaired, so return to finalized state */
+	DeleteShardPlacementRow(inactivePlacement->id);
 	InsertShardPlacementRow(inactivePlacement->id, inactivePlacement->shardId,
 							STATE_FINALIZED, inactivePlacement->nodeName,
 							inactivePlacement->nodePort);
@@ -159,26 +153,30 @@ RepairShardPlacement(ShardPlacement *inactivePlacement, ShardPlacement *healthyP
 
 
 /*
- * RecreateTableDDLCommandList returns a list of DDL statements identical to that returned
- * by ExtendedDDLCommandList except that an extra "DROP TABLE" or "DROP FOREIGN TABLE"
- * statement is prepended to the list to facilitate total recreation of a placement.
+ * RecreateTableDDLCommandList returns a list of DDL statements similar to that
+ * returned by ExtendedDDLCommandList except that the list begins with a "DROP
+ * TABLE" or "DROP FOREIGN TABLE" statement to facilitate total recreation of a
+ * placement.
  */
 static List *
 RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 {
 	char *shardName = generate_shard_name(relationId, shardId);
-	StringInfo workerDropQuery = makeStringInfo();
-	List *ddlCommandList = TableDDLCommandList(relationId);
+	StringInfo extendedDropCommand = makeStringInfo();
+	List *createCommandList = NIL;
+	List *extendedCreateCommandList = NIL;
+	List *extendedDropCommandList = NIL;
+	List *extendedRecreateCommandList = NIL;
 	char relationKind = get_rel_relkind(relationId);
-	char *tableModifier = "";
 
-	/* add shard identifier to DDL commands */
-	ddlCommandList = ExtendedDDLCommandList(relationId, shardId,
-											ddlCommandList);
-
-	if (relationKind == RELKIND_FOREIGN_TABLE)
+	/* build appropriate DROP command based on relation kind */
+	if (relationKind == RELKIND_RELATION)
 	{
-		tableModifier = "FOREIGN";
+		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND, shardName);
+	}
+	else if (relationKind == RELKIND_FOREIGN_TABLE)
+	{
+		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND, shardName);
 	}
 	else if (relationKind != RELKIND_RELATION)
 	{
@@ -186,19 +184,22 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 						errmsg("repair target is not a regular or foreign table")));
 	}
 
-	/* build drop table (or drop foreign table) command using shard identifier */
-	appendStringInfo(workerDropQuery, DROP_TABLE_COMMAND, tableModifier, shardName);
+	extendedDropCommandList = list_make1(extendedDropCommand->data);
 
-	/* prepend drop table query to list of other DDL commands */
-	ddlCommandList = lcons(workerDropQuery->data, ddlCommandList);
+	createCommandList = TableDDLCommandList(relationId);
+	extendedCreateCommandList = ExtendedDDLCommandList(relationId, shardId,
+													   createCommandList);
 
-	return ddlCommandList;
+	extendedRecreateCommandList = list_union(extendedDropCommandList,
+											 extendedCreateCommandList);
+
+	return extendedRecreateCommandList;
 }
 
 
 /*
- * CopyDataFromFinalizedPlacement fills the specified inactive placement with data from
- * a finalized placement.
+ * CopyDataFromFinalizedPlacement fills the specified inactive placement with
+ * data from a finalized placement.
  */
 static bool
 CopyDataFromFinalizedPlacement(__attribute__ ((unused)) ShardPlacement *inactivePlacement,

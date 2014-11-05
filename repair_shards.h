@@ -17,6 +17,9 @@
 #include "postgres.h"
 #include "fmgr.h"
 
+#define DROP_REGULAR_TABLE_COMMAND "DROP TABLE IF EXISTS %s"
+#define DROP_FOREIGN_TABLE_COMMAND "DROP FOREIGN TABLE IF EXISTS %s"
+
 
 extern Datum repair_shard(PG_FUNCTION_ARGS);
 

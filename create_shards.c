@@ -410,15 +410,15 @@ CompareWorkerNodes(const void *leftElement, const void *rightElement)
 
 
 /*
- * ExecuteRemoteCommandList executes the given commands in a single transaction on the
- * specified node.
+ * ExecuteRemoteCommandList executes the given commands in a single transaction
+ * on the specified node.
  */
 bool
-ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *commandList)
+ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *sqlCommandList)
 {
-	bool shardCreated = true;
-	ListCell *commandCell = NULL;
-	bool commandIssued = false;
+	bool commandListExecuted = true;
+	ListCell *sqlCommandCell = NULL;
+	bool sqlCommandIssued = false;
 	bool beginIssued = false;
 
 	PGconn *connection = GetConnection(nodeName, nodePort);
@@ -434,32 +434,32 @@ ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *commandList)
 		return false;
 	}
 
-	foreach(commandCell, commandList)
+	foreach(sqlCommandCell, sqlCommandList)
 	{
-		char *commandText = (char *) lfirst(commandCell);
+		char *sqlCommand = (char *) lfirst(sqlCommandCell);
 
-		commandIssued = ExecuteRemoteCommand(connection, commandText);
-		if (!commandIssued)
+		sqlCommandIssued = ExecuteRemoteCommand(connection, sqlCommand);
+		if (!sqlCommandIssued)
 		{
 			break;
 		}
 	}
 
-	if (commandIssued)
+	if (sqlCommandIssued)
 	{
 		bool commitIssued = ExecuteRemoteCommand(connection, COMMIT_COMMAND);
 		if (!commitIssued)
 		{
-			shardCreated = false;
+			commandListExecuted = false;
 		}
 	}
 	else
 	{
 		ExecuteRemoteCommand(connection, ROLLBACK_COMMAND);
-		shardCreated = false;
+		commandListExecuted = false;
 	}
 
-	return shardCreated;
+	return commandListExecuted;
 }
 
 
