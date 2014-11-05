@@ -18,6 +18,6 @@
 #include "fmgr.h"
 
 
-extern Datum repair_shard_placement(PG_FUNCTION_ARGS);
+extern Datum repair_shard(PG_FUNCTION_ARGS);
 
 #endif /* PG_SHARD_H */

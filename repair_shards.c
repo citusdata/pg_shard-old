@@ -15,6 +15,7 @@
 #include "c.h"
 #include "fmgr.h"
 #include "miscadmin.h"
+#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "repair_shards.h"
@@ -36,34 +37,45 @@
 
 
 /* local function forward declarations */
-static void AcquireRepairLock();
+static bool RepairShardPlacement(ShardPlacement *inactivePlacement,
+								 ShardPlacement *healthyPlacement);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
-static bool CopyDataFromFinalizedPlacement(ShardPlacement *shardPlacement, int64 shardId);
+static bool CopyDataFromFinalizedPlacement(ShardPlacement *inactivePlacement,
+										   ShardPlacement *healthyPlacement);
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(repair_shard_placement);
+PG_FUNCTION_INFO_V1(repair_shard);
 
 
 /*
- * repair_shard_placement finds a shard placement by ID and attempts to repair it if it
- * is not in a healthy state.
+ * repair_shard implements a user-facing UDF to repair all inactive placements within a
+ * specified shard. If the shard has no healthy placements, this function throws an error.
+ * If a particular placement cannot be repaired, this function prints a warning but will
+ * not error out.
  */
 Datum
-repair_shard_placement(PG_FUNCTION_ARGS)
+repair_shard(PG_FUNCTION_ARGS)
 {
-	int64 shardPlacementId = PG_GETARG_INT64(0);
-	ShardPlacement *shardPlacement = LoadShardPlacement(shardPlacementId);
-	int64 shardId = shardPlacement->shardId;
-	ShardInterval *shardInterval = LoadShardInterval(shardId);
-	Oid distributedTableId = shardInterval->relationId;
+	int64 shardId = PG_GETARG_INT64(0);
+	List *shardPlacementList = LoadShardPlacementList(shardId);
+	ListCell *shardPlacementCell = NULL;
+	ShardPlacement *healthyPlacement = NULL;
 
-	List *ddlCommandList = NIL;
-	bool recreated = false;
-	bool dataCopied = false;
-
-	if (shardPlacement->shardState != STATE_INACTIVE)
+	foreach(shardPlacementCell, shardPlacementList)
 	{
-		ereport(ERROR, (errmsg("can only repair placements in inactive state")));
+		ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
+
+		if (shardPlacement->shardState == STATE_FINALIZED)
+		{
+			healthyPlacement = shardPlacement;
+			break;
+		}
+	}
+
+	if (healthyPlacement == NULL)
+	{
+		ereport(ERROR, (errmsg("could not find healthy placement for shard " INT64_FORMAT,
+							   shardId)));
 	}
 
 	/*
@@ -73,64 +85,76 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 	 */
 	LockShard(shardId, ExclusiveLock);
 
-	/* retrieve the DDL commands for the table and run them */
-	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
-
-	recreated = ExecuteRemoteCommandList(shardPlacement->nodeName,
-										 shardPlacement->nodePort,
-										 ddlCommandList);
-
-	if (!recreated)
+	foreach(shardPlacementCell, shardPlacementList)
 	{
-		ereport(ERROR, (errmsg("failed to recreate shard on placement")));
+		ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
+
+		if (shardPlacement->shardState == STATE_INACTIVE)
+		{
+			bool repairSuccess = RepairShardPlacement(shardPlacement, healthyPlacement);
+
+			if (!repairSuccess)
+			{
+				ereport(WARNING, (errmsg("could not repair placement " INT64_FORMAT,
+										 shardPlacement->id)));
+			}
+		}
 	}
-
-	HOLD_INTERRUPTS();
-	DeleteShardPlacementRow(shardPlacementId);
-
-	dataCopied = CopyDataFromFinalizedPlacement(shardPlacement, shardId);
-	if (!dataCopied)
-	{
-		/* return shard to inactive state since we were unable to repair */
-		InsertShardPlacementRow(shardPlacement->id, shardPlacement->shardId,
-								STATE_INACTIVE, shardPlacement->nodeName,
-								shardPlacement->nodePort);
-
-		ereport(ERROR, (errmsg("failed to copy data to recreated shard")));
-	}
-
-	InsertShardPlacementRow(shardPlacement->id, shardPlacement->shardId, STATE_FINALIZED,
-							shardPlacement->nodeName, shardPlacement->nodePort);
-
-	RESUME_INTERRUPTS();
 
 	PG_RETURN_VOID();
 }
 
 
 /*
- * AcquireRepairLock returns after acquiring the node-wide repair lock. This function will
- * raise an error if the lock is already held by a repair operation running in another
- * session.
+ * RepairShardPlacement repairs the specified inactive placement using data from the
+ * specified healthy placement.
  */
-static void
-AcquireRepairLock()
+static bool
+RepairShardPlacement(ShardPlacement *inactivePlacement, ShardPlacement *healthyPlacement)
 {
-	LOCKTAG lockTag;
-	memset(&lockTag, 0, sizeof(LOCKTAG));
-	bool sessionLock = false;	/* we want a transaction lock */
-	bool dontWait = true;		/* don't block */
-	LockAcquireResult result = LOCKACQUIRE_NOT_AVAIL;
+	int64 shardId = inactivePlacement->shardId;
+	ShardInterval *shardInterval = LoadShardInterval(shardId);
+	Oid distributedTableId = shardInterval->relationId;
 
-	/* pass two as the fourth lock field to avoid conflict with other locks */
-	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, 0, 0, 2);
+	List *ddlCommandList = NIL;
+	bool recreated = false;
+	bool dataCopied = false;
 
-	result = LockAcquire(&lockTag, ExclusiveLock, sessionLock, dontWait);
+	Assert(shardId == healthyPlacement->shardId);
 
-	if (result == LOCKACQUIRE_NOT_AVAIL)
+	/* retrieve the DDL commands for the table and run them */
+	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
+
+	recreated = ExecuteRemoteCommandList(inactivePlacement->nodeName,
+										 inactivePlacement->nodePort,
+										 ddlCommandList);
+
+	if (!recreated)
 	{
-		ereport(ERROR, (errmsg("concurrent repair operations already underway")));
+		return false;
 	}
+
+	HOLD_INTERRUPTS();
+	DeleteShardPlacementRow(inactivePlacement->id);
+
+	dataCopied = CopyDataFromFinalizedPlacement(inactivePlacement, healthyPlacement);
+	if (!dataCopied)
+	{
+		/* return shard to inactive state since we were unable to repair */
+		InsertShardPlacementRow(inactivePlacement->id, inactivePlacement->shardId,
+								STATE_INACTIVE, inactivePlacement->nodeName,
+								inactivePlacement->nodePort);
+
+		return false;
+	}
+
+	InsertShardPlacementRow(inactivePlacement->id, inactivePlacement->shardId,
+							STATE_FINALIZED, inactivePlacement->nodeName,
+							inactivePlacement->nodePort);
+
+	RESUME_INTERRUPTS();
+
+	return true;
 }
 
 
@@ -173,13 +197,12 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 
 
 /*
- * CopyDataFromFinalizedPlacement fills the specified placement with the healthy data from
- * a finalized placement within the specified shard. If the specified shard has no such
- * finalized placements, this function errors out.
+ * CopyDataFromFinalizedPlacement fills the specified inactive placement with data from
+ * a finalized placement.
  */
 static bool
-CopyDataFromFinalizedPlacement(__attribute__ ((unused)) ShardPlacement *shardPlacement,
-							   __attribute__ ((unused)) int64 shardId)
+CopyDataFromFinalizedPlacement(__attribute__ ((unused)) ShardPlacement *inactivePlacement,
+							   __attribute__ ((unused)) ShardPlacement *healthyPlacement)
 {
 	/* TODO: Implement */
 	return true;

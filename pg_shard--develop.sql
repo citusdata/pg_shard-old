@@ -62,7 +62,7 @@ RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION repair_shard_placement(placementid bigint)
+CREATE FUNCTION repair_shard(shardid bigint)
 RETURNS void
 AS 'pg_shard'
 LANGUAGE C STRICT;
