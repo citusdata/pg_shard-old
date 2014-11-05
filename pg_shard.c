@@ -16,6 +16,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "libpq-fe.h"
+#include "miscadmin.h"
 #include "postgres_ext.h"
 
 #include "pg_shard.h"
@@ -26,6 +27,7 @@
 #include "ruleutils.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -56,7 +58,6 @@
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
 #include "parser/parsetree.h"
-#include "storage/buf.h"
 #include "storage/lock.h"
 #include "tcop/dest.h"
 #include "tcop/utility.h"
