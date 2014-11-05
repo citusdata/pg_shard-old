@@ -29,17 +29,20 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "access/htup.h"
 #include "access/sdir.h"
 #include "access/skey.h"
+#include "access/tupdesc.h"
 #include "access/xact.h"
 #include "catalog/pg_type.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
+#include "executor/tuptable.h"
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
-#include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/nodes.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
@@ -50,12 +53,13 @@
 #include "optimizer/var.h"
 #include "parser/parsetree.h"
 #include "storage/lock.h"
+#include "tcop/dest.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
-#include "utils/rel.h"
+#include "utils/tuplestore.h"
 
 
 /* controls use of locks to enforce safe commutativity */
