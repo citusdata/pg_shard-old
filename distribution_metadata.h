@@ -80,8 +80,7 @@ typedef enum
 	STATE_FINALIZED = 1,
 	STATE_CACHED = 2,
 	STATE_INACTIVE = 3,
-	STATE_TO_DELETE = 4,
-	STATE_NO_MODIFY = 5
+	STATE_TO_DELETE = 4
 
 } ShardState;
 
