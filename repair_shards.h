@@ -21,6 +21,6 @@
 #define DROP_FOREIGN_TABLE_COMMAND "DROP FOREIGN TABLE IF EXISTS %s"
 
 
-extern Datum repair_shard(PG_FUNCTION_ARGS);
+extern Datum repair_shard_placement(PG_FUNCTION_ARGS);
 
 #endif /* PG_SHARD_H */

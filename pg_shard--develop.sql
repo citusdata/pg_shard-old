@@ -62,7 +62,9 @@ RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION repair_shard(shardid bigint)
+CREATE FUNCTION repair_shard_placement(badnodename text, badnodeport integer,
+									   goodnodename text, goodnodeport integer,
+									   shardid bigint)
 RETURNS void
-AS 'pg_shard'
+AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;

@@ -18,6 +18,7 @@
 #include "pg_config.h"
 #include "postgres_ext.h"
 
+#include "connection.h"
 #include "repair_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
@@ -35,46 +36,38 @@
 
 
 /* local function forward declarations */
-static bool RepairShardPlacement(ShardPlacement *inactivePlacement,
-								 ShardPlacement *healthyPlacement);
+static ShardPlacement *SearchShardPlacementsByNodeAndShardId(char *nodeName,
+															 int32 nodePort,
+															 int64 shardId);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 static bool CopyDataFromFinalizedPlacement(ShardPlacement *inactivePlacement,
 										   ShardPlacement *healthyPlacement);
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(repair_shard);
+PG_FUNCTION_INFO_V1(repair_shard_placement);
 
 
 /*
- * repair_shard implements a user-facing UDF to repair all inactive placements
- * within a specified shard. If the shard has no healthy placements, this
- * function throws an error. If a particular placement cannot be repaired, this
- * function prints a warning but will not error out.
+ * repair_shard_placement implements a user-facing UDF to repair a specific
+ * inactive placement using data from a specific healthy placement. If the
+ * repair fails at any point, this function throws an error.
  */
 Datum
-repair_shard(PG_FUNCTION_ARGS)
+repair_shard_placement(PG_FUNCTION_ARGS)
 {
-	int64 shardId = PG_GETARG_INT64(0);
-	List *shardPlacementList = LoadShardPlacementList(shardId);
-	ListCell *shardPlacementCell = NULL;
+	char *unhealthyNodeName = PG_GETARG_CSTRING(0);
+	int32 unhealthyNodePort = PG_GETARG_INT32(1);
+	char *healthyNodeName = PG_GETARG_CSTRING(2);
+	int32 healthyNodePort = PG_GETARG_INT32(3);
+	int64 shardId = PG_GETARG_INT64(4);
+	ShardInterval *shardInterval = LoadShardInterval(shardId);
+	Oid distributedTableId = shardInterval->relationId;
+
+	ShardPlacement *placementToRepair = NULL;
 	ShardPlacement *healthyPlacement = NULL;
-
-	foreach(shardPlacementCell, shardPlacementList)
-	{
-		ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
-
-		if (shardPlacement->shardState == STATE_FINALIZED)
-		{
-			healthyPlacement = shardPlacement;
-			break;
-		}
-	}
-
-	if (healthyPlacement == NULL)
-	{
-		ereport(ERROR, (errmsg("could not find healthy placement for shard " INT64_FORMAT,
-							   shardId)));
-	}
+	List *ddlCommandList = NIL;
+	bool recreated = false;
+	bool dataCopied = false;
 
 	/*
 	 * By taking an exclusive lock on the shard, we both stop all modifications
@@ -83,72 +76,71 @@ repair_shard(PG_FUNCTION_ARGS)
 	 */
 	LockShard(shardId, ExclusiveLock);
 
-	foreach(shardPlacementCell, shardPlacementList)
+	placementToRepair = SearchShardPlacementsByNodeAndShardId(unhealthyNodeName,
+															  unhealthyNodePort, shardId);
+	healthyPlacement = SearchShardPlacementsByNodeAndShardId(healthyNodeName,
+															 healthyNodePort, shardId);
+
+	Assert(placementToRepair->shardState == STATE_INACTIVE);
+	Assert(healthyPlacement->shardState == STATE_FINALIZED);
+
+	/* retrieve the DDL commands for the table and run them */
+	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
+
+	recreated = ExecuteRemoteCommandList(placementToRepair->nodeName,
+										 placementToRepair->nodePort,
+										 ddlCommandList);
+
+	if (!recreated)
 	{
-		ShardPlacement *shardPlacement = (ShardPlacement *) lfirst(shardPlacementCell);
-
-		if (shardPlacement->shardState == STATE_INACTIVE)
-		{
-			bool repairSuccess = RepairShardPlacement(shardPlacement, healthyPlacement);
-
-			if (!repairSuccess)
-			{
-				ereport(WARNING, (errmsg("could not repair placement " INT64_FORMAT,
-										 shardPlacement->id)));
-			}
-		}
+		ereport(ERROR, (errmsg("could not recreate table to receive placement data")));
 	}
+
+	HOLD_INTERRUPTS();
+
+	dataCopied = CopyDataFromFinalizedPlacement(placementToRepair, healthyPlacement);
+	if (!dataCopied)
+	{
+		ereport(ERROR, (errmsg("failed to copy placement data")));
+	}
+
+	/* the placement is repaired, so return to finalized state */
+	DeleteShardPlacementRow(placementToRepair->id);
+	InsertShardPlacementRow(placementToRepair->id, placementToRepair->shardId,
+							STATE_FINALIZED, placementToRepair->nodeName,
+							placementToRepair->nodePort);
+
+	RESUME_INTERRUPTS();
 
 	PG_RETURN_VOID();
 }
 
 
 /*
- * RepairShardPlacement repairs the specified inactive placement using data from
- * the specified healthy placement.
+ * SearchShardPlacementsByNodeAndShardId does an in-memory search of all
+ * placements for the specified shard ID, returning one with the provided
+ * node name and port. If no such placement is found, this function throws
+ * an error.
  */
-static bool
-RepairShardPlacement(ShardPlacement *inactivePlacement, ShardPlacement *healthyPlacement)
+static ShardPlacement *
+SearchShardPlacementsByNodeAndShardId(char *nodeName, int32 nodePort, int64 shardId)
 {
-	int64 shardId = inactivePlacement->shardId;
-	ShardInterval *shardInterval = LoadShardInterval(shardId);
-	Oid distributedTableId = shardInterval->relationId;
+	List *shardPlacementList = LoadShardPlacementList(shardId);
+	ListCell *shardPlacementCell = NULL;
 
-	List *ddlCommandList = NIL;
-	bool recreated = false;
-	bool dataCopied = false;
-
-	Assert(shardId == healthyPlacement->shardId);
-
-	/* retrieve the DDL commands for the table and run them */
-	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
-
-	recreated = ExecuteRemoteCommandList(inactivePlacement->nodeName,
-										 inactivePlacement->nodePort,
-										 ddlCommandList);
-
-	if (!recreated)
+	foreach(shardPlacementCell, shardPlacementList)
 	{
-		return false;
+		ShardPlacement *candidatePlacement = lfirst(shardPlacementCell);
+
+		if (strncmp(nodeName, candidatePlacement->nodeName, MAX_NODE_LENGTH) &&
+			nodePort == candidatePlacement->nodePort)
+		{
+			return candidatePlacement;
+		}
 	}
 
-	HOLD_INTERRUPTS();
-
-	dataCopied = CopyDataFromFinalizedPlacement(inactivePlacement, healthyPlacement);
-	if (!dataCopied)
-	{
-		return false;
-	}
-
-	/* the placement is repaired, so return to finalized state */
-	DeleteShardPlacementRow(inactivePlacement->id);
-	InsertShardPlacementRow(inactivePlacement->id, inactivePlacement->shardId,
-							STATE_FINALIZED, inactivePlacement->nodeName,
-							inactivePlacement->nodePort);
-
-	RESUME_INTERRUPTS();
-
-	return true;
+	ereport(ERROR, (errmsg("shard " INT64_FORMAT " has no placement at %s:%d", shardId,
+					nodeName, nodePort)));
 }
 
 
