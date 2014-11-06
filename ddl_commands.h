@@ -16,7 +16,6 @@
 
 #include "c.h"
 #include "fmgr.h"
-#include "libpq-fe.h"
 #include "postgres_ext.h"
 
 #include "lib/stringinfo.h"

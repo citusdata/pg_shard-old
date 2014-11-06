@@ -90,7 +90,6 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 	recreated = ExecuteRemoteCommandList(placementToRepair->nodeName,
 										 placementToRepair->nodePort,
 										 ddlCommandList);
-
 	if (!recreated)
 	{
 		ereport(ERROR, (errmsg("could not recreate table to receive placement data")));
