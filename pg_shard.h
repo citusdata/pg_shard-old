@@ -58,6 +58,10 @@ typedef struct DistributedPlan
 	Plan *originalPlan;	/* we save a copy of standard_planner's output */
 	List *taskList;		/* list of tasks to run as part of this plan */
 	List *targetList;   /* copy of the target list for remote SELECT queries only */
+	bool multiShardSelect; /* true if plan is a select across multiple shards */
+
+	/* valid only for multi-shard select statements */
+	CreateStmt *createTemporaryTableStmt;
 } DistributedPlan;
 
 

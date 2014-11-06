@@ -48,6 +48,7 @@
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
 #include "optimizer/clauses.h"
+#include "optimizer/cost.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
 #include "parser/parsetree.h"
@@ -90,8 +91,8 @@ static List * QueryFromList(List *rangeTableList);
 static List * TargetEntryList(List *expressionList);
 static DistributedPlan * BuildDistributedPlan(Query *query, List *shardIntervalList);
 static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
-									 EState *executorState, DestReceiver *destination,
-									 TupleDesc tupleDescriptor);
+									 EState *executorState, TupleDesc tupleDescriptor,
+									 DestReceiver *destination);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
 static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 							 Tuplestorestate *tupleStore);
@@ -100,11 +101,11 @@ static LOCKMODE CommutativityRuleToLockMode(CmdType commandType);
 static void AcquireExecutorShardLocks(List *taskList, LOCKMODE lockMode);
 static int CompareTasksByShardId(const void *leftElement, const void *rightElement);
 static void LockShard(int64 shardId, LOCKMODE lockMode);
-static bool MultiShardSelect(QueryDesc *queryDesc, DistributedPlan *distributedPlan);
-static Oid CreateTemporaryTableLike(Oid relationId);
+static CreateStmt * CreateTemporaryTableLikeStmt(Oid relationId);
 static void ExecuteQueriesAndFetchData(DistributedPlan *distributedPlan, Oid tableId);
-static void TupleStoreToTable(Oid tableId, List *targetList,
-							  TupleDesc tupleStoreDescriptor, Tuplestorestate *tupleStore);
+static void TupleStoreToLocalTable(Oid localTableId, List *targetList,
+								   TupleDesc tupleStoreDescriptor,
+								   Tuplestorestate *tupleStore);
 static void ErrorIfUnsupportedPlan(Plan *plan);
 
 
@@ -180,6 +181,8 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
 		List *queryShardList = NIL;
+		bool multiShardSelect = false;
+		CreateStmt *createTemporaryTableStmt = NULL;
 
 		/* call standard planner first to have Query transformations performed */
 		plannedStatement = standard_planner(distributedQuery, cursorOptions,
@@ -193,15 +196,45 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		/*
 		 * If a select query touches multiple shards, we don't push down the
 		 * query as-is, and instead only push down the filter clauses and select
-		 * needed columns.
+		 * needed columns. We then copy those results to a local temporary table
+		 * and let PostgreSQL run its original plan on that fetched data.
 		 */
 		if ((query->commandType == CMD_SELECT) && (list_length(queryShardList) > 1))
 		{
+			Oid distributedTableId = InvalidOid;
+			bool indexScanEnabledOldValue = false;
+			bool bitmapScanEnabledOldValue = false;
+
+			multiShardSelect = true;
+
+			/* disable the index scan types */
+			indexScanEnabledOldValue = enable_indexscan;
+			bitmapScanEnabledOldValue = enable_bitmapscan;
+
+			enable_indexscan = false;
+			enable_bitmapscan = false;
+			distributedQuery = copyObject(query);
+			plannedStatement = standard_planner(distributedQuery, cursorOptions,
+												boundParams);
+
+			enable_indexscan = indexScanEnabledOldValue;
+			enable_bitmapscan = bitmapScanEnabledOldValue;
+
+			/* validate plan only contains supported scan nodes */
+			ErrorIfPlanNotSupported(plannedStatement->planTree);
+
 			distributedQuery = RowAndColumnFilterQuery(distributedQuery);
+
+			/* construct a CreateStmt to clone the existing table */
+			distributedTableId = ExtractFirstDistributedTableId(distributedQuery);
+			createTemporaryTableStmt = CreateTemporaryTableLikeStmt(distributedTableId);
 		}
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
+		distributedPlan->multiShardSelect = multiShardSelect;
+		distributedPlan->createTemporaryTableStmt = createTemporaryTableStmt;
+
 		plannedStatement->planTree = (Plan *) distributedPlan;
 	}
 	else if (plannerType == PLANNER_TYPE_CITUSDB)
@@ -304,30 +337,36 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 		 * point the existing plan to scan this temp table instead of the
 		 * original one.
 		 */
-		multiShardSelect = MultiShardSelect(queryDesc, distributedPlan);
+		multiShardSelect = distributedPlan->multiShardSelect;
 		if (multiShardSelect)
 		{
-			RangeTblEntry *remoteRTE = NULL;
-			Oid clonedTableId = InvalidOid;
+			RangeTblEntry *remoteRangeTable = NULL;
+			Oid newTableId = InvalidOid;
 
-			/* validate that the plan only contains a sequential scan */
-			ErrorIfUnsupportedPlan(originalPlan);
+			/* execute the previously created statement to create a temp table */
+			CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
+			const char *queryDescription = "create temp table like";
+			RangeVar *newTable = createStmt->relation;
 
-			/* extract the range table entry for the original table */
+			ProcessUtility((Node *) createStmt, queryDescription, PROCESS_UTILITY_TOPLEVEL,
+						   NULL, None_Receiver, NULL);
+
+			newTableId = RangeVarGetRelid(newTable, NoLock, false);
+			if (newTableId == InvalidOid)
+			{
+				ereport(ERROR, (errmsg("could not create temporary table")));
+			}
+
+			/* update the table entry to point to the new temporary table */
 			Assert(list_length(plannedStatement->rtable) == 1);
-			remoteRTE = linitial(plannedStatement->rtable);
-			Assert(remoteRTE->rtekind == RTE_RELATION);
-
-			/* create a clone of the existing table */
-			clonedTableId = CreateTemporaryTableLike(remoteRTE->relid);
-
-			/* update the table entry to point to the new cloned table */
-			remoteRTE->relid = clonedTableId;
+			remoteRangeTable = linitial(plannedStatement->rtable);
+			Assert(remoteRangeTable->rtekind == RTE_RELATION);
+			remoteRangeTable->relid = newTableId;
 
 			/* execute the queries and fetch data into the temp table */
-			ExecuteQueriesAndFetchData(distributedPlan, clonedTableId);
+			ExecuteQueriesAndFetchData(distributedPlan, newTableId);
 
-			/* update the query descriptor snapshot so it see's the new data */
+			/* update the query descriptor snapshot so the new data is visible */
 			UnregisterSnapshot(queryDesc->snapshot);
 			UpdateActiveSnapshotCommandId();
 			queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
@@ -444,7 +483,7 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 			List *targetList = plan->targetList;
 			TupleDesc tupleDescriptor = ExecCleanTypeFromTL(targetList, false);
 
-			ExecuteDistributedSelect(plan, estate, destination, tupleDescriptor);
+			ExecuteDistributedSelect(plan, estate, tupleDescriptor, destination);
 		}
 		else
 		{
@@ -1015,7 +1054,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
  */
 static void
 ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState,
-						 DestReceiver *destination, TupleDesc tupleDescriptor)
+						 TupleDesc tupleDescriptor, DestReceiver *destination)
 {
 	Task *task = NULL;
 	List *taskPlacementList = NIL;
@@ -1355,36 +1394,15 @@ LockShard(int64 shardId, LOCKMODE lockMode)
 
 
 /*
- * MultiShardSelect returns true if the query is a SELECT query, which scans
- * more than one shard. If not, the function returns false.
+ * CreateTemporaryTableLike returns a CreateStmt node which will create a clone
+ * of the given relation using the CREATE TABLE LIKE option. Note that the
+ * function only creates the table, and does not copy over indexes, constraints,
+ * defaults etc.
  */
-static bool
-MultiShardSelect(QueryDesc *queryDesc, DistributedPlan *distributedPlan)
+static CreateStmt *
+CreateTemporaryTableLikeStmt(Oid relationId)
 {
-	CmdType operation = queryDesc->operation;
-	int taskCount = list_length(distributedPlan->taskList);
-
-	if ((operation == CMD_SELECT) && (taskCount > 1))
-	{
-		return true;
-	}
-	else
-	{
-		return false;
-	}
-}
-
-
-/*
- * CreateTemporaryTableLike creates a clone of the given relation using the
- * CREATE TABLE LIKE statement. Note that the function only creates the table,
- * and does not copy over indexes, constraints, defaults etc.
- */
-static Oid
-CreateTemporaryTableLike(Oid relationId)
-{
-	Oid newRelationId = InvalidOid;
-	CreateStmt *createStmt = makeNode(CreateStmt);
+	CreateStmt *createStmt = NULL;
 	TableLikeClause *tableLikeClause = NULL;
 	char *currentTableName = get_rel_name(relationId);
 	Oid currentNamespaceOid = get_rel_namespace(relationId);
@@ -1394,8 +1412,11 @@ CreateTemporaryTableLike(Oid relationId)
 
 	/* create a unique table name */
 	StringInfo newTableName = makeStringInfo();
-	uint64 jobId = NextSequenceId(JOB_ID_SEQUENCE_NAME);
-	appendStringInfo(newTableName, "%s_" UINT64_FORMAT, currentTableName, jobId);
+	static unsigned long temporaryTableNumber = 0;
+	appendStringInfo(newTableName, "%s_%d_%lu", currentTableName, MyProcPid,
+					 temporaryTableNumber);
+	temporaryTableNumber++;
+
 
 	newRelation = makeRangeVar(NULL, newTableName->data, -1);
 	newRelation->relpersistence = RELPERSISTENCE_TEMP;
@@ -1404,22 +1425,11 @@ CreateTemporaryTableLike(Oid relationId)
 	tableLikeClause->relation = currentRelation;
 	tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
 
+	createStmt = makeNode(CreateStmt);
 	createStmt->relation = newRelation;
 	createStmt->tableElts = list_make1(tableLikeClause);
 
-	/* create the relation */
-	ProcessUtility((Node *) createStmt, "create table like", PROCESS_UTILITY_TOPLEVEL,
-				   NULL, None_Receiver, NULL);
-
-	/* retrieve the newly created table's relationId */
-	newRelationId = RangeVarGetRelid(newRelation, NoLock, false);
-
-	if (newRelationId == InvalidOid)
-	{
-		ereport(ERROR, (errmsg("could not create temporary relation")));
-	}
-
-	return newRelationId;
+	return createStmt;
 }
 
 
@@ -1493,53 +1503,56 @@ ExecuteQueriesAndFetchData(DistributedPlan *distributedPlan, Oid tableId)
 		 * results from the tupleStore into the table.
 		 */
 		Assert(tupleStore != NULL);
-		TupleStoreToTable(tableId, targetList, tupleStoreDescriptor, tupleStore);
+		TupleStoreToLocalTable(tableId, targetList, tupleStoreDescriptor, tupleStore);
 		tuplestore_end(tupleStore);
 	}
 }
 
 
 /*
- * TupleStoreToTable inserts the tuples from the given tupleStore into the table
- * represented by the given tableId. Before doing so, the function extracts the
- * values from the tuple and sets the right attributes for the given table based
- * on the column attribute numbers.
+ * TupleStoreToLocalTable inserts the tuples from the given tupleStore into
+ * the table represented by the given tableId. Before doing so, the function
+ * extracts the values from the tuple and sets the right attributes for the
+ * given table based on the column attribute numbers.
  */
 static void
-TupleStoreToTable(Oid tableId, List *remoteTargetList, TupleDesc tupleStoreDescriptor,
-				  Tuplestorestate *tupleStore)
+TupleStoreToLocalTable(Oid localTableId, List *remoteTargetList,
+					   TupleDesc tupleStoreDescriptor,
+					   Tuplestorestate *tupleStore)
 {
-	/* open the temp table for inserting */
-	Relation insertRelation = heap_open(tableId, RowExclusiveLock);
-	TupleDesc tableTupleDescriptor = RelationGetDescr(insertRelation);
+	/* open the local table for inserting */
+	Relation localTable = heap_open(localTableId, RowExclusiveLock);
+	TupleDesc localTableTupleDescriptor = RelationGetDescr(localTable);
 
-	int tableColumnCount = tableTupleDescriptor->natts;
-	int fetchedColumnCount = tupleStoreDescriptor->natts;
-	Datum *values = palloc0(tableColumnCount * sizeof(Datum));
-	bool *isNulls = palloc0(tableColumnCount * sizeof(bool));
-	Datum *fetchedTupleValues = palloc0(fetchedColumnCount * sizeof(Datum));
-	bool *fetchedTupleNulls = palloc0(fetchedColumnCount * sizeof(bool));
+	int localTableColumnCount = localTableTupleDescriptor->natts;
+	Datum *localTableTupleValues = palloc0(localTableColumnCount * sizeof(Datum));
+	bool *localTableTupleNulls = palloc0(localTableColumnCount * sizeof(bool));
 
-	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleStoreDescriptor);
+	int tupleStoreColumnCount = tupleStoreDescriptor->natts;
+	Datum *tupleStoreTupleValues = palloc0(tupleStoreColumnCount * sizeof(Datum));
+	bool *tupleStoreTupleNulls = palloc0(tupleStoreColumnCount * sizeof(bool));
+
+	TupleTableSlot *tupleStoreTableSlot = MakeSingleTupleTableSlot(tupleStoreDescriptor);
 
 	for (;;)
 	{
-		HeapTuple fetchedTuple = NULL;
-		HeapTuple insertTuple = NULL;
+		HeapTuple tupleStoreTuple = NULL;
+		HeapTuple localTableTuple = NULL;
 		int columnIndex = 0;
 
-		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
+		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false,
+												 tupleStoreTableSlot);
 		if (!nextTuple)
 		{
 			break;
 		}
 
-		fetchedTuple = ExecFetchSlotTuple(tupleTableSlot);
-		heap_deform_tuple(fetchedTuple, tupleStoreDescriptor,
-						  fetchedTupleValues, fetchedTupleNulls);
+		tupleStoreTuple = ExecFetchSlotTuple(tupleStoreTableSlot);
+		heap_deform_tuple(tupleStoreTuple, tupleStoreDescriptor,
+						  tupleStoreTupleValues, tupleStoreTupleNulls);
 
-		/* set all values to null initially */
-		memset(isNulls, true, tableColumnCount * sizeof(bool));
+		/* set all values to null for the local table tuple */
+		memset(localTableTupleNulls, true, localTableColumnCount * sizeof(bool));
 
 		/*
 		 * Extract values from the returned tuple and set them in the right
@@ -1547,7 +1560,7 @@ TupleStoreToTable(Oid tableId, List *remoteTargetList, TupleDesc tupleStoreDescr
 		 * location based on the attribute number in the column from the remote
 		 * query's target list.
 		 */
-		for (columnIndex = 0; columnIndex < fetchedColumnCount; columnIndex++)
+		for (columnIndex = 0; columnIndex < tupleStoreColumnCount; columnIndex++)
 		{
 			TargetEntry *targetEntry = (TargetEntry *) list_nth(remoteTargetList,
 																columnIndex);
@@ -1559,11 +1572,7 @@ TupleStoreToTable(Oid tableId, List *remoteTargetList, TupleDesc tupleStoreDescr
 			if (IsA(expression, Const))
 			{
 				Const *constValue = (Const *) expression;
-				if (constValue->consttype != UNKNOWNOID)
-				{
-					ereport(ERROR, (errmsg("unknown const type: %d",
-										   constValue->consttype)));
-				}
+				Assert(constValue->consttype == UNKNOWNOID);
 
 				/* skip over the null consts */
 				continue;
@@ -1572,28 +1581,34 @@ TupleStoreToTable(Oid tableId, List *remoteTargetList, TupleDesc tupleStoreDescr
 			Assert(IsA(expression, Var));
 			column = (Var *) expression;
 			attributeNumber = column->varattno;
-			values[attributeNumber - 1] = fetchedTupleValues[columnIndex];
-			isNulls[attributeNumber - 1] = fetchedTupleNulls[columnIndex];
+
+			localTableTupleValues[attributeNumber - 1] =
+				tupleStoreTupleValues[columnIndex];
+			localTableTupleNulls[attributeNumber - 1] =
+				tupleStoreTupleNulls[columnIndex];
 		}
 
-		insertTuple = heap_form_tuple(tableTupleDescriptor, values, isNulls);
-		simple_heap_insert(insertRelation, insertTuple);
+		localTableTuple = heap_form_tuple(localTableTupleDescriptor,
+										  localTableTupleValues,
+										  localTableTupleNulls);
+
+		simple_heap_insert(localTable, localTableTuple);
 		CommandCounterIncrement();
 
-		ExecClearTuple(tupleTableSlot);
+		ExecClearTuple(tupleStoreTableSlot);
 	}
 
-	ExecDropSingleTupleTableSlot(tupleTableSlot);
-	heap_close(insertRelation, RowExclusiveLock);
+	ExecDropSingleTupleTableSlot(tupleStoreTableSlot);
+	heap_close(localTable, RowExclusiveLock);
 }
 
 
 /*
- * ErrorIfUnsupportedPlan walks over the plan tree and errors out if the plan
- * contains scan nodes other than sequential scan.
+ * ErrorIfPlanNotSupported walks over the plan tree in a breadth-first manner
+ * and errors out if the plan contains scan nodes other than sequential scan.
  */
 static void
-ErrorIfUnsupportedPlan(Plan *plan)
+ErrorIfPlanNotSupported(Plan *plan)
 {
 	List *planNodeList = list_make1(plan);
 
