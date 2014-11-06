@@ -106,7 +106,7 @@ static void ExecuteQueriesAndFetchData(DistributedPlan *distributedPlan, Oid tab
 static void TupleStoreToLocalTable(Oid localTableId, List *targetList,
 								   TupleDesc tupleStoreDescriptor,
 								   Tuplestorestate *tupleStore);
-static void ErrorIfUnsupportedPlan(Plan *plan);
+static void ErrorIfPlanNotSupported(Plan *plan);
 
 
 /* declarations for dynamic loading */
