@@ -29,19 +29,22 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "access/htup.h"
 #include "access/htup_details.h"
 #include "access/sdir.h"
 #include "access/skey.h"
+#include "access/tupdesc.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
+#include "executor/tuptable.h"
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
-#include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
+#include "nodes/nodes.h"
 #include "nodes/params.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
@@ -63,6 +66,7 @@
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
 #include "utils/tqual.h"
+#include "utils/tuplestore.h"
 
 
 /* controls use of locks to enforce safe commutativity */
@@ -95,6 +99,8 @@ static void ExecuteDistributedSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, TupleDesc tupleDescriptor,
 									 DestReceiver *destination);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
+static bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
+									   Tuplestorestate *tupleStore);
 static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 							 Tuplestorestate *tupleStore);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
@@ -232,7 +238,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 
 		distributedPlan = BuildDistributedPlan(distributedQuery, queryShardList);
 		distributedPlan->originalPlan = plannedStatement->planTree;
-		distributedPlan->multiShardSelect = multiShardSelect;
+		distributedPlan->selectFromMultipleShards = selectFromMultipleShards;
 		distributedPlan->createTemporaryTableStmt = createTemporaryTableStmt;
 
 		plannedStatement->planTree = (Plan *) distributedPlan;
@@ -314,7 +320,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
 	bool pgShardExecution = IsPgShardPlan(plannedStatement);
 	DistributedPlan *distributedPlan = NULL;
-	bool multiShardSelect = false;
+	bool selectFromMultipleShards = false;
 
 	if (pgShardExecution)
 	{
@@ -337,8 +343,8 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 		 * point the existing plan to scan this temp table instead of the
 		 * original one.
 		 */
-		multiShardSelect = distributedPlan->multiShardSelect;
-		if (multiShardSelect)
+		selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
+		if (selectFromMultipleShards)
 		{
 			RangeTblEntry *remoteRangeTable = NULL;
 			Oid intermediateResultTableId = InvalidOid;
@@ -362,7 +368,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			Assert(list_length(plannedStatement->rtable) == 1);
 			remoteRangeTable = linitial(plannedStatement->rtable);
 			Assert(remoteRangeTable->rtekind == RTE_RELATION);
-			remoteRangeTable->relid = newTableId;
+			remoteRangeTable->relid = intermediateResultTableId;
 
 			/* execute the queries and fetch data into the temp table */
 			ExecuteQueriesAndFetchData(distributedPlan, intermediateResultTableId);
@@ -393,7 +399,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 		}
 
 		/* if multiShard select, then we've completed all the work already */
-		if (!multiShardSelect)
+		if (!selectFromMultipleShards)
 		{
 			/* swap back to the distributed plan for rest of query */
 			plannedStatement->planTree = (Plan *) distributedPlan;
@@ -1073,10 +1079,8 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 						 TupleDesc tupleDescriptor, DestReceiver *destination)
 {
 	Task *task = NULL;
-	List *taskPlacementList = NIL;
-	ListCell *taskPlacementCell = NULL;
 	Tuplestorestate *tupleStore = NULL;
-	bool resultsReceived = false;
+	bool resultsOK = false;
 	TupleTableSlot *tupleTableSlot = NULL;
 
 	List *taskList = distributedPlan->taskList;
@@ -1086,49 +1090,10 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	}
 
 	task = (Task *) linitial(taskList);
-	taskPlacementList = task->taskPlacementList;
+	tupleStore = tuplestore_begin_heap(false, false, work_mem);
 
-	/*
-	 * Try to run the query to completion on one placement. If the query fails
-	 * attempt the query on the next placement.
-	 */
-	foreach(taskPlacementCell, taskPlacementList)
-	{
-		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-		char *nodeName = taskPlacement->nodeName;
-		int32 nodePort = taskPlacement->nodePort;
-		bool queryOK = false;
-		bool storedOK = false;
-
-		PGconn *connection = GetConnection(nodeName, nodePort);
-		if (connection == NULL)
-		{
-			continue;
-		}
-
-		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
-		if (!queryOK)
-		{
-			PurgeConnection(connection);
-			continue;
-		}
-
-		tupleStore = tuplestore_begin_heap(false, false, work_mem);
-		storedOK = StoreQueryResult(connection, tupleDescriptor, tupleStore);
-		if (storedOK)
-		{
-			resultsReceived = true;
-			break;
-		}
-		else
-		{
-			tuplestore_end(tupleStore);
-			PurgeConnection(connection);
-		}
-	}
-
-	/* check if the query ran successfully on either placement */
-	if (!resultsReceived)
+	resultsOK = ExecuteTaskAndStoreResults(task, tupleDescriptor, tupleStore);
+	if (!resultsOK)
 	{
 		ereport(ERROR, (errmsg("could not receive query results")));
 	}
@@ -1138,11 +1103,10 @@ ExecuteDistributedSelect(DistributedPlan *distributedPlan, EState *executorState
 	/* startup the tuple receiver */
 	(*destination->rStartup) (destination, CMD_SELECT, tupleDescriptor);
 
-	/* iterate over each tuple in the store and send them to the given destination */
+	/* iterate over tuples in tuple store, and send them to destination */
 	for (;;)
 	{
 		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
-
 		if (!nextTuple)
 		{
 			break;
@@ -1193,12 +1157,66 @@ SendQueryInSingleRowMode(PGconn *connection, StringInfo query)
 
 
 /*
+ * ExecuteTaskAndStoreResults executes the task on the remote node, retrieves
+ * the results and stores them in the given tuple store. If the task fails on
+ * one of the placements, the function retries it on other placements.
+ */
+static bool
+ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
+						   Tuplestorestate *tupleStore)
+{
+	bool resultsOK = false;
+	List *taskPlacementList = task->taskPlacementList;
+	ListCell *taskPlacementCell = NULL;
+
+	/*
+	 * Try to run the query to completion on one placement. If the query fails
+	 * attempt the query on the next placement.
+	 */
+	foreach(taskPlacementCell, taskPlacementList)
+	{
+		ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
+		char *nodeName = taskPlacement->nodeName;
+		int32 nodePort = taskPlacement->nodePort;
+		bool queryOK = false;
+		bool storedOK = false;
+
+		PGconn *connection = GetConnection(nodeName, nodePort);
+		if (connection == NULL)
+		{
+			continue;
+		}
+
+		queryOK = SendQueryInSingleRowMode(connection, task->queryString);
+		if (!queryOK)
+		{
+			PurgeConnection(connection);
+			continue;
+		}
+
+		storedOK = StoreQueryResult(connection, tupleDescriptor, tupleStore);
+		if (storedOK)
+		{
+			resultsOK = true;
+			break;
+		}
+		else
+		{
+			tuplestore_clear(tupleStore);
+			PurgeConnection(connection);
+		}
+	}
+
+	return resultsOK;
+}
+
+
+/*
  * StoreQueryResult gets the query results from the given connection, builds
  * tuples from the results and stores them in the given tuple-store. If the
- * function is unable to do any of the above, it returns false.
- * Note that the function assumes the following two things:
- * (1) The query has already been sent on the connection by the caller.
- * (2) The tuplestore has been initialized by the caller.
+ * function can't receive query results, it returns false. Note that this
+ * function assumes the query has already been sent on the connection and the
+ * tuplestore has earlier been initialized.
  */
 static bool
 StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
@@ -1206,8 +1224,6 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 {
 	AttInMetadata *attributeInputMetadata = TupleDescGetAttInMetadata(tupleDescriptor);
 	uint32 expectedColumnCount = tupleDescriptor->natts;
-
-	/* allocate memory for the column values */
 	char **columnArray = (char **) palloc0(expectedColumnCount * sizeof(char *));
 
 	Assert(tupleStore != NULL);
@@ -1237,11 +1253,7 @@ StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 
 		rowCount = PQntuples(result);
 		columnCount = PQnfields(result);
-		if (columnCount != expectedColumnCount)
-		{
-			ereport(ERROR, (errmsg("received unexpected number of columns from "
-								   "remote query")));
-		}
+		Assert(columnCount == expectedColumnCount);
 
 		for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
 		{
@@ -1459,57 +1471,18 @@ ExecuteQueriesAndFetchData(DistributedPlan *distributedPlan, Oid tableId)
 	List *taskList = distributedPlan->taskList;
 	ListCell *taskCell = NULL;
 	List *targetList = distributedPlan->targetList;
+
+	/* ExecType instead of ExecCleanType so we don't ignore junk columns */
 	TupleDesc tupleStoreDescriptor = ExecTypeFromTL(targetList, false);
 
 	foreach(taskCell, taskList)
 	{
 		Task *task = (Task *) lfirst(taskCell);
-		List *taskPlacementList = task->taskPlacementList;
-		ListCell *taskPlacementCell = NULL;
-		Tuplestorestate *tupleStore = NULL;
-		bool resultsReceived = false;
+		bool resultsOK = false;
+		Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
 
-		/*
-		 * Try to run the query to completion on one placement. If the query fails
-		 * attempt the query on the next placement.
-		 */
-		foreach(taskPlacementCell, taskPlacementList)
-		{
-			ShardPlacement *taskPlacement = (ShardPlacement *) lfirst(taskPlacementCell);
-			char *nodeName = taskPlacement->nodeName;
-			int32 nodePort = taskPlacement->nodePort;
-			bool queryOK = false;
-			bool storedOK = false;
-
-			PGconn *connection = GetConnection(nodeName, nodePort);
-			if (connection == NULL)
-			{
-				continue;
-			}
-
-			queryOK = SendQueryInSingleRowMode(connection, task->queryString);
-			if (!queryOK)
-			{
-				PurgeConnection(connection);
-				continue;
-			}
-
-			tupleStore = tuplestore_begin_heap(false, false, work_mem);
-			storedOK = StoreQueryResult(connection, tupleStoreDescriptor, tupleStore);
-			if (storedOK)
-			{
-				resultsReceived = true;
-				break;
-			}
-			else
-			{
-				tuplestore_end(tupleStore);
-				PurgeConnection(connection);
-			}
-		}
-
-		/* check if the query ran successfully on either placement */
-		if (!resultsReceived)
+		resultsOK = ExecuteTaskAndStoreResults(task, tupleStoreDescriptor, tupleStore);
+		if (!resultsOK)
 		{
 			ereport(ERROR, (errmsg("could not receive query results")));
 		}
