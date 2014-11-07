@@ -87,6 +87,8 @@ static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static List * DistributedQueryShardList(Query *query);
 static bool SelectFromMultipleShards(Query *query, List *queryShardList);
+static PlannedStmt * SequentialScanPlanner(Query *query, int cursorOptions,
+										   ParamListInfo boundParams);
 static List * QueryRestrictList(Query *query);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
@@ -210,24 +212,9 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		if (selectFromMultipleShards)
 		{
 			Oid distributedTableId = InvalidOid;
-			bool indexScanEnabledOldValue = false;
-			bool bitmapScanEnabledOldValue = false;
 
-			/* disable the index scan types */
-			indexScanEnabledOldValue = enable_indexscan;
-			bitmapScanEnabledOldValue = enable_bitmapscan;
-
-			enable_indexscan = false;
-			enable_bitmapscan = false;
-			distributedQuery = copyObject(query);
-			plannedStatement = standard_planner(distributedQuery, cursorOptions,
-												boundParams);
-
-			enable_indexscan = indexScanEnabledOldValue;
-			enable_bitmapscan = bitmapScanEnabledOldValue;
-
-			/* validate plan only contains supported scan nodes */
-			ErrorIfPlanNotSupported(plannedStatement->planTree);
+			/* try to plan using only sequential scans of the table */
+			plannedStatement = SequentialScanPlanner(query, cursorOptions, boundParams);
 
 			distributedQuery = RowAndColumnFilterQuery(distributedQuery);
 
@@ -697,6 +684,40 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
 	{
 		return false;
 	}
+}
+
+
+/*
+ * PlanSequentialScan attempts to plan the given query using only a sequential
+ * scan of the underlying table. The function disables index scan types and
+ * plans the query. If the plan still contains a non-sequential scan plan node,
+ * the function errors out.
+ */
+static PlannedStmt *
+SequentialScanPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
+{
+	PlannedStmt *sequentialScanPlan = NULL;
+	bool indexScanEnabledOldValue = false;
+	bool bitmapScanEnabledOldValue = false;
+	Query *distributedQuery = NULL;
+
+	/* disable the index scan types */
+	indexScanEnabledOldValue = enable_indexscan;
+	bitmapScanEnabledOldValue = enable_bitmapscan;
+
+	enable_indexscan = false;
+	enable_bitmapscan = false;
+	distributedQuery = copyObject(query);
+
+	sequentialScanPlan = standard_planner(distributedQuery, cursorOptions, boundParams);
+
+	enable_indexscan = indexScanEnabledOldValue;
+	enable_bitmapscan = bitmapScanEnabledOldValue;
+
+	/* validate plan only contains supported scan nodes */
+	ErrorIfPlanNotSupported(sequentialScanPlan->planTree);
+
+	return sequentialScanPlan;
 }
 
 
