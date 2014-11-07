@@ -115,7 +115,6 @@ static void ExecuteQueriesAndFetchData(DistributedPlan *distributedPlan, Oid tab
 static void TupleStoreToLocalTable(Oid localTableId, List *targetList,
 								   TupleDesc tupleStoreDescriptor,
 								   Tuplestorestate *tupleStore);
-static void ErrorIfPlanNotSupported(Plan *plan);
 
 
 /* declarations for dynamic loading */
@@ -688,7 +687,7 @@ SelectFromMultipleShards(Query *query, List *queryShardList)
 
 
 /*
- * PlanSequentialScan attempts to plan the given query using only a sequential
+ * SequentialScanPlanner attempts to plan the given query using only a sequential
  * scan of the underlying table. The function disables index scan types and
  * plans the query. If the plan still contains a non-sequential scan plan node,
  * the function errors out.
@@ -700,6 +699,23 @@ SequentialScanPlanner(Query *query, int cursorOptions, ParamListInfo boundParams
 	bool indexScanEnabledOldValue = false;
 	bool bitmapScanEnabledOldValue = false;
 	Query *distributedQuery = NULL;
+
+	/* error out if the table is a foreign table */
+	List *rangeTableList = NIL;
+	ListCell *rangeTableCell = NULL;
+	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
+
+	foreach(rangeTableCell, rangeTableList)
+	{
+		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
+		if ((rangeTableEntry->rtekind == RTE_RELATION) &&
+			(rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE))
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("multi shard selects for foreign tables "
+								   "are unsupported")));
+		}
+	}
 
 	/* disable the index scan types */
 	indexScanEnabledOldValue = enable_indexscan;
@@ -713,9 +729,6 @@ SequentialScanPlanner(Query *query, int cursorOptions, ParamListInfo boundParams
 
 	enable_indexscan = indexScanEnabledOldValue;
 	enable_bitmapscan = bitmapScanEnabledOldValue;
-
-	/* validate plan only contains supported scan nodes */
-	ErrorIfPlanNotSupported(sequentialScanPlan->planTree);
 
 	return sequentialScanPlan;
 }
@@ -1611,62 +1624,4 @@ TupleStoreToLocalTable(Oid localTableId, List *remoteTargetList,
 
 	ExecDropSingleTupleTableSlot(tupleStoreTableSlot);
 	heap_close(localTable, RowExclusiveLock);
-}
-
-
-/*
- * ErrorIfPlanNotSupported walks over the plan tree in a breadth-first manner
- * and errors out if the plan contains scan nodes other than sequential scan.
- */
-static void
-ErrorIfPlanNotSupported(Plan *plan)
-{
-	List *planNodeList = list_make1(plan);
-
-	while (planNodeList != NIL)
-	{
-		Plan *planNode = (Plan *) linitial(planNodeList);
-		Plan *innerPlan = innerPlan(planNode);
-		Plan *outerPlan = outerPlan(planNode);
-		NodeTag nodeType = nodeTag(planNode);
-		bool unsupportedPlanNode = false;
-
-		planNodeList = list_delete_first(planNodeList);
-
-		if (innerPlan != NULL)
-		{
-			planNodeList = lappend(planNodeList, innerPlan);
-		}
-		if (outerPlan != NULL)
-		{
-			planNodeList = lappend(planNodeList, outerPlan);
-		}
-
-		/* currently only support sequential scans */
-		switch (nodeType)
-		{
-			case T_IndexScan:
-			case T_IndexOnlyScan:
-			case T_BitmapIndexScan:
-			case T_BitmapHeapScan:
-			case T_TidScan:
-			case T_SubqueryScan:
-			case T_FunctionScan:
-			case T_ValuesScan:
-			case T_CteScan:
-			case T_WorkTableScan:
-			case T_ForeignScan:
-				unsupportedPlanNode = true;
-				break;
-			default:
-				break;
-		}
-
-		if (unsupportedPlanNode)
-		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("scans other than sequential scans "
-								   "are unsupported")));
-		}
-	}
 }
