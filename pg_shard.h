@@ -21,8 +21,9 @@
 #include "lib/stringinfo.h"
 
 
-/* sequence to distinguish between different queries */
-#define JOB_ID_SEQUENCE_NAME "job_id_sequence"
+/* prefix used for temporary tables created on the master node */
+#define TEMPORARY_TABLE_PREFIX "intermediate_temporary_table"
+
 
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of
@@ -58,10 +59,9 @@ typedef struct DistributedPlan
 	Plan *originalPlan;	/* we save a copy of standard_planner's output */
 	List *taskList;		/* list of tasks to run as part of this plan */
 	List *targetList;   /* copy of the target list for remote SELECT queries only */
-	bool multiShardSelect; /* true if plan is a select across multiple shards */
 
-	/* valid only for multi-shard select statements */
-	CreateStmt *createTemporaryTableStmt;
+	bool selectFromMultipleShards; /* does the select run across multiple shards? */
+	CreateStmt *createTemporaryTableStmt; /* valid for multiple shard selects */
 } DistributedPlan;
 
 

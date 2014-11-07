@@ -82,6 +82,7 @@ static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, lo
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static List * DistributedQueryShardList(Query *query);
+static bool SelectFromMultipleShards(Query *query, List *queryShardList);
 static List * QueryRestrictList(Query *query);
 static int32 ExecuteDistributedModify(DistributedPlan *distributedPlan);
 static Const * ExtractPartitionValue(Query *query, Var *partitionColumn);
@@ -181,7 +182,7 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		DistributedPlan *distributedPlan = NULL;
 		Query *distributedQuery = copyObject(query);
 		List *queryShardList = NIL;
-		bool multiShardSelect = false;
+		bool selectFromMultipleShards = false;
 		CreateStmt *createTemporaryTableStmt = NULL;
 
 		/* call standard planner first to have Query transformations performed */
@@ -199,13 +200,12 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		 * needed columns. We then copy those results to a local temporary table
 		 * and let PostgreSQL run its original plan on that fetched data.
 		 */
-		if ((query->commandType == CMD_SELECT) && (list_length(queryShardList) > 1))
+		selectFromMultipleShards = SelectFromMultipleShards(query, queryShardList);
+		if (selectFromMultipleShards)
 		{
 			Oid distributedTableId = InvalidOid;
 			bool indexScanEnabledOldValue = false;
 			bool bitmapScanEnabledOldValue = false;
-
-			multiShardSelect = true;
 
 			/* disable the index scan types */
 			indexScanEnabledOldValue = enable_indexscan;
@@ -341,18 +341,19 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 		if (multiShardSelect)
 		{
 			RangeTblEntry *remoteRangeTable = NULL;
-			Oid newTableId = InvalidOid;
+			Oid intermediateResultTableId = InvalidOid;
 
 			/* execute the previously created statement to create a temp table */
 			CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
 			const char *queryDescription = "create temp table like";
-			RangeVar *newTable = createStmt->relation;
+			RangeVar *intermediateResultTable = createStmt->relation;
 
 			ProcessUtility((Node *) createStmt, queryDescription, PROCESS_UTILITY_TOPLEVEL,
 						   NULL, None_Receiver, NULL);
 
-			newTableId = RangeVarGetRelid(newTable, NoLock, false);
-			if (newTableId == InvalidOid)
+			intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
+														 NoLock, false);
+			if (intermediateResultTableId == InvalidOid)
 			{
 				ereport(ERROR, (errmsg("could not create temporary table")));
 			}
@@ -364,7 +365,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			remoteRangeTable->relid = newTableId;
 
 			/* execute the queries and fetch data into the temp table */
-			ExecuteQueriesAndFetchData(distributedPlan, newTableId);
+			ExecuteQueriesAndFetchData(distributedPlan, intermediateResultTableId);
 
 			/* update the query descriptor snapshot so the new data is visible */
 			UnregisterSnapshot(queryDesc->snapshot);
@@ -675,6 +676,21 @@ DistributedQueryShardList(Query *query)
 										   shardList);
 
 	return prunedShardList;
+}
+
+
+/* Returns true if the query is a select over multiple shards. */
+static bool
+SelectFromMultipleShards(Query *query, List *queryShardList)
+{
+	if ((query->commandType == CMD_SELECT) && (list_length(queryShardList) > 1))
+	{
+		return true;
+	}
+	else
+	{
+		return false;
+	}
 }
 
 
@@ -1404,19 +1420,19 @@ CreateTemporaryTableLikeStmt(Oid relationId)
 {
 	CreateStmt *createStmt = NULL;
 	TableLikeClause *tableLikeClause = NULL;
+	RangeVar *newRelation = NULL;
+
 	char *currentTableName = get_rel_name(relationId);
 	Oid currentNamespaceOid = get_rel_namespace(relationId);
 	char *currentSchemaName = get_namespace_name(currentNamespaceOid);
 	RangeVar *currentRelation = makeRangeVar(currentSchemaName, currentTableName, -1);
-	RangeVar *newRelation = NULL;
 
 	/* create a unique table name */
 	StringInfo newTableName = makeStringInfo();
 	static unsigned long temporaryTableNumber = 0;
-	appendStringInfo(newTableName, "%s_%d_%lu", currentTableName, MyProcPid,
+	appendStringInfo(newTableName, "%s_%d_%lu", TEMPORARY_TABLE_PREFIX, MyProcPid,
 					 temporaryTableNumber);
 	temporaryTableNumber++;
-
 
 	newRelation = makeRangeVar(NULL, newTableName->data, -1);
 	newRelation->relpersistence = RELPERSISTENCE_TEMP;
@@ -1499,11 +1515,12 @@ ExecuteQueriesAndFetchData(DistributedPlan *distributedPlan, Oid tableId)
 		}
 
 		/*
-		 * We successfully fetched data into local tuplestore. Now move
-		 * results from the tupleStore into the table.
+		 * We successfully fetched data into local tuplestore. Now move results from 
+		 * the tupleStore into the table.
 		 */
 		Assert(tupleStore != NULL);
 		TupleStoreToLocalTable(tableId, targetList, tupleStoreDescriptor, tupleStore);
+
 		tuplestore_end(tupleStore);
 	}
 }
