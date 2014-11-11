@@ -205,7 +205,11 @@ PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
 		 * If a select query touches multiple shards, we don't push down the
 		 * query as-is, and instead only push down the filter clauses and select
 		 * needed columns. We then copy those results to a local temporary table
-		 * and let PostgreSQL run its original plan on that fetched data.
+		 * and then modify the original PostgreSQL plan to perform a sequential
+		 * scan on that temporary table.
+		 * XXX: This approach is limited as we cannot handle index or foreign
+		 * scans. We will revisit this by potentially using another type of scan
+		 * node instead of a sequential scan.
 		 */
 		selectFromMultipleShards = SelectFromMultipleShards(query, queryShardList);
 		if (selectFromMultipleShards)
