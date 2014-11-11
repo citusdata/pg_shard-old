@@ -21,9 +21,12 @@
 #include "repair_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
+#include "pg_shard.h"
+#include "ruleutils.h"
 
 #include <string.h>
 
+#include "access/heapam.h"
 #include "catalog/pg_class.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
@@ -32,16 +35,22 @@
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
+#include "utils/rel.h"
 
 
 /* local function forward declarations */
 static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 												   char *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
-
+static bool CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
+										   ShardPlacement *healthyPlacement,
+										   Oid distributedTableId, int64 shardId);
+static bool CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore,
+											 Relation relation);
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(master_copy_shard_placement);
+PG_FUNCTION_INFO_V1(copy_relation_from_node);
 
 
 /*
@@ -69,6 +78,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	ShardPlacement *sourcePlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
+	bool dataCopied = false;
 
 	/*
 	 * By taking an exclusive lock on the shard, we both stop all modifications
@@ -98,9 +108,12 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	}
 
 	HOLD_INTERRUPTS();
-
-	/* TODO: implement row copying functionality */
-	ereport(ERROR, (errmsg("shard placement repair not fully implemented")));
+	dataCopied = CopyDataFromFinalizedPlacement(sourcePlacement, targetPlacement,
+												distributedTableId, shardId);
+	if (!dataCopied)
+	{
+		ereport(ERROR, (errmsg("failed to copy placement data")));
+	}
 
 	/* the placement is repaired, so return to finalized state */
 	DeleteShardPlacementRow(targetPlacement->id);
@@ -111,6 +124,59 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	RESUME_INTERRUPTS();
 
 	PG_RETURN_VOID();
+}
+
+
+/*
+ * repair_shard_placement implements a internal UDF to copy a table's data from
+ * a healthy placement into a receiving table on an unhealthy placement. This
+ * function returns a boolean reflecting success or failure.
+ */
+Datum
+copy_relation_from_node(PG_FUNCTION_ARGS)
+{
+	Oid distributedTableId = PG_GETARG_OID(0);
+	char *nodeName = PG_GETARG_CSTRING(1);
+	int32 nodePort = PG_GETARG_INT32(2);
+
+	Relation distributedTable = heap_open(distributedTableId, RowExclusiveLock);
+	char *relationName = RelationGetRelationName(distributedTable);
+	ShardPlacement *placement = (ShardPlacement *) palloc0(sizeof(ShardPlacement));
+	Task *task = (Task *) palloc0(sizeof(Task));
+	StringInfo selectAllQuery = makeStringInfo();
+
+	TupleDesc tupleDescriptor = RelationGetDescr(distributedTable);
+	Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
+	bool fetchSuccessful = false;
+	bool loadSuccessful = false;
+
+	appendStringInfo(selectAllQuery, SELECT_ALL_QUERY, quote_identifier(relationName));
+
+	placement->nodeName = nodeName;
+	placement->nodePort = nodePort;
+
+	task->queryString = selectAllQuery;
+	task->taskPlacementList = list_make1(placement);
+
+	fetchSuccessful = ExecuteTaskAndStoreResults(task, tupleDescriptor, tupleStore);
+	if (!fetchSuccessful)
+	{
+		ereport(WARNING, (errmsg("could not receive query results")));
+		PG_RETURN_BOOL(false);
+	}
+
+	loadSuccessful = CopyDataFromTupleStoreToRelation(tupleStore, distributedTable);
+	if (!loadSuccessful)
+	{
+		ereport(WARNING, (errmsg("could not load query results")));
+		PG_RETURN_BOOL(false);
+	}
+
+	tuplestore_end(tupleStore);
+
+	heap_close(distributedTable, RowExclusiveLock);
+
+	PG_RETURN_BOOL(true);
 }
 
 
@@ -171,11 +237,13 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	/* build appropriate DROP command based on relation kind */
 	if (relationKind == RELKIND_RELATION)
 	{
-		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND, shardName);
+		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND,
+						 quote_identifier(shardName));
 	}
 	else if (relationKind == RELKIND_FOREIGN_TABLE)
 	{
-		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND, shardName);
+		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND,
+						 quote_identifier(shardName));
 	}
 	else
 	{
@@ -193,4 +261,96 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 											 extendedCreateCommandList);
 
 	return extendedRecreateCommandList;
+}
+
+static bool
+CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
+							   ShardPlacement *healthyPlacement,
+							   Oid distributedTableId, int64 shardId)
+{
+	char *relationName = get_rel_name(distributedTableId);
+	const char *shardName = NULL;
+	char *nodeName = placementToRepair->nodeName;
+	int32 nodePort = placementToRepair->nodePort;
+	StringInfo copyRelationQuery = makeStringInfo();
+
+	PGconn *connection = NULL;
+	PGresult *result = NULL;
+	char *copySuccessfulString = NULL;
+	bool copySuccessful = false;
+	bool responseParsedSuccessfully = false;
+
+	AppendShardIdToName(&relationName, shardId);
+	shardName = quote_identifier(relationName);
+
+	connection = GetConnection(nodeName, nodePort);
+	if (connection == NULL)
+	{
+		ereport(WARNING, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
+
+		return false;
+	}
+
+	appendStringInfo(copyRelationQuery, COPY_RELATION_QUERY,
+					 quote_literal_cstr(shardName),
+					 quote_literal_cstr(healthyPlacement->nodeName),
+					 healthyPlacement->nodePort);
+
+
+	result = PQexec(connection, copyRelationQuery->data);
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		PQclear(result);
+
+		return false;
+	}
+
+	Assert(PQntuples(result) == 1);
+	Assert(PQnfields(result) == 1);
+
+	copySuccessfulString = PQgetvalue(result, 0, 0);
+	responseParsedSuccessfully = parse_bool(copySuccessfulString, &copySuccessful);
+
+	Assert(responseParsedSuccessfully);
+
+	PQclear(result);
+
+	return true;
+}
+
+
+static bool
+CopyDataFromTupleStoreToRelation(Tuplestorestate *tupleStore, Relation relation)
+{
+	TupleDesc tupleDescriptor = RelationGetDescr(relation);
+	TupleTableSlot *tupleTableSlot = MakeSingleTupleTableSlot(tupleDescriptor);
+	bool copySuccessful = false;
+
+	for (;;)
+	{
+		HeapTuple tupleToInsert = NULL;
+		Oid insertedOid = InvalidOid;
+		bool nextTuple = tuplestore_gettupleslot(tupleStore, true, false, tupleTableSlot);
+		if (!nextTuple)
+		{
+			copySuccessful = true;
+			break;
+		}
+
+		tupleToInsert = ExecMaterializeSlot(tupleTableSlot);
+
+		insertedOid = simple_heap_insert(relation, tupleToInsert);
+		if (insertedOid == InvalidOid)
+		{
+			copySuccessful = false;
+			break;
+		}
+
+		ExecClearTuple(tupleTableSlot);
+	}
+
+	ExecDropSingleTupleTableSlot(tupleTableSlot);
+
+	return copySuccessful;
 }
