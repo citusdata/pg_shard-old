@@ -21,6 +21,10 @@
 #include "lib/stringinfo.h"
 
 
+/* prefix used for temporary tables created on the master node */
+#define TEMPORARY_TABLE_PREFIX "pg_shard_temp_table"
+
+
 /*
  * DistributedNodeTag identifies nodes used in the planning and execution of
  * queries interacting with distributed tables.
@@ -55,6 +59,9 @@ typedef struct DistributedPlan
 	Plan *originalPlan;	/* we save a copy of standard_planner's output */
 	List *taskList;		/* list of tasks to run as part of this plan */
 	List *targetList;   /* copy of the target list for remote SELECT queries only */
+
+	bool selectFromMultipleShards; /* does the select run across multiple shards? */
+	CreateStmt *createTemporaryTableStmt; /* valid for multiple shard selects */
 } DistributedPlan;
 
 
