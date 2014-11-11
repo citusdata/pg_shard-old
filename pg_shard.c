@@ -112,7 +112,7 @@ static int CompareTasksByShardId(const void *leftElement, const void *rightEleme
 static void LockShard(int64 shardId, LOCKMODE lockMode);
 static CreateStmt * CreateTemporaryTableLikeStmt(Oid sourceRelationId);
 static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
-									   RangeVar* intermediateTable);
+									   RangeVar *intermediateTable);
 static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 							  TupleDesc storeTupleDescriptor, Tuplestorestate *store);
 
@@ -704,34 +704,36 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 	PlannedStmt *sequentialScanPlan = NULL;
 	bool indexScanEnabledOldValue = false;
 	bool bitmapScanEnabledOldValue = false;
-	Query *distributedQuery = NULL;
-
-	/* error out if the table is a foreign table */
+	Query *queryCopy = NULL;
 	List *rangeTableList = NIL;
 	ListCell *rangeTableCell = NULL;
+
+	/* error out if the table is a foreign table */
 	ExtractRangeTableEntryWalker((Node *) query, &rangeTableList);
 
 	foreach(rangeTableCell, rangeTableList)
 	{
 		RangeTblEntry *rangeTableEntry = (RangeTblEntry *) lfirst(rangeTableCell);
-		if ((rangeTableEntry->rtekind == RTE_RELATION) &&
-			(rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE))
+		if (rangeTableEntry->rtekind == RTE_RELATION)
 		{
-			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							errmsg("multi shard selects for foreign tables "
-								   "are unsupported")));
+			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
+			{
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("select from multiple shards are unspported "
+									   "for foreign tables")));
+			}
 		}
 	}
 
-	/* disable the index scan types */
+	/* disable index scan types */
 	indexScanEnabledOldValue = enable_indexscan;
 	bitmapScanEnabledOldValue = enable_bitmapscan;
 
 	enable_indexscan = false;
 	enable_bitmapscan = false;
-	distributedQuery = copyObject(query);
 
-	sequentialScanPlan = standard_planner(distributedQuery, cursorOptions, boundParams);
+	queryCopy = copyObject(query);
+	sequentialScanPlan = standard_planner(queryCopy, cursorOptions, boundParams);
 
 	enable_indexscan = indexScanEnabledOldValue;
 	enable_bitmapscan = bitmapScanEnabledOldValue;
@@ -1506,7 +1508,7 @@ CreateTemporaryTableLikeStmt(Oid sourceRelationId)
  * plan and inserts the returned rows into the given tableId.
  */
 static void
-ExecuteMultipleShardSelect(DistributedPlan *distributedPlan, RangeVar* intermediateTable)
+ExecuteMultipleShardSelect(DistributedPlan *distributedPlan, RangeVar *intermediateTable)
 {
 	List *taskList = distributedPlan->taskList;
 	List *targetList = distributedPlan->targetList;
@@ -1518,8 +1520,8 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan, RangeVar* intermedi
 	foreach(taskCell, taskList)
 	{
 		Task *task = (Task *) lfirst(taskCell);
-		bool resultsOK = false;
 		Tuplestorestate *tupleStore = tuplestore_begin_heap(false, false, work_mem);
+		bool resultsOK = false;
 
 		resultsOK = ExecuteTaskAndStoreResults(task, tupleStoreDescriptor, tupleStore);
 		if (!resultsOK)
@@ -1546,10 +1548,9 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan, RangeVar* intermedi
  * numbers.
  */
 static void
-TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
+TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 				  TupleDesc storeTupleDescriptor, Tuplestorestate *store)
 {
-	/* open the local table for inserting */
 	Relation table = heap_openrv(tableRangeVar, RowExclusiveLock);
 	TupleDesc tableTupleDescriptor = RelationGetDescr(table);
 
@@ -1560,7 +1561,6 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 	int storeColumnCount = storeTupleDescriptor->natts;
 	Datum *storeTupleValues = palloc0(storeColumnCount * sizeof(Datum));
 	bool *storeTupleNulls = palloc0(storeColumnCount * sizeof(bool));
-
 	TupleTableSlot *storeTableSlot = MakeSingleTupleTableSlot(storeTupleDescriptor);
 
 	for (;;)
@@ -1569,8 +1569,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 		HeapTuple tableTuple = NULL;
 		int storeColumnIndex = 0;
 
-		bool nextTuple = tuplestore_gettupleslot(store, true, false,
-												 storeTableSlot);
+		bool nextTuple = tuplestore_gettupleslot(store, true, false, storeTableSlot);
 		if (!nextTuple)
 		{
 			break;
@@ -1591,25 +1590,25 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 		 */
 		for (storeColumnIndex = 0; storeColumnIndex < storeColumnCount; storeColumnIndex++)
 		{
-			TargetEntry *targetEntry = (TargetEntry *) list_nth(remoteTargetList,
-																storeColumnIndex);
-			Expr *expression = targetEntry->expr;
-			Var *column = NULL;
+			TargetEntry *tableEntry = (TargetEntry *) list_nth(storeToTableColumnList,
+															   storeColumnIndex);
+			Expr *tableExpression = tableEntry->expr;
+			Var *tableColumn = NULL;
 			int tableColumnId = 0;
 
 			/* special case for count(*) as we expect a NULL const */
-			if (IsA(expression, Const))
+			if (IsA(tableExpression, Const))
 			{
-				Const *constValue = (Const *) expression;
+				Const *constValue = (Const *) tableExpression;
 				Assert(constValue->consttype == UNKNOWNOID);
 
 				/* skip over the null consts */
 				continue;
 			}
 
-			Assert(IsA(expression, Var));
-			column = (Var *) expression;
-			tableColumnId = column->varattno;
+			Assert(IsA(tableExpression, Var));
+			tableColumn = (Var *) tableExpression;
+			tableColumnId = tableColumn->varattno;
 
 			tableTupleValues[tableColumnId - 1] = storeTupleValues[storeColumnIndex];
 			tableTupleNulls[tableColumnId - 1] = storeTupleNulls[storeColumnIndex];

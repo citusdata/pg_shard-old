@@ -22,7 +22,7 @@
 
 
 /* prefix used for temporary tables created on the master node */
-#define TEMPORARY_TABLE_PREFIX "intermediate_temporary_table"
+#define TEMPORARY_TABLE_PREFIX "pg_shard_temp_table"
 
 
 /*
