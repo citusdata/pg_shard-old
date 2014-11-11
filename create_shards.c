@@ -129,6 +129,13 @@ create_shards(PG_FUNCTION_ARGS)
 						(errdetail("Shards have already been created"))));
 	}
 
+	/* make sure that at least one replica is specified */
+	if (replicationFactor <= 0)
+	{
+		ereport(ERROR, (errmsg("cannot create 0 replicas for a shard"),
+						(errhint("Please specify at least 1 for replicationFactor"))));
+	}
+
 	/* load and sort the worker node list for deterministic placement */
 	workerNodeList = ParseWorkerNodeFile(WORKER_LIST_FILENAME);
 	workerNodeList = SortList(workerNodeList, CompareWorkerNodes);
@@ -142,7 +149,7 @@ create_shards(PG_FUNCTION_ARGS)
 	workerNodeCount = list_length(workerNodeList);
 	if (replicationFactor > workerNodeCount)
 	{
-		ereport(ERROR, (errmsg("could not create distributed table"),
+		ereport(ERROR, (errmsg("cannot create new shards for table"),
 						(errdetail("Replication factor: %u exceeds worker node count: %u",
 								   replicationFactor, workerNodeCount))));
 	}

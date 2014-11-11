@@ -518,9 +518,9 @@ PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
 
 /*
  * ExtractRangeTableEntryWalker walks over a query tree, and finds all range
- * table entries that are plain relations or values scans. For recursing into
- * the query tree, this function uses the query tree walker since the expression
- * tree walker doesn't recurse into sub-queries.
+ * table entries. For recursing into the query tree, this function uses the
+ * query tree walker since the expression tree walker doesn't recurse into
+ * sub-queries.
  */
 static bool
 ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
@@ -534,10 +534,7 @@ ExtractRangeTableEntryWalker(Node *node, List **rangeTableList)
 	if (IsA(node, RangeTblEntry))
 	{
 		RangeTblEntry *rangeTable = (RangeTblEntry *) node;
-		if (rangeTable->rtekind == RTE_RELATION || rangeTable->rtekind == RTE_VALUES)
-		{
-			(*rangeTableList) = lappend(*rangeTableList, rangeTable);
-		}
+		(*rangeTableList) = lappend(*rangeTableList, rangeTable);
 	}
 	else if (IsA(node, Query))
 	{
@@ -594,6 +591,12 @@ ErrorIfQueryNotSupported(Query *queryTree)
 		else if (rangeTableEntry->rtekind == RTE_VALUES)
 		{
 			hasValuesScan = true;
+		}
+		else
+		{
+			/* reject subquery, join, function or CTE range table entries */
+			ereport(ERROR, (errmsg("unsupported range table type: %d",
+								   rangeTableEntry->rtekind)));
 		}
 	}
 
@@ -723,7 +726,7 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("select from multiple shards are unspported "
+								errmsg("select from multiple shards are unsupported "
 									   "for foreign tables")));
 			}
 		}
