@@ -71,3 +71,9 @@ CREATE FUNCTION master_copy_shard_placement(shard_id bigint,
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
+
+CREATE FUNCTION copy_relation_from_node(distributedtable regclass, goodnodename text,
+										goodnodeport integer)
+RETURNS boolean
+AS 'MODULE_PATHNAME'
+LANGUAGE C STRICT;
