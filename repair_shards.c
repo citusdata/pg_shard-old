@@ -36,9 +36,9 @@
 
 
 /* local function forward declarations */
-static ShardPlacement *SearchShardPlacementsByNodeAndShardId(char *nodeName,
-															 int32 nodePort,
-															 int64 shardId);
+static ShardPlacement * SearchShardPlacementsByNodeAndShardId(char *nodeName,
+															  int32 nodePort,
+															  int64 shardId);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 static bool CopyDataFromFinalizedPlacement(ShardPlacement *inactivePlacement,
 										   ShardPlacement *healthyPlacement);
@@ -126,20 +126,28 @@ SearchShardPlacementsByNodeAndShardId(char *nodeName, int32 nodePort, int64 shar
 {
 	List *shardPlacementList = LoadShardPlacementList(shardId);
 	ListCell *shardPlacementCell = NULL;
+	ShardPlacement *matchingPlacement = NULL;
 
 	foreach(shardPlacementCell, shardPlacementList)
 	{
-		ShardPlacement *candidatePlacement = lfirst(shardPlacementCell);
+		ShardPlacement *shardPlacement = lfirst(shardPlacementCell);
 
-		if (strncmp(nodeName, candidatePlacement->nodeName, MAX_NODE_LENGTH) &&
-			nodePort == candidatePlacement->nodePort)
+		if (strncmp(nodeName, shardPlacement->nodeName, MAX_NODE_LENGTH) &&
+			nodePort == shardPlacement->nodePort)
 		{
-			return candidatePlacement;
+			matchingPlacement = shardPlacement;
+
+			break;
 		}
 	}
 
-	ereport(ERROR, (errmsg("shard " INT64_FORMAT " has no placement at %s:%d", shardId,
-					nodeName, nodePort)));
+	if (matchingPlacement == NULL)
+	{
+		ereport(ERROR, (errmsg("shard " INT64_FORMAT " has no placement at %s:%d",
+							   shardId, nodeName, nodePort)));
+	}
+
+	return matchingPlacement;
 }
 
 
@@ -169,7 +177,7 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	{
 		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND, shardName);
 	}
-	else if (relationKind != RELKIND_RELATION)
+	else
 	{
 		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
 						errmsg("repair target is not a regular or foreign table")));
