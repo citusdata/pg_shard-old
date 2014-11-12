@@ -1603,7 +1603,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 			/* special case for count(*) as we expect a NULL const */
 			if (IsA(tableExpression, Const))
 			{
-				Const *constValue = (Const *) tableExpression;
+				Const *constValue PG_USED_FOR_ASSERTS_ONLY = (Const *) tableExpression;
 				Assert(constValue->consttype == UNKNOWNOID);
 
 				/* skip over the null consts */
