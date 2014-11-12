@@ -29,13 +29,15 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "access/htup.h"
+#include "access/heapam.h"
 #include "access/htup_details.h"
+#include "access/htup.h"
 #include "access/sdir.h"
 #include "access/skey.h"
 #include "access/tupdesc.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
@@ -56,6 +58,7 @@
 #include "optimizer/var.h"
 #include "parser/parsetree.h"
 #include "storage/lock.h"
+#include "tcop/dest.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
@@ -64,8 +67,8 @@
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
+#include "utils/relcache.h"
 #include "utils/snapmgr.h"
-#include "utils/tqual.h"
 #include "utils/tuplestore.h"
 
 

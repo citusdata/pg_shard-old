@@ -16,6 +16,7 @@
 
 #include "c.h"
 
+#include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
