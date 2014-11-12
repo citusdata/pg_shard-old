@@ -120,8 +120,15 @@ typedef struct ShardPlacement
 } ShardPlacement;
 
 
+typedef struct ShardIntervalListCacheEntry
+{
+	Oid distributedTableId;	/* cache key */
+	List *shardIntervalList;
+} ShardIntervalListCacheEntry;
+
+
+extern List * LookupShardIntervalListCache(Oid distributedTableId);
 extern List * LoadShardList(Oid distributedTableId);
-extern ShardInterval * LookupShardIntervalCache(int64 shardId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
 extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);

@@ -50,8 +50,8 @@
 #include "utils/tqual.h"
 
 
-/* hash table used for caching shard intervals */
-static HTAB *ShardIntervalCache = NULL;
+/* hash table used for caching shard interval lists */
+static HTAB *ShardIntervalListCache = NULL;
 
 
 /* local function forward declarations */
@@ -141,6 +141,74 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 
 /*
+ * LookupShardIntervalListCache searches the shard interval list cache for
+ * the given shard id. If the matching element is not found, this function
+ * loads the shard interval list and puts it into the cache. In all cases,
+ * the shard interval matching the given shard id is returned.
+ */
+List *
+LookupShardIntervalListCache(Oid distributedTableId)
+{
+	List *shardIntervalList = NIL;
+	ShardIntervalListCacheEntry *intervalListCacheEntry = NULL;
+	bool entryFound = false;
+
+	if (ShardIntervalListCache == NULL)
+	{
+		HASHCTL info;
+		int hashFlags = 0;
+
+		/* make sure CacheMemoryContext exists */
+		if (CacheMemoryContext == NULL)
+		{
+			CreateCacheMemoryContext();
+		}
+
+		/* construct the shard interval cache */
+		memset(&info, 0, sizeof(info));
+		info.keysize = sizeof(Oid);
+		info.entrysize = sizeof(ShardIntervalListCacheEntry);
+		info.hash = oid_hash;
+		info.hcxt = CacheMemoryContext;
+		hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+		ShardIntervalListCache = hash_create("pg_shard interval list cache",
+											 128, &info, hashFlags);
+	}
+
+	intervalListCacheEntry = hash_search(ShardIntervalListCache, &distributedTableId,
+										 HASH_FIND, &entryFound);
+	if (!entryFound)
+	{
+		List *loadedIntervalList = NIL;
+		ListCell *shardCell = NULL;
+
+		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
+
+		List *shardList = LoadShardList(distributedTableId);
+		foreach(shardCell, shardList)
+		{
+			int64 *shardIdPointer = lfirst(shardCell);
+			int64 shardId = *shardIdPointer;
+			ShardInterval *shardInterval = LoadShardInterval(shardId);
+
+			loadedIntervalList = lappend(loadedIntervalList, shardInterval);
+		}
+
+		intervalListCacheEntry = hash_search(ShardIntervalListCache,
+											 &distributedTableId, HASH_ENTER,
+											 &entryFound);
+		intervalListCacheEntry->shardIntervalList = loadedIntervalList;
+
+		MemoryContextSwitchTo(oldContext);
+	}
+
+	shardIntervalList = intervalListCacheEntry->shardIntervalList;
+	return shardIntervalList;
+}
+
+
+/*
  * LoadShardList returns a list of shard identifiers related for a given
  * distributed table. The function returns an empty list if no shards can be
  * found for the given relation.
@@ -194,55 +262,6 @@ LoadShardList(Oid distributedTableId)
 	relation_close(heapRelation, AccessShareLock);
 
 	return shardList;
-}
-
-
-/*
- * ShardIntervalCacheLookup searches the shard interval cache for the given
- * shard id. If the matching element is not found, this function loads the
- * shard interval and puts into the cache. In all cases, the shard interval
- * matching the given shard id is returned.
- */
-ShardInterval *
-LookupShardIntervalCache(int64 shardId)
-{
-	ShardInterval *shardInterval = NULL;
-	bool entryFound = false;
-
-	if (ShardIntervalCache == NULL)
-	{
-		HASHCTL info;
-		int hashFlags = 0;
-
-		/* make sure CacheMemoryContext exists */
-		if (CacheMemoryContext == NULL)
-		{
-			CreateCacheMemoryContext();
-		}
-
-		/* construct the shard interval cache */
-		memset(&info, 0, sizeof(info));
-		info.keysize = sizeof(int64);
-		info.entrysize = sizeof(ShardInterval);
-		info.hash = tag_hash;
-		info.hcxt = CacheMemoryContext;
-		hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-
-		ShardIntervalCache = hash_create("pg_shard interval cache", 128,
-										 &info, hashFlags);
-	}
-
-	shardInterval = hash_search(ShardIntervalCache, &shardId, HASH_FIND, &entryFound);
-	if (!entryFound)
-	{
-		ShardInterval *loadedInterval = LoadShardInterval(shardId);
-		shardInterval = hash_search(ShardIntervalCache, &shardId, HASH_ENTER,
-									&entryFound);
-
-		memcpy(shardInterval, loadedInterval, sizeof(ShardInterval));
-	}
-
-	return shardInterval;
 }
 
 

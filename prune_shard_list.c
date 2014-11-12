@@ -61,10 +61,10 @@ static bool SimpleOpExpression(Expr *clause);
  * and returns remaining shards in another list.
  */
 List *
-PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
+PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 {
 	List *remainingShardList = NIL;
-	ListCell *shardCell = NULL;
+	ListCell *shardIntervalCell = NULL;
 	List *restrictInfoList = NIL;
 	Node *baseConstraint = NULL;
 
@@ -95,14 +95,13 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
 	baseConstraint = BuildBaseConstraint(partitionColumn);
 
 	/* walk over shard list and check if shards can be pruned */
-	foreach(shardCell, shardList)
+	foreach(shardIntervalCell, shardIntervalList)
 	{
-		uint64 *shardIdPointer = (uint64 *) lfirst(shardCell);
-		uint64 shardId = (*shardIdPointer);
+		ShardInterval *shardInterval = lfirst(shardIntervalCell);
+		int64 *shardIdPointer = &(shardInterval->id);
+		int64 shardId = (*shardIdPointer);
 		List *constraintList = NIL;
 		bool shardPruned = false;
-
-		ShardInterval *shardInterval = LookupShardIntervalCache(shardId);
 
 		/* set the min/max values in the base constraint */
 		UpdateConstraint(baseConstraint, shardInterval);

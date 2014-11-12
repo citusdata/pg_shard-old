@@ -26,7 +26,8 @@
 #define RESERVED_HASHED_COLUMN_ID	MaxAttrNumber
 
 
-extern List * PruneShardList(Oid relationId, List *whereClauseList, List *shardList);
+extern List * PruneShardList(Oid relationId, List *whereClauseList,
+							 List *shardIntervalList);
 extern OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
 
 
