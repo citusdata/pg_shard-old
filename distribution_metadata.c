@@ -164,7 +164,7 @@ LookupShardIntervalListCache(Oid distributedTableId)
 			CreateCacheMemoryContext();
 		}
 
-		/* construct the shard interval cache */
+		/* construct the shard interval list cache */
 		memset(&info, 0, sizeof(info));
 		info.keysize = sizeof(Oid);
 		info.entrysize = sizeof(ShardIntervalListCacheEntry);
