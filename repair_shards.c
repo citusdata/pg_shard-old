@@ -36,9 +36,8 @@
 
 
 /* local function forward declarations */
-static ShardPlacement * SearchShardPlacementsByNodeAndShardId(char *nodeName,
-															  int32 nodePort,
-															  int64 shardId);
+static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
+												   char *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 static bool CopyDataFromFinalizedPlacement(ShardPlacement *inactivePlacement,
 										   ShardPlacement *healthyPlacement);
@@ -63,6 +62,7 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Oid distributedTableId = shardInterval->relationId;
 
+	List *shardPlacements = NIL;
 	ShardPlacement *placementToRepair = NULL;
 	ShardPlacement *healthyPlacement = NULL;
 	List *ddlCommandList = NIL;
@@ -76,10 +76,11 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 	 */
 	LockShard(shardId, ExclusiveLock);
 
-	placementToRepair = SearchShardPlacementsByNodeAndShardId(unhealthyNodeName,
-															  unhealthyNodePort, shardId);
-	healthyPlacement = SearchShardPlacementsByNodeAndShardId(healthyNodeName,
-															 healthyNodePort, shardId);
+	shardPlacements = LoadShardPlacementList(shardId);
+	placementToRepair = SearchShardPlacementInList(shardPlacements, unhealthyNodeName,
+												   unhealthyNodePort);
+	healthyPlacement = SearchShardPlacementInList(shardPlacements, healthyNodeName,
+												  healthyNodePort);
 
 	Assert(placementToRepair->shardState == STATE_INACTIVE);
 	Assert(healthyPlacement->shardState == STATE_FINALIZED);
@@ -116,15 +117,13 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 
 
 /*
- * SearchShardPlacementsByNodeAndShardId does an in-memory search of all
- * placements for the specified shard ID, returning one with the provided
- * node name and port. If no such placement is found, this function throws
- * an error.
+ * SearchShardPlacementInList searches a provided list for a shard placement
+ * with the specified node name and port. This function throws an error if no
+ * such placement exists in the provided list.
  */
 static ShardPlacement *
-SearchShardPlacementsByNodeAndShardId(char *nodeName, int32 nodePort, int64 shardId)
+SearchShardPlacementInList(List *shardPlacementList, char *nodeName, int32 nodePort)
 {
-	List *shardPlacementList = LoadShardPlacementList(shardId);
 	ListCell *shardPlacementCell = NULL;
 	ShardPlacement *matchingPlacement = NULL;
 
@@ -143,8 +142,8 @@ SearchShardPlacementsByNodeAndShardId(char *nodeName, int32 nodePort, int64 shar
 
 	if (matchingPlacement == NULL)
 	{
-		ereport(ERROR, (errmsg("shard " INT64_FORMAT " has no placement at %s:%d",
-							   shardId, nodeName, nodePort)));
+		ereport(ERROR, (errmsg("could not find placement matching %s:%d", nodeName,
+							   nodePort)));
 	}
 
 	return matchingPlacement;
