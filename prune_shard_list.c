@@ -102,7 +102,7 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
 		List *constraintList = NIL;
 		bool shardPruned = false;
 
-		ShardInterval *shardInterval = LoadShardInterval(shardId);
+		ShardInterval *shardInterval = LookupShardIntervalCache(shardId);
 
 		/* set the min/max values in the base constraint */
 		UpdateConstraint(baseConstraint, shardInterval);

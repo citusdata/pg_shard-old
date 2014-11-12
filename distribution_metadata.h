@@ -121,6 +121,7 @@ typedef struct ShardPlacement
 
 
 extern List * LoadShardList(Oid distributedTableId);
+extern ShardInterval * LookupShardIntervalCache(int64 shardId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
 extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);

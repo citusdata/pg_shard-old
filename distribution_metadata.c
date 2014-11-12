@@ -38,14 +38,20 @@
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
 #include "utils/tqual.h"
+
+
+/* hash table used for caching shard intervals */
+static HTAB *ShardIntervalCache = NULL;
 
 
 /* local function forward declarations */
@@ -188,6 +194,55 @@ LoadShardList(Oid distributedTableId)
 	relation_close(heapRelation, AccessShareLock);
 
 	return shardList;
+}
+
+
+/*
+ * ShardIntervalCacheLookup searches the shard interval cache for the given
+ * shard id. If the matching element is not found, this function loads the
+ * shard interval and puts into the cache. In all cases, the shard interval
+ * matching the given shard id is returned.
+ */
+ShardInterval *
+LookupShardIntervalCache(int64 shardId)
+{
+	ShardInterval *shardInterval = NULL;
+	bool entryFound = false;
+
+	if (ShardIntervalCache == NULL)
+	{
+		HASHCTL info;
+		int hashFlags = 0;
+
+		/* make sure CacheMemoryContext exists */
+		if (CacheMemoryContext == NULL)
+		{
+			CreateCacheMemoryContext();
+		}
+
+		/* construct the shard interval cache */
+		memset(&info, 0, sizeof(info));
+		info.keysize = sizeof(int64);
+		info.entrysize = sizeof(ShardInterval);
+		info.hash = tag_hash;
+		info.hcxt = CacheMemoryContext;
+		hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+
+		ShardIntervalCache = hash_create("pg_shard interval cache", 128,
+										 &info, hashFlags);
+	}
+
+	shardInterval = hash_search(ShardIntervalCache, &shardId, HASH_FIND, &entryFound);
+	if (!entryFound)
+	{
+		ShardInterval *loadedInterval = LoadShardInterval(shardId);
+		shardInterval = hash_search(ShardIntervalCache, &shardId, HASH_ENTER,
+									&entryFound);
+
+		memcpy(shardInterval, loadedInterval, sizeof(ShardInterval));
+	}
+
+	return shardInterval;
 }
 
 
