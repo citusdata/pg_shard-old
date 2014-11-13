@@ -23,8 +23,6 @@
 #include "nodes/primnodes.h"
 
 
-#define PG_SHARD_EXTENSION_NAME "pg_shard"
-
 /* schema for configuration related to distributed tables */
 #define METADATA_SCHEMA_NAME "pgs_distribution_metadata"
 

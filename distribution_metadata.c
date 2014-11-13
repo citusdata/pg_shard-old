@@ -32,7 +32,6 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
-#include "commands/extension.h"
 #include "commands/sequence.h"
 #include "nodes/makefuncs.h"
 #include "nodes/pg_list.h"
@@ -438,14 +437,6 @@ IsDistributedTable(Oid tableId)
 	const int scanKeyCount = 1;
 	ScanKeyData scanKey[scanKeyCount];
 	HeapTuple heapTuple = NULL;
-
-	/* check if the extension was created */
-	bool missingOK = true;
-	Oid extensionOid = get_extension_oid(PG_SHARD_EXTENSION_NAME, missingOK);
-	if (extensionOid == InvalidOid)
-	{
-		return false;
-	}
 
 	heapRangeVar = makeRangeVar(METADATA_SCHEMA_NAME, PARTITION_TABLE_NAME, -1);
 	heapRelation = relation_openrv(heapRangeVar, AccessShareLock);
