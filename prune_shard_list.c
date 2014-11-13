@@ -409,11 +409,9 @@ OpExpressionContainsColumn(OpExpr *operatorExpression, Var *partitionColumn)
 static OpExpr *
 MakeHashedOperatorExpression(OpExpr *operatorExpression)
 {
+	const Oid hashResultTypeId = INT4OID;	
+	TypeCacheEntry *hashResultTypeEntry = NULL;
 	Oid operatorId = InvalidOid;
-	Oid typeId = INT4OID;
-	Oid accessMethodId = BTREE_AM_OID;
-	int16 strategyNumber = BTEqualStrategyNumber;
-
 	OpExpr *hashedExpression = NULL;
 	Var *hashedColumn = NULL;
 	Datum hashedValue = 0;
@@ -434,8 +432,9 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 		constant = (Const *) leftOperand;
 	}
 
-	/* Load the operator from system catalogs */
-	operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+	/* Load the operator from type cache */
+	hashResultTypeEntry = lookup_type_cache(hashResultTypeId, TYPECACHE_EQ_OPR);
+	operatorId = hashResultTypeEntry->eq_opr;
 
 	/* Get a column with int4 type */
 	hashedColumn = MakeInt4Column();
