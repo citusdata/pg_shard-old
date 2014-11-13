@@ -37,6 +37,7 @@
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
+#include "commands/extension.h"
 #include "executor/execdesc.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
@@ -271,6 +272,14 @@ DeterminePlannerType(Query *query)
 {
 	PlannerType plannerType = PLANNER_INVALID_FIRST;
 	CmdType commandType = query->commandType;
+
+	/* if the extension isn't created, we always use the postgres planner */
+	bool missingOK = true;
+	Oid extensionOid = get_extension_oid(PG_SHARD_EXTENSION_NAME, missingOK);
+	if (extensionOid == InvalidOid)
+	{
+		return PLANNER_TYPE_POSTGRES;
+	}
 
 	if (commandType == CMD_SELECT && UseCitusDBSelectLogic)
 	{
@@ -726,7 +735,7 @@ PlanSequentialScan(Query *query, int cursorOptions, ParamListInfo boundParams)
 			if (rangeTableEntry->relkind == RELKIND_FOREIGN_TABLE)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("select from multiple shards are unsupported "
+								errmsg("select from multiple shards is unsupported "
 									   "for foreign tables")));
 			}
 		}

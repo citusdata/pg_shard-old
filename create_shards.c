@@ -126,14 +126,14 @@ create_shards(PG_FUNCTION_ARGS)
 	if (existingShardList != NIL)
 	{
 		ereport(ERROR, (errmsg("cannot create new shards for table"),
-						(errdetail("Shards have already been created"))));
+						errdetail("Shards have already been created")));
 	}
 
 	/* make sure that at least one replica is specified */
 	if (replicationFactor <= 0)
 	{
 		ereport(ERROR, (errmsg("cannot create 0 replicas for a shard"),
-						(errhint("Please specify at least 1 for replicationFactor"))));
+						errhint("Please specify at least 1 for replicationFactor")));
 	}
 
 	/* load and sort the worker node list for deterministic placement */
