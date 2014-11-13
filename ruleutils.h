@@ -22,7 +22,6 @@
 
 
 extern void deparse_shard_query(Query *query, int64 shardid, StringInfo buffer);
-extern char *generate_shard_name(Oid relid, int64 shardid);
 
 
 #endif /* PG_SHARD_RULEUTILS_H */

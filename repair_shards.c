@@ -30,6 +30,7 @@
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "storage/lock.h"
+#include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
@@ -153,13 +154,17 @@ SearchShardPlacementInList(List *shardPlacementList, char *nodeName, int32 nodeP
 static List *
 RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 {
-	char *shardName = generate_shard_name(relationId, shardId);
+	char *relationName = get_rel_name(relationId);
+	const char *shardName = NULL;
 	StringInfo extendedDropCommand = makeStringInfo();
 	List *createCommandList = NIL;
 	List *extendedCreateCommandList = NIL;
 	List *extendedDropCommandList = NIL;
 	List *extendedRecreateCommandList = NIL;
 	char relationKind = get_rel_relkind(relationId);
+
+	AppendShardIdToName(&relationName, shardId);
+	shardName = quote_identifier(shardName);
 
 	/* build appropriate DROP command based on relation kind */
 	if (relationKind == RELKIND_RELATION)

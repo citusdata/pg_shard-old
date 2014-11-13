@@ -28,6 +28,7 @@ extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,
 									 List *sqlCommandList);
+extern void AppendShardIdToName(char **name, uint64 shardId);
 extern bool ExecuteRemoteCommandList(char *nodeName, uint32 nodePort,
 									 List *sqlCommandList);
 
