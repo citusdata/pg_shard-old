@@ -120,6 +120,10 @@ typedef struct ShardPlacement
 } ShardPlacement;
 
 
+/*
+ * ShardIntervalListCacheEntry contains the information for a cache entry in
+ * shard interval list cache entry.
+ */
 typedef struct ShardIntervalListCacheEntry
 {
 	Oid distributedTableId;	/* cache key */
