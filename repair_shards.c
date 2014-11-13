@@ -40,16 +40,16 @@ static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(master_repair_shard_placement);
+PG_FUNCTION_INFO_V1(master_copy_shard_placement);
 
 
 /*
- * master_repair_shard_placement implements a user-facing UDF to repair a
+ * master_copy_shard_placement implements a user-facing UDF to repair a
  * specific inactive placement using data from a specific healthy placement.
  * If the repair fails at any point, this function throws an error.
  */
 Datum
-master_repair_shard_placement(PG_FUNCTION_ARGS)
+master_copy_shard_placement(PG_FUNCTION_ARGS)
 {
 	char *unhealthyNodeName = PG_GETARG_CSTRING(0);
 	int32 unhealthyNodePort = PG_GETARG_INT32(1);
