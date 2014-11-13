@@ -50,21 +50,21 @@ SELECT pg_catalog.pg_extension_config_dump(
 	'pgs_distribution_metadata.partition', '');
 
 -- define the table distribution functions
-CREATE FUNCTION create_distributed_table(tablename text, partitioncolumn text,
-										 partitionmethod "char" DEFAULT 'h')
+CREATE FUNCTION master_create_distributed_table(tablename text, partitioncolumn text,
+												partitionmethod "char" DEFAULT 'h')
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION create_shards(tablename text, shardcount integer,
-							  replicationfactor integer DEFAULT 2)
+CREATE FUNCTION master_create_worker_shards(tablename text, shardcount integer,
+											replicationfactor integer DEFAULT 2)
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION repair_shard_placement(badnodename text, badnodeport integer,
-									   goodnodename text, goodnodeport integer,
-									   shardid bigint)
+CREATE FUNCTION master_repair_shard_placement(badnodename text, badnodeport integer,
+											  goodnodename text, goodnodeport integer,
+											  shardid bigint)
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;

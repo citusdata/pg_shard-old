@@ -54,17 +54,17 @@ static text * IntegerToText(int32 value);
 
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(create_distributed_table);
-PG_FUNCTION_INFO_V1(create_shards);
+PG_FUNCTION_INFO_V1(master_create_distributed_table);
+PG_FUNCTION_INFO_V1(master_create_worker_shards);
 
 
 /*
- * create_distributed_table inserts the table and partition column information
- * into the partition metadata table. Note that this function currently assumes
- * the table is hash partitioned.
+ * master_create_distributed_table inserts the table and partition column
+ * information into the partition metadata table. Note that this function
+ * currently assumes the table is hash partitioned.
  */
 Datum
-create_distributed_table(PG_FUNCTION_ARGS)
+master_create_distributed_table(PG_FUNCTION_ARGS)
 {
 	text *tableNameText = PG_GETARG_TEXT_P(0);
 	text *partitionColumnText = PG_GETARG_TEXT_P(1);
@@ -93,16 +93,16 @@ create_distributed_table(PG_FUNCTION_ARGS)
 
 
 /*
- * create_shards creates empty shards for the given table based on the specified
- * number of initial shards. The function first gets a list of candidate nodes
- * and issues DDL commands on the nodes to create empty shard placements on
- * those nodes. The function then updates metadata on the master node to make
- * this shard (and its placements) visible. Note that the function assumes the
- * table is hash partitioned and calculates the min/max hash token ranges for
- * each shard, giving them an equal split of the hash space.
+ * master_create_worker_shards creates empty shards for the given table based
+ * on the specified number of initial shards. The function first gets a list of
+ * candidate nodes and issues DDL commands on the nodes to create empty shard
+ * placements on those nodes. The function then updates metadata on the master
+ * node to make this shard (and its placements) visible. Note that the function
+ * assumes the table is hash partitioned and calculates the min/max hash token
+ * ranges for each shard, giving them an equal split of the hash space.
  */
 Datum
-create_shards(PG_FUNCTION_ARGS)
+master_create_worker_shards(PG_FUNCTION_ARGS)
 {
 	text *tableNameText = PG_GETARG_TEXT_P(0);
 	uint32 shardCount = PG_GETARG_UINT32(1);

@@ -43,8 +43,8 @@ extern List * SortList(List *pointerList,
 					   int (*ComparisonFunction)(const void *, const void *));
 
 /* function declarations for initializing a distributed table */
-extern Datum create_distributed_table(PG_FUNCTION_ARGS);
-extern Datum create_shards(PG_FUNCTION_ARGS);
+extern Datum master_create_distributed_table(PG_FUNCTION_ARGS);
+extern Datum master_create_worker_shards(PG_FUNCTION_ARGS);
 
 
 #endif /* CREATE_SHARDS_H */
