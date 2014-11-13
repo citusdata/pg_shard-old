@@ -61,7 +61,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 
 	List *shardPlacements = NIL;
 	ShardPlacement *placementToRepair = NULL;
-	ShardPlacement *healthyPlacement = NULL;
+	ShardPlacement *healthyPlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
 
