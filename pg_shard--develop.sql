@@ -51,13 +51,13 @@ SELECT pg_catalog.pg_extension_config_dump(
 
 -- define the table distribution functions
 CREATE FUNCTION create_distributed_table(tablename text, partitioncolumn text,
-                                         partitionmethod "char" DEFAULT 'h')
+										 partitionmethod "char" DEFAULT 'h')
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
 CREATE FUNCTION create_shards(tablename text, shardcount integer,
-                              replicationfactor integer DEFAULT 2)
+							  replicationfactor integer DEFAULT 2)
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
