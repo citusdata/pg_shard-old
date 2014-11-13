@@ -39,8 +39,6 @@
 static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 												   char *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
-static bool CopyDataFromFinalizedPlacement(ShardPlacement *inactivePlacement,
-										   ShardPlacement *healthyPlacement);
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(repair_shard_placement);
@@ -67,7 +65,6 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 	ShardPlacement *healthyPlacement = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
-	bool dataCopied = false;
 
 	/*
 	 * By taking an exclusive lock on the shard, we both stop all modifications
@@ -98,11 +95,8 @@ repair_shard_placement(PG_FUNCTION_ARGS)
 
 	HOLD_INTERRUPTS();
 
-	dataCopied = CopyDataFromFinalizedPlacement(placementToRepair, healthyPlacement);
-	if (!dataCopied)
-	{
-		ereport(ERROR, (errmsg("failed to copy placement data")));
-	}
+	/* TODO: implement row copying functionality */
+	ereport(ERROR, (errmsg("shard placement repair not fully implemented")));
 
 	/* the placement is repaired, so return to finalized state */
 	DeleteShardPlacementRow(placementToRepair->id);
@@ -194,15 +188,3 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	return extendedRecreateCommandList;
 }
 
-
-/*
- * CopyDataFromFinalizedPlacement fills the specified inactive placement with
- * data from a finalized placement.
- */
-static bool
-CopyDataFromFinalizedPlacement(__attribute__ ((unused)) ShardPlacement *inactivePlacement,
-							   __attribute__ ((unused)) ShardPlacement *healthyPlacement)
-{
-	/* TODO: Implement */
-	return true;
-}
