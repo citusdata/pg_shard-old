@@ -22,7 +22,6 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "pg_config.h"
 #include "pg_config_manual.h"
 #include "postgres_ext.h"
 
@@ -38,9 +37,7 @@
 #include "access/htup.h"
 #include "access/htup_details.h"
 #include "access/tupdesc.h"
-#include "catalog/namespace.h"
 #include "catalog/pg_attribute.h"
-#include "catalog/pg_class.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"

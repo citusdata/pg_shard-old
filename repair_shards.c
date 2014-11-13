@@ -15,14 +15,12 @@
 #include "c.h"
 #include "fmgr.h"
 #include "miscadmin.h"
-#include "pg_config.h"
 #include "postgres_ext.h"
 
 #include "connection.h"
 #include "repair_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
-#include "ruleutils.h"
 
 #include <string.h>
 
