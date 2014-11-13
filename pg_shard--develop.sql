@@ -63,9 +63,11 @@ AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
 -- define the repair functions
-CREATE FUNCTION master_copy_shard_placement(bad_node_name text, bad_node_port integer,
-											good_node_name text, good_node_port integer,
-											shard_id bigint)
+CREATE FUNCTION master_copy_shard_placement(shard_id bigint,
+											source_node_name text,
+											source_node_port integer,
+											target_node_name text,
+											target_node_port integer)
 RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;

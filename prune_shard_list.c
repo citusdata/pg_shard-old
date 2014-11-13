@@ -243,7 +243,7 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 
 
 /*
- * SimpleOpExpression returns the operator oid for the given type, access
+ * GetOperatorByType returns the operator oid for the given type, access
  * method, and strategy number.
  */
 static Oid

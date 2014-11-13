@@ -39,29 +39,34 @@ static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 												   char *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 
+
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(master_copy_shard_placement);
 
 
 /*
- * master_copy_shard_placement implements a user-facing UDF to repair a
- * specific inactive placement using data from a specific healthy placement.
- * If the repair fails at any point, this function throws an error.
+ * master_copy_shard_placement implements a user-facing UDF to copy data from
+ * a healthy (source) node to an inactive (target) node. To accomplish this it
+ * entirely recreates the table structure before copying all data. During this
+ * time all modifications are paused to the shard. After successful repair, the
+ * inactive placement is marked healthy and modifications may continue. If the
+ * repair fails at any point, this function throws an error, leaving the node
+ * in an unhealthy state.
  */
 Datum
 master_copy_shard_placement(PG_FUNCTION_ARGS)
 {
-	char *unhealthyNodeName = PG_GETARG_CSTRING(0);
-	int32 unhealthyNodePort = PG_GETARG_INT32(1);
-	char *healthyNodeName = PG_GETARG_CSTRING(2);
-	int32 healthyNodePort = PG_GETARG_INT32(3);
-	int64 shardId = PG_GETARG_INT64(4);
+	int64 shardId = PG_GETARG_INT64(0);
+	char *sourceNodeName = PG_GETARG_CSTRING(1);
+	int32 sourceNodePort = PG_GETARG_INT32(2);
+	char *targetNodeName = PG_GETARG_CSTRING(3);
+	int32 targetNodePort = PG_GETARG_INT32(4);
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Oid distributedTableId = shardInterval->relationId;
 
 	List *shardPlacements = NIL;
-	ShardPlacement *placementToRepair = NULL;
-	ShardPlacement *healthyPlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
+	ShardPlacement *targetPlacement = NULL;
+	ShardPlacement *sourcePlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
 
@@ -73,19 +78,19 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	LockShard(shardId, ExclusiveLock);
 
 	shardPlacements = LoadShardPlacementList(shardId);
-	placementToRepair = SearchShardPlacementInList(shardPlacements, unhealthyNodeName,
-												   unhealthyNodePort);
-	healthyPlacement = SearchShardPlacementInList(shardPlacements, healthyNodeName,
-												  healthyNodePort);
+	targetPlacement = SearchShardPlacementInList(shardPlacements, targetNodeName,
+												 targetNodePort);
+	sourcePlacement = SearchShardPlacementInList(shardPlacements, sourceNodeName,
+												 sourceNodePort);
 
-	Assert(placementToRepair->shardState == STATE_INACTIVE);
-	Assert(healthyPlacement->shardState == STATE_FINALIZED);
+	Assert(targetPlacement->shardState == STATE_INACTIVE);
+	Assert(sourcePlacement->shardState == STATE_FINALIZED);
 
 	/* retrieve the DDL commands for the table and run them */
 	ddlCommandList = RecreateTableDDLCommandList(distributedTableId, shardId);
 
-	recreated = ExecuteRemoteCommandList(placementToRepair->nodeName,
-										 placementToRepair->nodePort,
+	recreated = ExecuteRemoteCommandList(targetPlacement->nodeName,
+										 targetPlacement->nodePort,
 										 ddlCommandList);
 	if (!recreated)
 	{
@@ -98,10 +103,10 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	ereport(ERROR, (errmsg("shard placement repair not fully implemented")));
 
 	/* the placement is repaired, so return to finalized state */
-	DeleteShardPlacementRow(placementToRepair->id);
-	InsertShardPlacementRow(placementToRepair->id, placementToRepair->shardId,
-							STATE_FINALIZED, placementToRepair->nodeName,
-							placementToRepair->nodePort);
+	DeleteShardPlacementRow(targetPlacement->id);
+	InsertShardPlacementRow(targetPlacement->id, targetPlacement->shardId,
+							STATE_FINALIZED, targetPlacement->nodeName,
+							targetPlacement->nodePort);
 
 	RESUME_INTERRUPTS();
 
@@ -128,7 +133,6 @@ SearchShardPlacementInList(List *shardPlacementList, char *nodeName, int32 nodeP
 			nodePort == shardPlacement->nodePort)
 		{
 			matchingPlacement = shardPlacement;
-
 			break;
 		}
 	}
@@ -190,4 +194,3 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 
 	return extendedRecreateCommandList;
 }
-
