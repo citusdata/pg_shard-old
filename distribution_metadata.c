@@ -185,6 +185,7 @@ LookupShardIntervalListCache(Oid distributedTableId)
 
 		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
 
+		/* load the shard interval list and enter it into the cache */
 		List *shardList = LoadShardList(distributedTableId);
 		foreach(shardCell, shardList)
 		{
