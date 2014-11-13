@@ -299,7 +299,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		char *linePointer = NULL;
 		uint32 nodePort = 0;
 		int parsedValues = 0;
-		char nodeName[MAX_NODE_LENGTH];
+		char nodeName[MAX_NODE_LENGTH + 1];
 		memset(nodeName, 0, MAX_NODE_LENGTH);
 
 		if (strnlen(workerNodeLine, MAXPGPATH) == MAXPGPATH - 1)
@@ -323,7 +323,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		}
 
 		/* parse out the node name and node port */
-		parsedValues = sscanf(workerNodeLine, "%s%u", nodeName, &nodePort);
+		parsedValues = sscanf(workerNodeLine, "%" STRINGIFY(MAX_NODE_LENGTH)
+							  "s%*[ \t]%10u", nodeName, &nodePort);
 		if (parsedValues != 2)
 		{
 			ereport(ERROR, (errmsg("unable to parse worker node line: %s",
@@ -332,8 +333,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 
 		/* allocate worker node structure and set fields */
 		workerNode = (WorkerNode *) palloc0(sizeof(WorkerNode));
-		workerNode->nodeName = palloc(sizeof(char) * MAX_NODE_LENGTH);
-		strlcpy(workerNode->nodeName, nodeName, MAX_NODE_LENGTH);
+		workerNode->nodeName = palloc(sizeof(char) * MAX_NODE_LENGTH + 1);
+		strlcpy(workerNode->nodeName, nodeName, MAX_NODE_LENGTH + 1);
 		workerNode->nodePort = nodePort;
 
 		workerNodeList = lappend(workerNodeList, workerNode);
