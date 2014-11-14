@@ -841,9 +841,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		connection = GetConnection(nodeName, nodePort);
 		if (connection == NULL)
 		{
-			ereport(WARNING, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
 			failedPlacementList = lappend(failedPlacementList, taskPlacement);
-
 			continue;
 		}
 
@@ -851,8 +849,9 @@ ExecuteDistributedModify(DistributedPlan *plan)
 		if (PQresultStatus(result) != PGRES_COMMAND_OK)
 		{
 			ReportRemoteError(connection, result);
-			failedPlacementList = lappend(failedPlacementList, taskPlacement);
+			PQclear(result);
 
+			failedPlacementList = lappend(failedPlacementList, taskPlacement);
 			continue;
 		}
 
