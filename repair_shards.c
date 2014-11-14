@@ -64,7 +64,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Oid distributedTableId = shardInterval->relationId;
 
-	List *shardPlacements = NIL;
+	List *shardPlacementList = NIL;
 	ShardPlacement *targetPlacement = NULL;
 	ShardPlacement *sourcePlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
 	List *ddlCommandList = NIL;
@@ -77,10 +77,10 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	 */
 	LockShard(shardId, ExclusiveLock);
 
-	shardPlacements = LoadShardPlacementList(shardId);
-	targetPlacement = SearchShardPlacementInList(shardPlacements, targetNodeName,
+	shardPlacementList = LoadShardPlacementList(shardId);
+	targetPlacement = SearchShardPlacementInList(shardPlacementList, targetNodeName,
 												 targetNodePort);
-	sourcePlacement = SearchShardPlacementInList(shardPlacements, sourceNodeName,
+	sourcePlacement = SearchShardPlacementInList(shardPlacementList, sourceNodeName,
 												 sourceNodePort);
 
 	Assert(targetPlacement->shardState == STATE_INACTIVE);
