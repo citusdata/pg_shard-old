@@ -242,7 +242,10 @@ MakeOpExpression(Var *variable, int16 strategyNumber)
 }
 
 
-/* Returns operator oid for the given type, access method, and strategy number. */
+/*
+ * GetOperatorByType returns the operator oid for the given type, access
+ * method, and strategy number.
+ */
 static Oid
 GetOperatorByType(Oid typeId, Oid accessMethodId, int16 strategyNumber)
 {

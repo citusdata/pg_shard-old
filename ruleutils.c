@@ -22,11 +22,11 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "pg_config.h"
 #include "pg_config_manual.h"
 #include "postgres_ext.h"
 
 #include "ruleutils.h"
+#include "ddl_commands.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -37,9 +37,7 @@
 #include "access/htup.h"
 #include "access/htup_details.h"
 #include "access/tupdesc.h"
-#include "catalog/namespace.h"
 #include "catalog/pg_attribute.h"
-#include "catalog/pg_class.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -76,8 +74,6 @@
 #pragma GCC diagnostic ignored "-Wempty-body"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wswitch"
-
-#define SHARD_SUFFIX_SEPARATOR '_'
 
 /* ----------
  * Pretty formatting constants
@@ -389,8 +385,7 @@ static Node *processIndirection(Node *node, deparse_context *context,
 				   bool printit);
 static void printSubscripts(ArrayRef *aref, deparse_context *context);
 static char *get_relation_name(Oid relid);
-static char *generate_shard_name(Oid relid, int64 shardid, List *namespaces);
-static char *generate_relation_name(Oid relid, List *namespaces);
+static char *generate_shard_name(Oid relid, int64 shardid);
 static char *generate_function_name(Oid funcid, int nargs,
 					   List *argnames, Oid *argtypes,
 					   bool was_variadic, bool *use_variadic_p);
@@ -2699,7 +2694,7 @@ get_insert_query_def(Query *query, deparse_context *context)
 		appendStringInfoChar(buf, ' ');
 	}
 	appendStringInfo(buf, "INSERT INTO %s ",
-					 generate_shard_name(rte->relid, context->shardid, NIL));
+					 generate_shard_name(rte->relid, context->shardid));
 
 	/*
 	 * Add the insert-column-names list.  To handle indirection properly, we
@@ -2819,7 +2814,7 @@ get_update_query_def(Query *query, deparse_context *context)
 	}
 	appendStringInfo(buf, "UPDATE %s%s",
 					 only_marker(rte),
-					 generate_shard_name(rte->relid, context->shardid, NIL));
+					 generate_shard_name(rte->relid, context->shardid));
 	if (rte->alias != NULL)
 		appendStringInfo(buf, " %s",
 						 quote_identifier(rte->alias->aliasname));
@@ -2903,7 +2898,7 @@ get_delete_query_def(Query *query, deparse_context *context)
 	}
 	appendStringInfo(buf, "DELETE FROM %s%s",
 					 only_marker(rte),
-					 generate_shard_name(rte->relid, context->shardid, NIL));
+					 generate_shard_name(rte->relid, context->shardid));
 	if (rte->alias != NULL)
 		appendStringInfo(buf, " %s",
 						 quote_identifier(rte->alias->aliasname));
@@ -5811,7 +5806,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				/* Normal relation RTE */
 				appendStringInfo(buf, "%s%s",
 								 only_marker(rte),
-								 generate_shard_name(rte->relid, context->shardid, NIL));
+								 generate_shard_name(rte->relid, context->shardid));
 				break;
 			case RTE_SUBQUERY:
 				/* Subquery RTE */
@@ -6189,102 +6184,23 @@ get_relation_name(Oid relid)
  * generate_shard_name
  *		Compute the name to display for a particular shard of a given relation
  *
- * The function calls generate_relation_name to produce the standard name for
- * the relation and operates on that result to append a shard suffix. If the
+ * The function calls get_relation_name to produce the standard name for the
+ * relation and operates on that result to append a shard suffix. If the
  * provided shardid is non-positive, no suffix is appended.
  */
 static char *
-generate_shard_name(Oid relid, int64 shardid, List *namespaces)
+generate_shard_name(Oid relid, int64 shardid)
 {
-	char		   *relname;
-	int				len;
-	bool			quoted;
-	StringInfoData	buf;
-
-	initStringInfo(&buf);
-
-	relname = generate_relation_name(relid, namespaces);
+	char *relname = get_relation_name(relid);
 
 	if (shardid <= 0)
 		return relname;
 
-	len = strlen(relname);
-	quoted = (relname[len - 1] == '"');
+	AppendShardIdToName(&relname, shardid);
 
-	if (quoted)
-		relname[len - 1] = '\0';
+	relname = (char *) quote_identifier(relname);
 
-	appendStringInfo(&buf, "%s%c"INT64_FORMAT, relname, SHARD_SUFFIX_SEPARATOR,
-					 shardid);
-
-	if (quoted)
-		appendStringInfoChar(&buf, '"');
-
-	return buf.data;
-}
-
-/*
- * generate_relation_name
- *		Compute the name to display for a relation specified by OID
- *
- * The result includes all necessary quoting and schema-prefixing.
- *
- * If namespaces isn't NIL, it must be a list of deparse_namespace nodes.
- * We will forcibly qualify the relation name if it equals any CTE name
- * visible in the namespace list.
- */
-static char *
-generate_relation_name(Oid relid, List *namespaces)
-{
-	HeapTuple	tp;
-	Form_pg_class reltup;
-	bool		need_qual;
-	ListCell   *nslist;
-	char	   *relname;
-	char	   *nspname;
-	char	   *result;
-
-	tp = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
-	if (!HeapTupleIsValid(tp))
-		elog(ERROR, "cache lookup failed for relation %u", relid);
-	reltup = (Form_pg_class) GETSTRUCT(tp);
-	relname = NameStr(reltup->relname);
-
-	/* Check for conflicting CTE name */
-	need_qual = false;
-	foreach(nslist, namespaces)
-	{
-		deparse_namespace *dpns = (deparse_namespace *) lfirst(nslist);
-		ListCell   *ctlist;
-
-		foreach(ctlist, dpns->ctes)
-		{
-			CommonTableExpr *cte = (CommonTableExpr *) lfirst(ctlist);
-
-			if (strcmp(cte->ctename, relname) == 0)
-			{
-				need_qual = true;
-				break;
-			}
-		}
-		if (need_qual)
-			break;
-	}
-
-	/* Otherwise, qualify the name if not visible in search path */
-	if (!need_qual)
-		need_qual = !RelationIsVisible(relid);
-
-	if (need_qual)
-		nspname = get_namespace_name(reltup->relnamespace);
-	else
-		nspname = NULL;
-
-	result = quote_qualified_identifier(nspname, relname);
-
-	ReleaseSysCache(tp);
-
-	return result;
+	return relname;
 }
 
 /*

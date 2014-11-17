@@ -54,7 +54,6 @@ static Node * ParseTreeNode(const char *ddlCommand);
 static void ExtendDDLCommand(Node *parseTree, uint64 shardId);
 static bool TypeAddIndexConstraint(const AlterTableCmd *command);
 static void AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId);
-static void AppendShardIdToName(char **name, uint64 shardId);
 static char * DeparseDDLCommand(Node *ddlCommandNode, Oid masterRelationId);
 static char * DeparseAlterTableStmt(AlterTableStmt *alterTableStmt);
 static char * DeparseIndexConstraint(Constraint *constraint);
@@ -287,7 +286,7 @@ AppendShardIdToConstraintName(AlterTableCmd *command, uint64 shardId)
  * the name's address in order to reallocate memory for the name in the same
  * memory context the name was originally created in.
  */
-static void
+void
 AppendShardIdToName(char **name, uint64 shardId)
 {
 	char   extendedName[NAMEDATALEN];

@@ -13,6 +13,7 @@
 
 #include "postgres.h"
 #include "fmgr.h"
+#include "miscadmin.h"
 #include "pg_config.h"
 
 #include "distribution_metadata.h"
@@ -790,4 +791,36 @@ NextSequenceId(char *sequenceName)
 	uint64 nextSequenceId = (uint64) DatumGetInt64(sequenceIdDatum);
 
 	return nextSequenceId;
+}
+
+
+/*
+ * LockShard returns after acquiring a lock for the specified shard, blocking
+ * indefinitely if required. Only the ExclusiveLock and ShareLock modes are
+ * supported: all others will trigger an error. Locks acquired with this method
+ * are automatically released at transaction end.
+ */
+void
+LockShard(int64 shardId, LOCKMODE lockMode)
+{
+	/* locks use 32-bit identifier fields, so split shardId */
+	uint32 keyUpperHalf = (uint32) (shardId >> 32);
+	uint32 keyLowerHalf = (uint32) shardId;
+
+	LOCKTAG lockTag;
+	memset(&lockTag, 0, sizeof(LOCKTAG));
+
+	SET_LOCKTAG_ADVISORY(lockTag, MyDatabaseId, keyUpperHalf, keyLowerHalf, 0);
+
+	if (lockMode == ExclusiveLock || lockMode == ShareLock)
+	{
+		bool sessionLock = false;	/* we want a transaction lock */
+		bool dontWait = false;		/* block indefinitely until acquired */
+
+		(void) LockAcquire(&lockTag, lockMode, sessionLock, dontWait);
+	}
+	else
+	{
+		ereport(ERROR, (errmsg("attempted to lock shard using unsupported mode")));
+	}
 }

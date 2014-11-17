@@ -49,23 +49,22 @@ static Oid ResolveRelationId(text *relationName);
 static void CheckHashPartitionedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
-static bool WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
 static text * IntegerToText(int32 value);
 
 
 /* declarations for dynamic loading */
-PG_FUNCTION_INFO_V1(create_distributed_table);
-PG_FUNCTION_INFO_V1(create_shards);
+PG_FUNCTION_INFO_V1(master_create_distributed_table);
+PG_FUNCTION_INFO_V1(master_create_worker_shards);
 
 
 /*
- * create_distributed_table inserts the table and partition column information
- * into the partition metadata table. Note that this function currently assumes
- * the table is hash partitioned.
+ * master_create_distributed_table inserts the table and partition column
+ * information into the partition metadata table. Note that this function
+ * currently assumes the table is hash partitioned.
  */
 Datum
-create_distributed_table(PG_FUNCTION_ARGS)
+master_create_distributed_table(PG_FUNCTION_ARGS)
 {
 	text *tableNameText = PG_GETARG_TEXT_P(0);
 	text *partitionColumnText = PG_GETARG_TEXT_P(1);
@@ -94,16 +93,16 @@ create_distributed_table(PG_FUNCTION_ARGS)
 
 
 /*
- * create_shards creates empty shards for the given table based on the specified
- * number of initial shards. The function first gets a list of candidate nodes
- * and issues DDL commands on the nodes to create empty shard placements on
- * those nodes. The function then updates metadata on the master node to make
- * this shard (and its placements) visible. Note that the function assumes the
- * table is hash partitioned and calculates the min/max hash token ranges for
- * each shard, giving them an equal split of the hash space.
+ * master_create_worker_shards creates empty shards for the given table based
+ * on the specified number of initial shards. The function first gets a list of
+ * candidate nodes and issues DDL commands on the nodes to create empty shard
+ * placements on those nodes. The function then updates metadata on the master
+ * node to make this shard (and its placements) visible. Note that the function
+ * assumes the table is hash partitioned and calculates the min/max hash token
+ * ranges for each shard, giving them an equal split of the hash space.
  */
 Datum
-create_shards(PG_FUNCTION_ARGS)
+master_create_worker_shards(PG_FUNCTION_ARGS)
 {
 	text *tableNameText = PG_GETARG_TEXT_P(0);
 	uint32 shardCount = PG_GETARG_UINT32(1);
@@ -192,7 +191,8 @@ create_shards(PG_FUNCTION_ARGS)
 			char *nodeName = candidateNode->nodeName;
 			uint32 nodePort = candidateNode->nodePort;
 
-			bool created = WorkerCreateShard(nodeName, nodePort, extendedDDLCommands);
+			bool created = ExecuteRemoteCommandList(nodeName, nodePort,
+													extendedDDLCommands);
 			if (created)
 			{
 				uint64 shardPlacementId = NextSequenceId(SHARD_PLACEMENT_ID_SEQUENCE_NAME);
@@ -410,15 +410,15 @@ CompareWorkerNodes(const void *leftElement, const void *rightElement)
 
 
 /*
- * WorkerCreateShard applies the given DDL commands to create the shard on the
- * worker node.
+ * ExecuteRemoteCommandList executes the given commands in a single transaction
+ * on the specified node.
  */
-static bool
-WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList)
+bool
+ExecuteRemoteCommandList(char *nodeName, uint32 nodePort, List *sqlCommandList)
 {
-	bool shardCreated = true;
-	ListCell *ddlCommandCell = NULL;
-	bool ddlCommandIssued = false;
+	bool commandListExecuted = true;
+	ListCell *sqlCommandCell = NULL;
+	bool sqlCommandIssued = false;
 	bool beginIssued = false;
 
 	PGconn *connection = GetConnection(nodeName, nodePort);
@@ -427,39 +427,39 @@ WorkerCreateShard(char *nodeName, uint32 nodePort, List *ddlCommandList)
 		return false;
 	}
 
-	/* begin a transaction before we start applying the ddl commands */
+	/* begin a transaction before we start executing commands */
 	beginIssued = ExecuteRemoteCommand(connection, BEGIN_COMMAND);
 	if (!beginIssued)
 	{
 		return false;
 	}
 
-	foreach(ddlCommandCell, ddlCommandList)
+	foreach(sqlCommandCell, sqlCommandList)
 	{
-		char *ddlCommand = (char *) lfirst(ddlCommandCell);
+		char *sqlCommand = (char *) lfirst(sqlCommandCell);
 
-		ddlCommandIssued = ExecuteRemoteCommand(connection, ddlCommand);
-		if (!ddlCommandIssued)
+		sqlCommandIssued = ExecuteRemoteCommand(connection, sqlCommand);
+		if (!sqlCommandIssued)
 		{
 			break;
 		}
 	}
 
-	if (ddlCommandIssued)
+	if (sqlCommandIssued)
 	{
 		bool commitIssued = ExecuteRemoteCommand(connection, COMMIT_COMMAND);
 		if (!commitIssued)
 		{
-			shardCreated = false;
+			commandListExecuted = false;
 		}
 	}
 	else
 	{
 		ExecuteRemoteCommand(connection, ROLLBACK_COMMAND);
-		shardCreated = false;
+		commandListExecuted = false;
 	}
 
-	return shardCreated;
+	return commandListExecuted;
 }
 
 

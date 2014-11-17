@@ -21,6 +21,7 @@
 
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
+#include "storage/lock.h"
 
 
 /* schema for configuration related to distributed tables */
@@ -136,6 +137,7 @@ extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 									uint32 nodePort);
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
+extern void LockShard(int64 shardId, LOCKMODE lockMode);
 extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 
 
