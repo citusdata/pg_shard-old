@@ -98,8 +98,6 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 	foreach(shardIntervalCell, shardIntervalList)
 	{
 		ShardInterval *shardInterval = lfirst(shardIntervalCell);
-		int64 *shardIdPointer = &(shardInterval->id);
-		int64 shardId = (*shardIdPointer);
 		List *constraintList = NIL;
 		bool shardPruned = false;
 
@@ -111,10 +109,11 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 		if (shardPruned)
 		{
 			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
-									UINT64_FORMAT, shardId)));
+									UINT64_FORMAT, shardInterval->id)));
 		}
 		else
 		{
+			int64 *shardIdPointer = &(shardInterval->id);
 			remainingShardList = lappend(remainingShardList, shardIdPointer);
 		}
 	}
@@ -436,6 +435,9 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	hashResultTypeEntry = lookup_type_cache(hashResultTypeId, TYPECACHE_EQ_OPR);
 	operatorId = hashResultTypeEntry->eq_opr;
 
+	/* Get a column with int4 type */
+	hashedColumn = MakeInt4Column();
+
 	/* Load the hash function from type cache */
 	typeEntry = lookup_type_cache(constant->consttype, TYPECACHE_HASH_PROC_FINFO);
 	hashFunction = &(typeEntry->hash_proc_finfo);
@@ -452,8 +454,6 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 	 */
 	hashedValue = FunctionCall1(hashFunction, constant->constvalue);
 	hashedConstant = MakeInt4Constant(hashedValue);
-
-	hashedColumn = MakeInt4Column();
 
 	/* Now create the expression with modified partition column and hashed constant */
 	hashedExpression = (OpExpr *) make_opclause(operatorId,

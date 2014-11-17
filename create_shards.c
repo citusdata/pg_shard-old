@@ -122,7 +122,7 @@ create_shards(PG_FUNCTION_ARGS)
 	CheckHashPartitionedTable(distributedTableId);
 
 	/* validate that shards haven't already been created for this table */
-	existingShardList = LoadShardList(distributedTableId);
+	existingShardList = LoadShardIntervalList(distributedTableId);
 	if (existingShardList != NIL)
 	{
 		ereport(ERROR, (errmsg("cannot create new shards for table"),

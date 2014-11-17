@@ -131,8 +131,8 @@ typedef struct ShardIntervalListCacheEntry
 } ShardIntervalListCacheEntry;
 
 
-extern List * LookupShardIntervalListCache(Oid distributedTableId);
-extern List * LoadShardList(Oid distributedTableId);
+extern List * LookupShardIntervalList(Oid distributedTableId);
+extern List * LoadShardIntervalList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);
 extern List * LoadFinalizedShardPlacementList(uint64 shardId);
 extern List * LoadShardPlacementList(int64 shardId);
