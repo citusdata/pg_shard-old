@@ -16,10 +16,12 @@
 
 #include "c.h"
 
+#include "access/tupdesc.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/plannodes.h"
 #include "lib/stringinfo.h"
+#include "utils/tuplestore.h"
 
 
 #define PG_SHARD_EXTENSION_NAME "pg_shard"
@@ -86,6 +88,8 @@ typedef struct Task
 /* Function declarations for extension loading and unloading */
 extern void _PG_init(void);
 extern void _PG_fini(void);
+extern bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
+									   Tuplestorestate *tupleStore);
 
 
 #endif /* PG_SHARD_H */

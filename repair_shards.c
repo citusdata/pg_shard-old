@@ -14,6 +14,7 @@
 #include "postgres.h"
 #include "c.h"
 #include "fmgr.h"
+#include "libpq-fe.h"
 #include "miscadmin.h"
 #include "postgres_ext.h"
 
@@ -21,6 +22,7 @@
 #include "repair_shards.h"
 #include "ddl_commands.h"
 #include "distribution_metadata.h"
+#include "ruleutils.h"
 
 #include <string.h>
 
@@ -38,7 +40,9 @@
 static ShardPlacement * SearchShardPlacementInList(List *shardPlacementList,
 												   char *nodeName, int32 nodePort);
 static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
-
+static bool CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
+										   ShardPlacement *healthyPlacement,
+										   Oid distributedTableId, int64 shardId);
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(master_copy_shard_placement);
@@ -69,6 +73,7 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	ShardPlacement *sourcePlacement PG_USED_FOR_ASSERTS_ONLY = NULL;
 	List *ddlCommandList = NIL;
 	bool recreated = false;
+	bool dataCopied = false;
 
 	/*
 	 * By taking an exclusive lock on the shard, we both stop all modifications
@@ -98,9 +103,12 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 	}
 
 	HOLD_INTERRUPTS();
-
-	/* TODO: implement row copying functionality */
-	ereport(ERROR, (errmsg("shard placement repair not fully implemented")));
+	dataCopied = CopyDataFromFinalizedPlacement(sourcePlacement, targetPlacement,
+												distributedTableId, shardId);
+	if (!dataCopied)
+	{
+		ereport(ERROR, (errmsg("failed to copy placement data")));
+	}
 
 	/* the placement is repaired, so return to finalized state */
 	DeleteShardPlacementRow(targetPlacement->id);
@@ -171,11 +179,13 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	/* build appropriate DROP command based on relation kind */
 	if (relationKind == RELKIND_RELATION)
 	{
-		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND, shardName);
+		appendStringInfo(extendedDropCommand, DROP_REGULAR_TABLE_COMMAND,
+						 quote_identifier(shardName));
 	}
 	else if (relationKind == RELKIND_FOREIGN_TABLE)
 	{
-		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND, shardName);
+		appendStringInfo(extendedDropCommand, DROP_FOREIGN_TABLE_COMMAND,
+						 quote_identifier(shardName));
 	}
 	else
 	{
@@ -193,4 +203,68 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 											 extendedCreateCommandList);
 
 	return extendedRecreateCommandList;
+}
+
+
+/*
+ * CopyDataFromFinalizedPlacement connects to an unhealthy placement and
+ * directs it to copy the specified shard from a certain healthy placement.
+ * This function assumes that the unhealthy placement already has a schema
+ * in place to receive rows from the healthy placement. This function returns
+ * a boolean indicating success or failure.
+ */
+static bool
+CopyDataFromFinalizedPlacement(ShardPlacement *placementToRepair,
+							   ShardPlacement *healthyPlacement,
+							   Oid distributedTableId, int64 shardId)
+{
+	char *relationName = get_rel_name(distributedTableId);
+	const char *shardName = NULL;
+	char *nodeName = placementToRepair->nodeName;
+	int32 nodePort = placementToRepair->nodePort;
+	StringInfo copyRelationQuery = makeStringInfo();
+
+	PGconn *connection = NULL;
+	PGresult *result = NULL;
+	char *copySuccessfulString = NULL;
+	bool copySuccessful = false;
+	bool responseParsedSuccessfully = false;
+
+	AppendShardIdToName(&relationName, shardId);
+	shardName = quote_identifier(relationName);
+
+	connection = GetConnection(nodeName, nodePort);
+	if (connection == NULL)
+	{
+		ereport(WARNING, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
+
+		return false;
+	}
+
+	appendStringInfo(copyRelationQuery, COPY_RELATION_QUERY,
+					 quote_literal_cstr(shardName),
+					 quote_literal_cstr(healthyPlacement->nodeName),
+					 healthyPlacement->nodePort);
+
+
+	result = PQexec(connection, copyRelationQuery->data);
+	if (PQresultStatus(result) != PGRES_TUPLES_OK)
+	{
+		ReportRemoteError(connection, result);
+		PQclear(result);
+
+		return false;
+	}
+
+	Assert(PQntuples(result) == 1);
+	Assert(PQnfields(result) == 1);
+
+	copySuccessfulString = PQgetvalue(result, 0, 0);
+	responseParsedSuccessfully = parse_bool(copySuccessfulString, &copySuccessful);
+
+	Assert(responseParsedSuccessfully);
+
+	PQclear(result);
+
+	return true;
 }
