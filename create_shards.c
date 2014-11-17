@@ -285,6 +285,8 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 	List *workerNodeList = NIL;
 	char workerNodeLine[MAXPGPATH];
 	char *workerFilePath = make_absolute_path(workerNodeFilename);
+	char workerLinePattern[1024];
+	memset(workerLinePattern, '\0', sizeof(workerLinePattern));
 
 	FILE *workerFileStream = AllocateFile(workerFilePath, PG_BINARY_R);
 	if (workerFileStream == NULL)
@@ -293,6 +295,10 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 						errmsg("could not open worker file: %s", workerFilePath)));
 	}
 
+	/* build pattern to contain node name length limit */
+	snprintf(workerLinePattern, sizeof(workerLinePattern), "%%%us%%*[ \t]%%10u",
+			 MAX_NODE_LENGTH);
+
 	while (fgets(workerNodeLine, sizeof(workerNodeLine), workerFileStream) != NULL)
 	{
 		WorkerNode *workerNode = NULL;
@@ -300,7 +306,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		uint32 nodePort = 0;
 		int parsedValues = 0;
 		char nodeName[MAX_NODE_LENGTH + 1];
-		memset(nodeName, 0, MAX_NODE_LENGTH);
+		memset(nodeName, '\0', sizeof(nodeName));
 
 		if (strnlen(workerNodeLine, MAXPGPATH) == MAXPGPATH - 1)
 		{
@@ -323,8 +329,7 @@ ParseWorkerNodeFile(char *workerNodeFilename)
 		}
 
 		/* parse out the node name and node port */
-		parsedValues = sscanf(workerNodeLine, "%" STRINGIFY(MAX_NODE_LENGTH)
-							  "s%*[ \t]%10u", nodeName, &nodePort);
+		parsedValues = sscanf(workerNodeLine, workerLinePattern, nodeName, &nodePort);
 		if (parsedValues != 2)
 		{
 			ereport(ERROR, (errmsg("unable to parse worker node line: %s",

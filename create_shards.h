@@ -22,8 +22,6 @@
 
 
 #define WORKER_LIST_FILENAME "pg_worker_list.conf"
-#define STRINGIFY(x) INTERNAL_STRINGIFY(x)
-#define INTERNAL_STRINGIFY(x) #x
 
 /* transaction related commands used in talking to the worker nodes */
 #define BEGIN_COMMAND "BEGIN"
