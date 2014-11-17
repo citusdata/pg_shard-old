@@ -51,14 +51,13 @@
 
 
 /*
- * ShardIntervalListHash is used for caching shard interval lists. It begins
- * uninitialized. The first call to LookupShardIntervalList triggers hash creation.
+ * ShardIntervalListCache is used for caching shard interval lists. It begins
+ * initialized to empty list as there are no items in the cache.
  */
-static HTAB *ShardIntervalListHash = NULL;
+static List *ShardIntervalListCache = NULL;
 
 
 /* local function forward declarations */
-static HTAB * CreateShardIntervalListHash(void);
 static Var * ColumnNameToColumn(Oid relationId, char *columnName);
 static void LoadShardIntervalRow(int64 shardId, Oid *relationId,
 								 char **minValue, char **maxValue);
@@ -150,68 +149,49 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 List *
 LookupShardIntervalList(Oid distributedTableId)
 {
-	ShardIntervalListCacheEntry *intervalListCacheEntry = NULL;
-	bool entryFound = false;
+	ShardIntervalListCacheEntry *matchingCacheEntry = NULL;
+	ListCell *cacheEntryCell = NULL;
 
-	if (ShardIntervalListHash == NULL)
+	/* search the cache */
+	foreach(cacheEntryCell, ShardIntervalListCache)
 	{
-		ShardIntervalListHash = CreateShardIntervalListHash();
+		ShardIntervalListCacheEntry *cacheEntry = lfirst(cacheEntryCell);
+		if (cacheEntry->distributedTableId == distributedTableId)
+		{
+			matchingCacheEntry = cacheEntry;
+			break;
+		}
 	}
 
-	intervalListCacheEntry = hash_search(ShardIntervalListHash, &distributedTableId,
-										 HASH_FIND, &entryFound);
-	if (!entryFound)
+	/* if not found in the cache, load the shard interval and put it in cache */
+	if (matchingCacheEntry == NULL)
 	{
 		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
 
 		List *loadedIntervalList = LoadShardIntervalList(distributedTableId);
-
-		/* don't cache empty shard lists to force reload on next call */
-		if (loadedIntervalList == NIL)
+		if (loadedIntervalList != NIL)
 		{
-			return NIL;
-		}
+			matchingCacheEntry = palloc0(sizeof(ShardIntervalListCacheEntry));
+			matchingCacheEntry->distributedTableId = distributedTableId;
+			matchingCacheEntry->shardIntervalList = loadedIntervalList;
 
-		intervalListCacheEntry = hash_search(ShardIntervalListHash,
-											 &distributedTableId, HASH_ENTER,
-											 &entryFound);
-		intervalListCacheEntry->shardIntervalList = loadedIntervalList;
+			ShardIntervalListCache = lappend(ShardIntervalListCache,
+											 matchingCacheEntry);
+		}
 
 		MemoryContextSwitchTo(oldContext);
 	}
 
-	return intervalListCacheEntry->shardIntervalList;
-}
-
-
-/*
- * CreateShardIntervalListHash returns a newly created hash table suitable for
- * storing unlimited shard intervals indexed by distributed table id.
- */
-static HTAB *
-CreateShardIntervalListHash(void)
-{
-	HTAB *shardIntervalListHash = NULL;	
-	HASHCTL info;
-	int hashFlags = 0;
-
-	/* make sure CacheMemoryContext exists */
-	if (CacheMemoryContext == NULL)
+	/*
+	 * The only case we don't cache the shard list is when the distributed table
+	 * doesn't have any shards. This is to force reloading shard list on next call.
+	 */
+	if (matchingCacheEntry == NULL)
 	{
-		CreateCacheMemoryContext();
+		return NIL;
 	}
 
-	/* construct the shard interval list hash */
-	memset(&info, 0, sizeof(info));
-	info.keysize = sizeof(Oid);
-	info.entrysize = sizeof(ShardIntervalListCacheEntry);
-	info.hash = oid_hash;
-	info.hcxt = CacheMemoryContext;
-	hashFlags = (HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
-
-	shardIntervalListHash = hash_create("pg_shard shard interval lists",
-										128, &info, hashFlags);
-	return shardIntervalListHash;
+	return matchingCacheEntry->shardIntervalList;
 }
 
 
