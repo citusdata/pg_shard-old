@@ -166,7 +166,7 @@ RecreateTableDDLCommandList(Oid relationId, int64 shardId)
 	char relationKind = get_rel_relkind(relationId);
 
 	AppendShardIdToName(&relationName, shardId);
-	shardName = quote_identifier(shardName);
+	shardName = quote_identifier(relationName);
 
 	/* build appropriate DROP command based on relation kind */
 	if (relationKind == RELKIND_RELATION)
