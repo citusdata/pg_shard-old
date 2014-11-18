@@ -113,8 +113,7 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 		}
 		else
 		{
-			int64 *shardIdPointer = &(shardInterval->id);
-			remainingShardList = lappend(remainingShardList, shardIdPointer);
+			remainingShardList = lappend(remainingShardList, &(shardInterval->id));
 		}
 	}
 

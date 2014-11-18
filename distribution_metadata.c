@@ -38,7 +38,6 @@
 #include "nodes/primnodes.h"
 #include "storage/lock.h"
 #include "utils/builtins.h"
-#include "utils/catcache.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
 #include "utils/fmgroids.h"
@@ -54,7 +53,7 @@
  * ShardIntervalListCache is used for caching shard interval lists. It begins
  * initialized to empty list as there are no items in the cache.
  */
-static List *ShardIntervalListCache = NULL;
+static List *ShardIntervalListCache = NIL;
 
 
 /* local function forward declarations */
@@ -175,8 +174,7 @@ LookupShardIntervalList(Oid distributedTableId)
 			matchingCacheEntry->distributedTableId = distributedTableId;
 			matchingCacheEntry->shardIntervalList = loadedIntervalList;
 
-			ShardIntervalListCache = lappend(ShardIntervalListCache,
-											 matchingCacheEntry);
+			ShardIntervalListCache = lappend(ShardIntervalListCache, matchingCacheEntry);
 		}
 
 		MemoryContextSwitchTo(oldContext);
