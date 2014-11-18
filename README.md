@@ -98,7 +98,7 @@ This table will not be used to store any data on the master but rather serves as
 
 ```sql
 -- Pass table name and the column name on which you want to distribute your data
-SELECT create_distributed_table('customer_reviews', 'customer_id');
+SELECT master_create_distributed_table('customer_reviews', 'customer_id');
 ```
 
 This function informs `pg_shard` that the given table is to be hash partitioned
@@ -108,7 +108,7 @@ Now create shards for this table on the worker nodes:
 
 ```sql
 -- Pass the table name, desired shard count and the replication factor
-SELECT create_shards('customer_reviews', 16, 2);
+SELECT master_create_worker_shards('customer_reviews', 16, 2);
 ```
 
 This function does a number of things to set up your distributed table:
