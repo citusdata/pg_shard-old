@@ -16,7 +16,7 @@
 #include "c.h"
 #include "postgres_ext.h"
 
-#include "ddl_commands.h"
+#include "ddl_commands.h" /* IWYU pragma: keep */
 
 #include <stddef.h>
 

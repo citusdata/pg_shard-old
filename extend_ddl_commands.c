@@ -12,7 +12,7 @@
  *-------------------------------------------------------------------------
  */
 
-#include "postgres.h"
+#include "postgres.h" /* IWYU pragma: keep */
 #include "c.h"
 #include "ddl_commands.h"
 #include "pg_config.h"
