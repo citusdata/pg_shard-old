@@ -282,13 +282,14 @@ CheckHashPartitionedTable(Oid distributedTableId)
 static List *
 ParseWorkerNodeFile(char *workerNodeFilename)
 {
+	FILE *workerFileStream = NULL;
 	List *workerNodeList = NIL;
 	char workerNodeLine[MAXPGPATH];
 	char *workerFilePath = make_absolute_path(workerNodeFilename);
 	char workerLinePattern[1024];
 	memset(workerLinePattern, '\0', sizeof(workerLinePattern));
 
-	FILE *workerFileStream = AllocateFile(workerFilePath, PG_BINARY_R);
+	workerFileStream = AllocateFile(workerFilePath, PG_BINARY_R);
 	if (workerFileStream == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_CONFIG_FILE_ERROR),
