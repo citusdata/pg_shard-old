@@ -87,6 +87,8 @@ static PlannerType DeterminePlannerType(Query *query);
 static Oid ExtractFirstDistributedTableId(Query *query);
 static void PgShardExecutorStart(QueryDesc *queryDesc, int eflags);
 static void PgShardExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count);
+static void PgShardExecutorFinish(QueryDesc *queryDesc);
+static void PgShardExecutorEnd(QueryDesc *queryDesc);
 static bool ExtractRangeTableEntryWalker(Node *node, List **rangeTableList);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static List * DistributedQueryShardList(Query *query);
@@ -128,6 +130,8 @@ PG_MODULE_MAGIC;
 static planner_hook_type PreviousPlannerHook = NULL;
 static ExecutorStart_hook_type PreviousExecutorStartHook = NULL;
 static ExecutorRun_hook_type PreviousExecutorRunHook = NULL;
+static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
+static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
 
 
 /*
@@ -146,6 +150,12 @@ _PG_init(void)
 
 	PreviousExecutorRunHook = ExecutorRun_hook;
 	ExecutorRun_hook = PgShardExecutorRun;
+
+	PreviousExecutorFinishHook = ExecutorFinish_hook;
+	ExecutorFinish_hook = PgShardExecutorFinish;
+
+	PreviousExecutorEndHook = ExecutorEnd_hook;
+	ExecutorEnd_hook = PgShardExecutorEnd;
 
 	DefineCustomBoolVariable("pg_shard.all_modifications_commutative",
 							 "Bypasses commutativity checks when enabled", NULL,
@@ -170,6 +180,8 @@ _PG_fini(void)
 {
 	ExecutorRun_hook = PreviousExecutorRunHook;
 	ExecutorStart_hook = PreviousExecutorStartHook;
+	ExecutorFinish_hook = PreviousExecutorFinishHook;
+	ExecutorEnd_hook = PreviousExecutorEndHook;
 	planner_hook = PreviousPlannerHook;
 }
 
@@ -315,43 +327,54 @@ DeterminePlannerType(Query *query)
 
 
 /*
- * PgShardExecutorStart sets up the queryDesc so even distributed queries can
- * benefit from the standard ExecutorStart logic. After that hook finishes its
- * setup work, this function moves the special distributed plan back into place
- * for our run hook.
+ * PgShardExecutorStart sets up the executor state and queryDesc for pgShard
+ * executed statements. The function also handles multi-shard selects
+ * differently by fetching the remote data and modifying the existing plan to
+ * scan that data.
  */
 static void
 PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 {
 	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
 	bool pgShardExecution = IsPgShardPlan(plannedStatement);
-	DistributedPlan *distributedPlan = NULL;
-	bool selectFromMultipleShards = false;
 
 	if (pgShardExecution)
 	{
-		Plan *originalPlan = NULL;
-		bool topLevel = true;
+		DistributedPlan *distributedPlan = (DistributedPlan *) plannedStatement->planTree;
 
-		distributedPlan = (DistributedPlan *) plannedStatement->planTree;
-		originalPlan = distributedPlan->originalPlan;
-
-		/* disallow transactions and triggers during distributed commands */
-		PreventTransactionChain(topLevel, "distributed commands");
-		eflags |= EXEC_FLAG_SKIP_TRIGGERS;
-
-		/* swap in original (local) plan for compatibility with standard start hook */
-		plannedStatement->planTree = originalPlan;
-
-		/*
-		 * If its a SELECT query over multiple shards, we fetch the relevant
-		 * data from the remote nodes and insert it into a temp table. We then
-		 * point the existing plan to scan this temp table instead of the
-		 * original one.
-		 */
-		selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
-		if (selectFromMultipleShards)
+		bool selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
+		if (!selectFromMultipleShards)
         {
+			bool topLevel = true;
+			LOCKMODE lockMode = NoLock;
+			EState *executorState = NULL;
+
+			/* disallow transactions and triggers during distributed commands */
+			PreventTransactionChain(topLevel, "distributed commands");
+			eflags |= EXEC_FLAG_SKIP_TRIGGERS;
+
+			/* build empty executor state to obtain per-query memory context */
+			executorState = CreateExecutorState();
+			executorState->es_top_eflags = eflags;
+			executorState->es_instrument = queryDesc->instrument_options;
+
+			queryDesc->estate = executorState;
+
+			lockMode = CommutativityRuleToLockMode(plannedStatement->commandType);
+			if (lockMode != NoLock)
+			{
+				AcquireExecutorShardLocks(distributedPlan->taskList, lockMode);
+			}
+		}
+		else
+		{
+			/*
+			 * If its a SELECT query over multiple shards, we fetch the relevant
+			 * data from the remote nodes and insert it into a temp table. We then
+			 * point the existing plan to scan this temp table instead of the
+			 * original one.
+			 */
+			Plan *originalPlan = NULL;
             RangeTblEntry *sequentialScanRangeTable = NULL;
             Oid intermediateResultTableId = InvalidOid;
             bool missingOK = false;
@@ -380,37 +403,33 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
             sequentialScanRangeTable = linitial(plannedStatement->rtable);
             Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
             sequentialScanRangeTable->relid = intermediateResultTableId;
-        }
-	}
 
-	/* call the next hook in the chain or the standard one, if no other hook was set */
-	if (PreviousExecutorStartHook != NULL)
-	{
-		PreviousExecutorStartHook(queryDesc, eflags);
+			/* swap in modified (local) plan for compatibility with standard start hook */
+			originalPlan = distributedPlan->originalPlan;
+			plannedStatement->planTree = originalPlan;
+
+			/* call into the standard executor start, or hook if set */
+			if (PreviousExecutorStartHook != NULL)
+			{
+				PreviousExecutorStartHook(queryDesc, eflags);
+			}
+			else
+			{
+				standard_ExecutorStart(queryDesc, eflags);
+			}
+		}
 	}
 	else
 	{
-		standard_ExecutorStart(queryDesc, eflags);
-	}
-
-	if (pgShardExecution)
-	{
-		LOCKMODE lockMode = CommutativityRuleToLockMode(plannedStatement->commandType);
-		if (lockMode != NoLock)
+		/* call the next hook in the chain or the standard one, if no other hook was set */
+		if (PreviousExecutorStartHook != NULL)
 		{
-			AcquireExecutorShardLocks(distributedPlan->taskList, lockMode);
+			PreviousExecutorStartHook(queryDesc, eflags);
 		}
-
-		/*
-		 * If we are selecting from multiple shards, we've already fetched the
-		 * data into the intermediate result table. We can now let PostgreSQL
-		 * execute the original plan.
-		 */
-		if (!selectFromMultipleShards)
-		{
-			/* swap back to the distributed plan for rest of query */
-			plannedStatement->planTree = (Plan *) distributedPlan;
-		}
+		else
+       {
+		   standard_ExecutorStart(queryDesc, eflags);
+       }
 	}
 }
 
@@ -1611,4 +1630,68 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 
 	ExecDropSingleTupleTableSlot(storeTableSlot);
 	heap_close(table, RowExclusiveLock);
+}
+
+
+/* PgShardExecutorFinish cleans up after a distributed execution, if any, has executed */
+static void
+PgShardExecutorFinish(QueryDesc *queryDesc)
+{
+	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
+
+	if (pgShardExecution)
+	{
+		EState *estate = queryDesc->estate;
+		Assert(estate != NULL);
+
+		estate->es_finished = true;
+	}
+	else
+	{
+		/* this isn't a query pg_shard handles: use previous hook or standard */
+		if (PreviousExecutorFinishHook != NULL)
+		{
+			PreviousExecutorFinishHook(queryDesc);
+		}
+		else
+		{
+			standard_ExecutorFinish(queryDesc);
+		}
+	}
+}
+
+
+/*
+ * PgShardExecutorEnd cleans up the executor state after a distributed
+ * execution, if any, has executed.
+ */
+static void
+PgShardExecutorEnd(QueryDesc *queryDesc)
+{
+	PlannedStmt *plannedStatement = queryDesc->plannedstmt;
+	bool pgShardExecution = IsPgShardPlan(plannedStatement);
+
+	if (pgShardExecution)
+	{
+		EState *estate = queryDesc->estate;
+
+		Assert(estate != NULL);
+		Assert(estate->es_finished);
+
+		FreeExecutorState(estate);
+		queryDesc->estate = NULL;
+	}
+	else
+	{
+		/* this isn't a query pg_shard handles: use previous hook or standard */
+		if (PreviousExecutorEndHook != NULL)
+		{
+			PreviousExecutorEndHook(queryDesc);
+		}
+		else
+		{
+			standard_ExecutorEnd(queryDesc);
+		}
+	}
 }
