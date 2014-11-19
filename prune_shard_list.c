@@ -61,10 +61,10 @@ static bool SimpleOpExpression(Expr *clause);
  * and returns remaining shards in another list.
  */
 List *
-PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
+PruneShardList(Oid relationId, List *whereClauseList, List *shardIntervalList)
 {
 	List *remainingShardList = NIL;
-	ListCell *shardCell = NULL;
+	ListCell *shardIntervalCell = NULL;
 	List *restrictInfoList = NIL;
 	Node *baseConstraint = NULL;
 
@@ -95,14 +95,11 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
 	baseConstraint = BuildBaseConstraint(partitionColumn);
 
 	/* walk over shard list and check if shards can be pruned */
-	foreach(shardCell, shardList)
+	foreach(shardIntervalCell, shardIntervalList)
 	{
-		uint64 *shardIdPointer = (uint64 *) lfirst(shardCell);
-		uint64 shardId = (*shardIdPointer);
+		ShardInterval *shardInterval = lfirst(shardIntervalCell);
 		List *constraintList = NIL;
 		bool shardPruned = false;
-
-		ShardInterval *shardInterval = LoadShardInterval(shardId);
 
 		/* set the min/max values in the base constraint */
 		UpdateConstraint(baseConstraint, shardInterval);
@@ -112,11 +109,11 @@ PruneShardList(Oid relationId, List *whereClauseList, List *shardList)
 		if (shardPruned)
 		{
 			ereport(DEBUG2, (errmsg("predicate pruning for shardId "
-									UINT64_FORMAT, shardId)));
+									UINT64_FORMAT, shardInterval->id)));
 		}
 		else
 		{
-			remainingShardList = lappend(remainingShardList, shardIdPointer);
+			remainingShardList = lappend(remainingShardList, &(shardInterval->id));
 		}
 	}
 
@@ -413,11 +410,9 @@ OpExpressionContainsColumn(OpExpr *operatorExpression, Var *partitionColumn)
 static OpExpr *
 MakeHashedOperatorExpression(OpExpr *operatorExpression)
 {
+	const Oid hashResultTypeId = INT4OID;	
+	TypeCacheEntry *hashResultTypeEntry = NULL;
 	Oid operatorId = InvalidOid;
-	Oid typeId = INT4OID;
-	Oid accessMethodId = BTREE_AM_OID;
-	int16 strategyNumber = BTEqualStrategyNumber;
-
 	OpExpr *hashedExpression = NULL;
 	Var *hashedColumn = NULL;
 	Datum hashedValue = 0;
@@ -438,12 +433,14 @@ MakeHashedOperatorExpression(OpExpr *operatorExpression)
 		constant = (Const *) leftOperand;
 	}
 
-	/* Load the operator from system catalogs */
-	operatorId = GetOperatorByType(typeId, accessMethodId, strategyNumber);
+	/* Load the operator from type cache */
+	hashResultTypeEntry = lookup_type_cache(hashResultTypeId, TYPECACHE_EQ_OPR);
+	operatorId = hashResultTypeEntry->eq_opr;
 
 	/* Get a column with int4 type */
 	hashedColumn = MakeInt4Column();
 
+	/* Load the hash function from type cache */
 	typeEntry = lookup_type_cache(constant->consttype, TYPECACHE_HASH_PROC_FINFO);
 	hashFunction = &(typeEntry->hash_proc_finfo);
 	if (!OidIsValid(hashFunction->fn_oid))

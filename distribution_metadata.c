@@ -43,10 +43,18 @@
 #include "utils/errcodes.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
 #include "utils/relcache.h"
 #include "utils/tqual.h"
+
+
+/*
+ * ShardIntervalListCache is used for caching shard interval lists. It begins
+ * initialized to empty list as there are no items in the cache.
+ */
+static List *ShardIntervalListCache = NIL;
 
 
 /* local function forward declarations */
@@ -71,7 +79,7 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 	Oid distributedTableId = PG_GETARG_OID(0);
 
 	Var *partitionColumn = PartitionColumn(distributedTableId);
-	List *shardList = LoadShardList(distributedTableId);
+	List *shardIntervalList = LoadShardIntervalList(distributedTableId);
 	List *shardPlacementList = NIL;
 
 	ListCell *cell = NULL;
@@ -90,14 +98,12 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 						  partitionColumn->varattno,
 						  format_type_be(partitionColumn->vartype))));
 
-	ereport(INFO, (errmsg("Found %d shards...", list_length(shardList))));
+	ereport(INFO, (errmsg("Found %d shards...", list_length(shardIntervalList))));
 
-	foreach(cell, shardList)
+	foreach(cell, shardIntervalList)
 	{
 		ListCell *shardPlacementCell = NULL;
-		int64 *shardId = (int64 *) lfirst(cell);
-
-		ShardInterval *shardInterval = LoadShardInterval(*shardId);
+		ShardInterval *shardInterval = lfirst(cell);
 
 		char *minValueStr = OutputFunctionCall(&outputFunctionInfo,
 											   shardInterval->minValue);
@@ -111,7 +117,7 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 		ereport(INFO, (errmsg("\tmin value:\t%s", minValueStr)));
 		ereport(INFO, (errmsg("\tmax value:\t%s", maxValueStr)));
 
-		shardPlacementList = LoadShardPlacementList(*shardId);
+		shardPlacementList = LoadShardPlacementList(shardInterval->id);
 		ereport(INFO, (errmsg("\t%d shard placements:",
 							  list_length(shardPlacementList))));
 
@@ -136,14 +142,67 @@ TestDistributionMetadata(PG_FUNCTION_ARGS)
 
 
 /*
- * LoadShardList returns a list of shard identifiers related for a given
+ * LookupShardIntervalList is wrapper around LoadShardIntervalList that uses a
+ * cache to avoid multiple lookups of a distributed table's shards within a
+ * single session.
+ */
+List *
+LookupShardIntervalList(Oid distributedTableId)
+{
+	ShardIntervalListCacheEntry *matchingCacheEntry = NULL;
+	ListCell *cacheEntryCell = NULL;
+
+	/* search the cache */
+	foreach(cacheEntryCell, ShardIntervalListCache)
+	{
+		ShardIntervalListCacheEntry *cacheEntry = lfirst(cacheEntryCell);
+		if (cacheEntry->distributedTableId == distributedTableId)
+		{
+			matchingCacheEntry = cacheEntry;
+			break;
+		}
+	}
+
+	/* if not found in the cache, load the shard interval and put it in cache */
+	if (matchingCacheEntry == NULL)
+	{
+		MemoryContext oldContext = MemoryContextSwitchTo(CacheMemoryContext);
+
+		List *loadedIntervalList = LoadShardIntervalList(distributedTableId);
+		if (loadedIntervalList != NIL)
+		{
+			matchingCacheEntry = palloc0(sizeof(ShardIntervalListCacheEntry));
+			matchingCacheEntry->distributedTableId = distributedTableId;
+			matchingCacheEntry->shardIntervalList = loadedIntervalList;
+
+			ShardIntervalListCache = lappend(ShardIntervalListCache, matchingCacheEntry);
+		}
+
+		MemoryContextSwitchTo(oldContext);
+	}
+
+	/*
+	 * The only case we don't cache the shard list is when the distributed table
+	 * doesn't have any shards. This is to force reloading shard list on next call.
+	 */
+	if (matchingCacheEntry == NULL)
+	{
+		return NIL;
+	}
+
+	return matchingCacheEntry->shardIntervalList;
+}
+
+
+/*
+ * LoadShardIntervalList returns a list of shard intervals related for a given
  * distributed table. The function returns an empty list if no shards can be
  * found for the given relation.
  */
 List *
-LoadShardList(Oid distributedTableId)
+LoadShardIntervalList(Oid distributedTableId)
 {
-	List *shardList = NIL;
+	List *shardIntervalList = NIL;
 	RangeVar *heapRangeVar = NULL;
 	RangeVar *indexRangeVar = NULL;
 	Relation heapRelation = NULL;
@@ -176,10 +235,9 @@ LoadShardList(Oid distributedTableId)
 										  tupleDescriptor, &isNull);
 
 		int64 shardId = DatumGetInt64(shardIdDatum);
-		int64 *shardIdPointer = (int64 *) palloc0(sizeof(int64));
-		*shardIdPointer = shardId;
+		ShardInterval *shardInterval = LoadShardInterval(shardId);
 
-		shardList = lappend(shardList, shardIdPointer);
+		shardIntervalList = lappend(shardIntervalList, shardInterval);
 
 		heapTuple = index_getnext(indexScanDesc, ForwardScanDirection);
 	}
@@ -188,7 +246,7 @@ LoadShardList(Oid distributedTableId)
 	index_close(indexRelation, AccessShareLock);
 	relation_close(heapRelation, AccessShareLock);
 
-	return shardList;
+	return shardIntervalList;
 }
 
 

@@ -687,9 +687,9 @@ DistributedQueryShardList(Query *query)
 	Oid distributedTableId = ExtractFirstDistributedTableId(query);
 
 	List *restrictClauseList = QueryRestrictList(query);
-	List *shardList = LoadShardList(distributedTableId);
+	List *shardIntervalList = LookupShardIntervalList(distributedTableId);
 	List *prunedShardList = PruneShardList(distributedTableId, restrictClauseList,
-										   shardList);
+										   shardIntervalList);
 
 	return prunedShardList;
 }
