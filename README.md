@@ -17,7 +17,6 @@
 
 Features not yet available but under consideration for future releases:
 
-  * Eventual consistency
   * Range-based partitioning
   * Modification of schema of existing distributed tables
   * Identically partitioning sets of tables to ensure their data is colocated
