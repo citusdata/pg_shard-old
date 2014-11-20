@@ -20,6 +20,7 @@
 
 #define DROP_REGULAR_TABLE_COMMAND "DROP TABLE IF EXISTS %s"
 #define DROP_FOREIGN_TABLE_COMMAND "DROP FOREIGN TABLE IF EXISTS %s"
+#define COPY_RELATION_QUERY "SELECT copy_relation_from_node(%s, %s, %d)"
 
 
 extern Datum master_copy_shard_placement(PG_FUNCTION_ARGS);

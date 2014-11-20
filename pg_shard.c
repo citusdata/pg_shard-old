@@ -107,8 +107,6 @@ static void ExecuteSingleShardSelect(DistributedPlan *distributedPlan,
 									 EState *executorState, TupleDesc tupleDescriptor,
 									 DestReceiver *destination);
 static bool SendQueryInSingleRowMode(PGconn *connection, StringInfo query);
-static bool ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
-									   Tuplestorestate *tupleStore);
 static bool StoreQueryResult(PGconn *connection, TupleDesc tupleDescriptor,
 							 Tuplestorestate *tupleStore);
 static bool IsPgShardPlan(PlannedStmt *plannedStmt);
@@ -1247,7 +1245,7 @@ SendQueryInSingleRowMode(PGconn *connection, StringInfo query)
  * the results and stores them in the given tuple store. If the task fails on
  * one of the placements, the function retries it on other placements.
  */
-static bool
+bool
 ExecuteTaskAndStoreResults(Task *task, TupleDesc tupleDescriptor,
 						   Tuplestorestate *tupleStore)
 {
