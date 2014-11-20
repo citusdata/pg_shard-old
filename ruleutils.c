@@ -22,6 +22,7 @@
 #include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
+#include "pg_config.h"
 #include "pg_config_manual.h"
 #include "postgres_ext.h"
 
