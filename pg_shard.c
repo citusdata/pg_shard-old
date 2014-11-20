@@ -120,6 +120,9 @@ static void ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 									   RangeVar *intermediateTable);
 static void TupleStoreToTable(RangeVar *tableRangeVar, List *remoteTargetList,
 							  TupleDesc storeTupleDescriptor, Tuplestorestate *store);
+static void PgShardProcessUtility(Node *parsetree, const char *queryString,
+								  ProcessUtilityContext context, ParamListInfo params,
+								  DestReceiver *dest, char *completionTag);
 
 
 /* declarations for dynamic loading */
@@ -132,6 +135,7 @@ static ExecutorStart_hook_type PreviousExecutorStartHook = NULL;
 static ExecutorRun_hook_type PreviousExecutorRunHook = NULL;
 static ExecutorFinish_hook_type PreviousExecutorFinishHook = NULL;
 static ExecutorEnd_hook_type PreviousExecutorEndHook = NULL;
+static ProcessUtility_hook_type PreviousProcessUtilityHook = NULL;
 
 
 /*
@@ -157,6 +161,9 @@ _PG_init(void)
 	PreviousExecutorEndHook = ExecutorEnd_hook;
 	ExecutorEnd_hook = PgShardExecutorEnd;
 
+	PreviousProcessUtilityHook = ProcessUtility_hook;
+	ProcessUtility_hook = PgShardProcessUtility;
+
 	DefineCustomBoolVariable("pg_shard.all_modifications_commutative",
 							 "Bypasses commutativity checks when enabled", NULL,
 							 &AllModificationsCommutative, false, PGC_USERSET, 0, NULL,
@@ -178,6 +185,7 @@ _PG_init(void)
 void
 _PG_fini(void)
 {
+	ProcessUtility_hook = PreviousProcessUtilityHook;
 	ExecutorRun_hook = PreviousExecutorRunHook;
 	ExecutorStart_hook = PreviousExecutorStartHook;
 	ExecutorFinish_hook = PreviousExecutorFinishHook;
@@ -1697,5 +1705,45 @@ PgShardExecutorEnd(QueryDesc *queryDesc)
 		{
 			standard_ExecutorEnd(queryDesc);
 		}
+	}
+}
+
+
+/*
+ * PgShardProcessUtility intercepts utility statements and errors out for
+ * unsupported utility statements on distributed tables.
+ */
+static void
+PgShardProcessUtility(Node *parsetree, const char *queryString,
+					  ProcessUtilityContext context, ParamListInfo params,
+					  DestReceiver *dest, char *completionTag)
+{
+	NodeTag statementType = nodeTag(parsetree);
+	if (statementType == T_ExplainStmt)
+	{
+		/* extract the query from the explain statement */
+		Query *query = UtilityContainsQuery(parsetree);
+
+		if (query != NULL)
+		{
+			PlannerType plannerType = DeterminePlannerType(query);
+			if (plannerType == PLANNER_TYPE_PG_SHARD)
+			{
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("EXPLAIN statements on distributed tables "
+									   "are unsupported")));
+			}
+		}
+	}
+
+	if (PreviousProcessUtilityHook != NULL)
+	{
+		PreviousProcessUtilityHook(parsetree, queryString, context,
+								   params, dest, completionTag);
+	}
+	else
+	{
+		standard_ProcessUtility(parsetree, queryString, context,
+								params, dest, completionTag);
 	}
 }
