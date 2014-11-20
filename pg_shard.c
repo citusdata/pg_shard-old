@@ -1636,7 +1636,7 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 /*
  * PgShardExecutorFinish cleans up after a distributed execution, if any, has
  * executed.
-*/
+ */
 static void
 PgShardExecutorFinish(QueryDesc *queryDesc)
 {
@@ -1684,6 +1684,7 @@ PgShardExecutorEnd(QueryDesc *queryDesc)
 
 		FreeExecutorState(estate);
 		queryDesc->estate = NULL;
+		queryDesc->totaltime = NULL;
 	}
 	else
 	{
