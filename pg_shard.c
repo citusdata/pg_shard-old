@@ -1633,7 +1633,10 @@ TupleStoreToTable(RangeVar *tableRangeVar, List *storeToTableColumnList,
 }
 
 
-/* PgShardExecutorFinish cleans up after a distributed execution, if any, has executed */
+/*
+ * PgShardExecutorFinish cleans up after a distributed execution, if any, has
+ * executed.
+*/
 static void
 PgShardExecutorFinish(QueryDesc *queryDesc)
 {
