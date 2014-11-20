@@ -32,6 +32,7 @@
 
 #include "access/attnum.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_class.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -45,7 +46,7 @@
 
 
 /* local function forward declarations */
-static Oid ResolveRelationId(text *relationName);
+static void CheckRelationCanBeDistributed(Oid relationId);
 static void CheckHashPartitionedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
@@ -66,14 +67,16 @@ PG_FUNCTION_INFO_V1(master_create_worker_shards);
 Datum
 master_create_distributed_table(PG_FUNCTION_ARGS)
 {
-	text *tableNameText = PG_GETARG_TEXT_P(0);
+	Oid distributedTableId = PG_GETARG_OID(0);
 	text *partitionColumnText = PG_GETARG_TEXT_P(1);
 	char partitionMethod = PG_GETARG_CHAR(2);
-	Oid distributedTableId = ResolveRelationId(tableNameText);
+	char *partitionColumnName = text_to_cstring(partitionColumnText);
+	AttrNumber partitionColumnId = InvalidAttrNumber;
+
+	CheckRelationCanBeDistributed(distributedTableId);
 
 	/* verify column exists in given table */
-	char *partitionColumnName = text_to_cstring(partitionColumnText);
-	AttrNumber partitionColumnId = get_attnum(distributedTableId, partitionColumnName);
+	partitionColumnId = get_attnum(distributedTableId, partitionColumnName);
 	if (partitionColumnId == InvalidAttrNumber)
 	{
 		ereport(ERROR, (errmsg("could not find column: %s", partitionColumnName)));
@@ -104,11 +107,10 @@ master_create_distributed_table(PG_FUNCTION_ARGS)
 Datum
 master_create_worker_shards(PG_FUNCTION_ARGS)
 {
-	text *tableNameText = PG_GETARG_TEXT_P(0);
+	Oid distributedTableId = PG_GETARG_OID(0);
 	uint32 shardCount = PG_GETARG_UINT32(1);
 	uint32 replicationFactor = PG_GETARG_UINT32(2);
 
-	Oid distributedTableId = ResolveRelationId(tableNameText);
 	uint32 shardIndex = 0;
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
@@ -117,7 +119,8 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	uint32 hashTokenIncrement = UINT_MAX / shardCount;
 	List *existingShardList = NIL;
 
-	/* make sure table is hash partitioned */
+	/* ensure table can be distributed and uses hash partioning */
+	CheckRelationCanBeDistributed(distributedTableId);
 	CheckHashPartitionedTable(distributedTableId);
 
 	/* validate that shards haven't already been created for this table */
@@ -240,21 +243,21 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 }
 
 
-/* Finds the relationId from a potentially qualified relation name. */
-static Oid
-ResolveRelationId(text *relationName)
+/*
+ * CheckRelationCanBeDistributed looks up a relation kind using the provided
+ * relation id and throws an error if pg_shard does not support distribution
+ * of that relation kind.
+ */
+static void
+CheckRelationCanBeDistributed(Oid relationId)
 {
-	List *relationNameList = NIL;
-	RangeVar *relation = NULL;
-	Oid  relationId = InvalidOid;
-	bool failOK = false;		/* error if relation cannot be found */
+	char relationKind = get_rel_relkind(relationId);
 
-	/* resolve relationId from passed in schema and relation name */
-	relationNameList = textToQualifiedNameList(relationName);
-	relation = makeRangeVarFromNameList(relationNameList);
-	relationId = RangeVarGetRelid(relation, NoLock, failOK);
-
-	return relationId;
+	if (!(relationKind == RELKIND_RELATION || relationKind == RELKIND_FOREIGN_TABLE))
+	{
+		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						errmsg("relation type unsupported for distribution")));
+	}
 }
 
 
