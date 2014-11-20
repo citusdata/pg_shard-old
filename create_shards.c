@@ -105,16 +105,16 @@ Datum
 master_create_worker_shards(PG_FUNCTION_ARGS)
 {
 	text *tableNameText = PG_GETARG_TEXT_P(0);
-	uint32 shardCount = PG_GETARG_UINT32(1);
-	uint32 replicationFactor = PG_GETARG_UINT32(2);
+	int32 shardCount = PG_GETARG_INT32(1);
+	int32 replicationFactor = PG_GETARG_INT32(2);
 
 	Oid distributedTableId = ResolveRelationId(tableNameText);
-	uint32 shardIndex = 0;
+	int32 shardIndex = 0;
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
-	uint32 workerNodeCount = 0;
+	int32 workerNodeCount = 0;
  	uint32 placementAttemptCount = 0;
-	uint32 hashTokenIncrement = UINT_MAX / shardCount;
+	uint32 hashTokenIncrement = 0;
 	List *existingShardList = NIL;
 
 	/* make sure table is hash partitioned */
@@ -128,12 +128,24 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 						errdetail("Shards have already been created")));
 	}
 
+	/* make sure that at least one shard is specified */
+	if (shardCount <= 0)
+	{
+		ereport(ERROR, (errmsg("cannot create shards for the table"),
+						errdetail("The shardCount argument is invalid"),
+						errhint("Specify a positive value for shardCount")));
+	}
+
 	/* make sure that at least one replica is specified */
 	if (replicationFactor <= 0)
 	{
-		ereport(ERROR, (errmsg("cannot create 0 replicas for a shard"),
-						errhint("Please specify at least 1 for replicationFactor")));
+		ereport(ERROR, (errmsg("cannot create shards for the table"),
+						errdetail("The replicationFactor argument is invalid"),
+						errhint("Specify a positive value for replicationFactor")));
 	}
+
+	/* calculate the split of the hash space */
+	hashTokenIncrement = UINT_MAX / shardCount;
 
 	/* load and sort the worker node list for deterministic placement */
 	workerNodeList = ParseWorkerNodeFile(WORKER_LIST_FILENAME);
@@ -154,7 +166,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	}
 
 	/* if we have enough nodes, add an extra placement attempt for backup */
-	placementAttemptCount = replicationFactor;
+	placementAttemptCount = (uint32) replicationFactor;
 	if (workerNodeCount > replicationFactor)
 	{
 		placementAttemptCount++;
@@ -163,7 +175,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	for (shardIndex = 0; shardIndex < shardCount; shardIndex++)
 	{
 		uint64 shardId = NextSequenceId(SHARD_ID_SEQUENCE_NAME);
-		uint32 placementCount = 0;
+		int32 placementCount = 0;
 		uint32 placementIndex = 0;
 		uint32 roundRobinNodeIndex = shardIndex % workerNodeCount;
 
