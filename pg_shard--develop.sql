@@ -72,8 +72,8 @@ RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
 
-CREATE FUNCTION worker_copy_shard_placement(shard_table regclass, source_node_name text,
+CREATE FUNCTION worker_copy_shard_placement(table_name text, source_node_name text,
 											source_node_port integer)
-RETURNS boolean
+RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C STRICT;
