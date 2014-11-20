@@ -131,15 +131,17 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	/* make sure that at least one shard is specified */
 	if (shardCount <= 0)
 	{
-		ereport(ERROR, (errmsg("cannot create zero or negative shards for a table"),
-						errhint("Please specify at least 1 for shardCount")));
+		ereport(ERROR, (errmsg("cannot create shards for the table"),
+						errdetail("The shardCount argument is invalid"),
+						errhint("Specify a positive value for shardCount")));
 	}
 
 	/* make sure that at least one replica is specified */
 	if (replicationFactor <= 0)
 	{
-		ereport(ERROR, (errmsg("cannot create zero or negative replicas for a shard"),
-						errhint("Please specify at least 1 for replicationFactor")));
+		ereport(ERROR, (errmsg("cannot create shards for the table"),
+						errdetail("The replicationFactor argument is invalid"),
+						errhint("Specify a positive value for replicationFactor")));
 	}
 
 	/* calculate the split of the hash space */
