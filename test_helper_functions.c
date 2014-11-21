@@ -1,12 +1,11 @@
 /*-------------------------------------------------------------------------
  *
  * test_helper_functions.c
- *		  Test wrapper functions for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions to exercise other functions within pg_shard
+ * modules for purposes of unit testing.
  *
- * IDENTIFICATION
- *		  test_helper_functions.c
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -34,6 +33,12 @@
 #include "utils/palloc.h"
 
 
+/* local function forward declarations */
+static Datum ExtractIntegerDatum(char *input);
+static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
+										 Oid datumTypeId);
+
+
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(initialize_remote_temp_table);
 PG_FUNCTION_INFO_V1(count_remote_temp_table_rows);
@@ -42,12 +47,6 @@ PG_FUNCTION_INFO_V1(load_shard_id_array);
 PG_FUNCTION_INFO_V1(load_shard_interval_array);
 PG_FUNCTION_INFO_V1(load_shard_placement_array);
 PG_FUNCTION_INFO_V1(partition_column_id);
-
-
-/* local function forward declarations */
-static Datum ExtractIntegerDatum(char *input);
-static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
-										 Oid datumTypeId);
 
 
 /*
@@ -61,9 +60,9 @@ initialize_remote_temp_table(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
-	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
 	PGresult *result = NULL;
 
+	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
 	if (connection == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -92,9 +91,9 @@ count_remote_temp_table_rows(PG_FUNCTION_ARGS)
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
 	Datum count = Int32GetDatum(-1);
-	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
 	PGresult *result = NULL;
 
+	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
 	if (connection == NULL)
 	{
 		PG_RETURN_DATUM(count);
@@ -128,8 +127,8 @@ get_and_purge_connection(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
-	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
 
+	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
 	if (connection == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -171,12 +170,13 @@ load_shard_id_array(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	ArrayType *shardIdArrayType = NULL;
-	List *shardList = LoadShardIntervalList(distributedTableId);
-	int shardIdCount = list_length(shardList);
-	Datum *shardIdDatumArray = palloc0(shardIdCount * sizeof(Datum));
 	ListCell *shardCell = NULL;
 	int shardIdIndex = 0;
 	Oid shardIdTypeId = INT8OID;
+
+	List *shardList = LoadShardIntervalList(distributedTableId);
+	int shardIdCount = list_length(shardList);
+	Datum *shardIdDatumArray = palloc0(shardIdCount * sizeof(Datum));
 
 	foreach(shardCell, shardList)
 	{

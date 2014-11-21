@@ -1,12 +1,11 @@
 /*-------------------------------------------------------------------------
  *
  * test_helper_functions.h
- *		  Test wrapper functions for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Declarations for public functions and types related to unit testing
+ * functionality.
  *
- * IDENTIFICATION
- *		  test_helper_functions.h
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -24,6 +23,7 @@
 #define COUNT_TEMP_TABLE    "SELECT COUNT(*) FROM numbers;"
 
 
+/* function declarations for exercising pg_shard functions */
 extern Datum initialize_remote_temp_table(PG_FUNCTION_ARGS);
 extern Datum count_remote_temp_table_rows(PG_FUNCTION_ARGS);
 extern Datum get_and_purge_connection(PG_FUNCTION_ARGS);
