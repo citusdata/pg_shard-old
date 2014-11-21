@@ -42,30 +42,35 @@ PG_FUNCTION_INFO_V1(get_and_purge_connection);
 PG_FUNCTION_INFO_V1(load_shard_id_array);
 PG_FUNCTION_INFO_V1(load_shard_interval_array);
 PG_FUNCTION_INFO_V1(load_shard_placement_array);
-PG_FUNCTION_INFO_V1(partition_column_attribute_number);
+PG_FUNCTION_INFO_V1(partition_column_id);
 
 
 /* local function forward declarations */
-static PGconn * GetConnectionOrRaiseError(text *nodeText, int32 nodePort);
 static Datum ExtractIntegerDatum(char *input);
 static ArrayType * DatumArrayToArrayType(Datum *datumArray, int datumCount,
 										 Oid datumTypeId);
 
 
 /*
- * initialize_remote_temp_table connects to a specified host on a specified port
- * and creates a temporary table with 100 rows. Because the table is temporary,
- * it will be visible if a connection is reused but not if a new connection is
- * opened to the node.
+ * initialize_remote_temp_table connects to a specified host on a specified
+ * port and creates a temporary table with 100 rows. Because the table is
+ * temporary, it will be visible if a connection is reused but not if a new
+ * connection is opened to the node.
  */
 Datum
 initialize_remote_temp_table(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
-	PGconn *connection = GetConnectionOrRaiseError(nodeText, nodePort);
-	PGresult *result = PQexec(connection, POPULATE_TEMP_TABLE);
+	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
+	PGresult *result = NULL;
 
+	if (connection == NULL)
+	{
+		PG_RETURN_BOOL(false);
+	}
+
+	result = PQexec(connection, POPULATE_TEMP_TABLE);
 	if (PQresultStatus(result) != PGRES_COMMAND_OK)
 	{
 		ReportRemoteError(connection, result);
@@ -73,7 +78,7 @@ initialize_remote_temp_table(PG_FUNCTION_ARGS)
 
 	PQclear(result);
 
-	PG_RETURN_VOID();
+	PG_RETURN_BOOL(true);
 }
 
 
@@ -87,14 +92,19 @@ count_remote_temp_table_rows(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
-	PGconn *connection = GetConnectionOrRaiseError(nodeText, nodePort);
-	PGresult *result = PQexec(connection, COUNT_TEMP_TABLE);
-	Datum count = 0;
+	Datum count = Int32GetDatum(-1);
+	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
+	PGresult *result = NULL;
 
+	if (connection == NULL)
+	{
+		PG_RETURN_DATUM(count);
+	}
+
+	result = PQexec(connection, COUNT_TEMP_TABLE);
 	if (PQresultStatus(result) != PGRES_TUPLES_OK)
 	{
 		ReportRemoteError(connection, result);
-		count = Int32GetDatum(-1);
 	}
 	else
 	{
@@ -109,39 +119,26 @@ count_remote_temp_table_rows(PG_FUNCTION_ARGS)
 
 
 /*
- * get_and_purge_connection first gets a connection using the provided hostname and
- * port before immediately passing that connection to PurgeConnection. Simply a
- * wrapper around PurgeConnection that uses hostname/port rather than PGconn.
+ * get_and_purge_connection first gets a connection using the provided hostname
+ * and port before immediately passing that connection to PurgeConnection.
+ * Simply a wrapper around PurgeConnection that uses hostname/port rather than
+ * PGconn.
  */
 Datum
 get_and_purge_connection(PG_FUNCTION_ARGS)
 {
 	text *nodeText = PG_GETARG_TEXT_P(0);
 	int32 nodePort = PG_GETARG_INT32(1);
-	PGconn *connection = GetConnectionOrRaiseError(nodeText, nodePort);
+	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
+
+	if (connection == NULL)
+	{
+		PG_RETURN_BOOL(false);
+	}
 
 	PurgeConnection(connection);
 
-	PG_RETURN_VOID();
-}
-
-
-/*
- * GetConnectionOrRaiseError just wraps GetConnection to throw an error if no
- * connection can be established.
- */
-static PGconn *
-GetConnectionOrRaiseError(text *nodeText, int32 nodePort)
-{
-	char *nodeName = text_to_cstring(nodeText);
-
-	PGconn *connection = GetConnection(nodeName, nodePort);
-	if (connection == NULL)
-	{
-		ereport(ERROR, (errmsg("could not connect to %s:%d", nodeName, nodePort)));
-	}
-
-	return connection;
+	PG_RETURN_BOOL(true);
 }
 
 
@@ -176,10 +173,10 @@ load_shard_id_array(PG_FUNCTION_ARGS)
 	Oid distributedTableId = PG_GETARG_OID(0);
 	ArrayType *shardIdArrayType = NULL;
 	List *shardList = LoadShardIntervalList(distributedTableId);
-	ListCell *shardCell = NULL;
 	int shardIdCount = list_length(shardList);
-	int shardIdIndex = 0;
 	Datum *shardIdDatumArray = palloc0(shardIdCount * sizeof(Datum));
+	ListCell *shardCell = NULL;
+	int shardIdIndex = 0;
 	Oid shardIdTypeId = INT8OID;
 
 	foreach(shardCell, shardList)
@@ -208,9 +205,9 @@ Datum
 load_shard_interval_array(PG_FUNCTION_ARGS)
 {
 	int64 shardId = PG_GETARG_INT64(0);
-	ArrayType *shardIntervalArrayType = NULL;
 	ShardInterval *shardInterval = LoadShardInterval(shardId);
 	Datum shardIntervalArray[] = { shardInterval->minValue, shardInterval->maxValue };
+	ArrayType *shardIntervalArrayType = NULL;
 
 	/* for now we expect value type to always be integer (hash output) */
 	Assert(shardInterval->valueTypeId == INT4OID);
@@ -260,12 +257,12 @@ load_shard_placement_array(PG_FUNCTION_ARGS)
 
 
 /*
- * partition_column_attribute_number simply finds a distributed table using the
- * provided Oid and returns the attribute number of its partition column. If the
- * specified table is not distributed, this function raises an error instead.
+ * partition_column_id simply finds a distributed table using the provided Oid
+ * and returns the column_id of its partition column. If the specified table is
+ * not distributed, this function raises an error instead.
  */
 Datum
-partition_column_attribute_number(PG_FUNCTION_ARGS)
+partition_column_id(PG_FUNCTION_ARGS)
 {
 	Oid distributedTableId = PG_GETARG_OID(0);
 	Var *partitionColumn = PartitionColumn(distributedTableId);

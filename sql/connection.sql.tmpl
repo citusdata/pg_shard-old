@@ -3,7 +3,7 @@
 -- ===================================================================
 
 CREATE FUNCTION initialize_remote_temp_table(text, integer)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -13,7 +13,7 @@ CREATE FUNCTION count_remote_temp_table_rows(text, integer)
 	LANGUAGE C STRICT;
 
 CREATE FUNCTION get_and_purge_connection(text, integer)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 
@@ -24,7 +24,7 @@ CREATE FUNCTION get_and_purge_connection(text, integer)
 \set VERBOSITY terse
 
 -- connect to non-existant host
-SELECT initialize_remote_temp_table('dummyhost', $PGPORT);
+SELECT initialize_remote_temp_table('dummy-host-name', $PGPORT);
 
 \set VERBOSITY default
 

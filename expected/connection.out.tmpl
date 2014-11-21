@@ -2,7 +2,7 @@
 -- create test functions
 -- ===================================================================
 CREATE FUNCTION initialize_remote_temp_table(text, integer)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION count_remote_temp_table_rows(text, integer)
@@ -10,7 +10,7 @@ CREATE FUNCTION count_remote_temp_table_rows(text, integer)
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 CREATE FUNCTION get_and_purge_connection(text, integer)
-	RETURNS void
+	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
 -- ===================================================================
@@ -18,9 +18,13 @@ CREATE FUNCTION get_and_purge_connection(text, integer)
 -- ===================================================================
 \set VERBOSITY terse
 -- connect to non-existant host
-SELECT initialize_remote_temp_table('dummyhost', $PGPORT);
-WARNING:  Connection failed to dummyhost:$PGPORT
-ERROR:  could not connect to dummyhost:$PGPORT
+SELECT initialize_remote_temp_table('dummy-host-name', $PGPORT);
+WARNING:  Connection failed to dummy-host-name:$PGPORT
+ initialize_remote_temp_table 
+------------------------------
+ f
+(1 row)
+
 \set VERBOSITY default
 -- try to use hostname over 255 characters
 SELECT initialize_remote_temp_table(repeat('a', 256), $PGPORT);
@@ -29,7 +33,7 @@ ERROR:  hostnames may not exceed 255 characters
 SELECT initialize_remote_temp_table('localhost', $PGPORT);
  initialize_remote_temp_table 
 ------------------------------
- 
+ t
 (1 row)
 
 -- table should still be visible since session is reused
@@ -43,7 +47,7 @@ SELECT count_remote_temp_table_rows('localhost', $PGPORT);
 SELECT get_and_purge_connection('localhost', $PGPORT);
  get_and_purge_connection 
 --------------------------
- 
+ t
 (1 row)
 
 -- should not be able to see table anymore
@@ -59,7 +63,7 @@ DETAIL:  Remote message: relation "numbers" does not exist
 SELECT initialize_remote_temp_table('localhost', $PGPORT);
  initialize_remote_temp_table 
 ------------------------------
- 
+ t
 (1 row)
 
 -- kill backend to disconnect

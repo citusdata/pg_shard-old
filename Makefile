@@ -22,19 +22,23 @@ else
      SHLIB_LINK = $(libpq)
 endif
 
-PGPORT ?= 5432
 
 EXTENSION = pg_shard
 DATA = pg_shard--develop.sql
 
+# Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
+# with actual port number in order to anticipate correct output during tests.
+PGPORT ?= 5432
 sql/%: sql/%.tmpl
 	sed -e 's/$$PGPORT/${PGPORT}/g' $^ > $@
 
 expected/%: expected/%.tmpl
 	sed -e 's/$$PGPORT/${PGPORT}/g' $^ > $@
 
-REGRESS = init connection distribution_metadata
+# REGRESS_PREP is a make target executed by the PGXS build system before any
+# tests are run. We use it to trigger variable interpolation in our tests.
 REGRESS_PREP = sql/connection.sql expected/connection.out
+REGRESS = init connection distribution_metadata
 
 EXTRA_CLEAN += ${REGRESS_PREP}
 
