@@ -1,12 +1,11 @@
 /*-------------------------------------------------------------------------
  *
  * repair_shards.c
- *		  Repair functionality for pg_shard.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions to repair unhealthy shard placements using data
+ * from healthy ones.
  *
- * IDENTIFICATION
- *		  repair_shards.c
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

@@ -1,12 +1,11 @@
 /*-------------------------------------------------------------------------
  *
  * repair_shards.h
- *			Repair functionality for pg_shard.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Declarations for public functions and types to implement shard repair
+ * functionality.
  *
- * IDENTIFICATION
- *			repair_shards.h
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -18,10 +17,12 @@
 #include "fmgr.h"
 
 
+/* templates for SQL commands used during shard placement repair */
 #define DROP_REGULAR_TABLE_COMMAND "DROP TABLE IF EXISTS %s"
 #define DROP_FOREIGN_TABLE_COMMAND "DROP FOREIGN TABLE IF EXISTS %s"
 
 
+/* function declarations for shard repair functionality */
 extern Datum master_copy_shard_placement(PG_FUNCTION_ARGS);
 extern Datum worker_copy_shard_placement(PG_FUNCTION_ARGS);
 

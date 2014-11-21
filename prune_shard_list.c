@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * prune_shard_list.c
- *			Pruning function implementations for pg_shard extension
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions to examine lists of shards and remove those not
+ * required to execute a given query. Functions contained here are borrowed from
+ * CitusDB.
  *
- * IDENTIFICATION
- *			prune_shard_list.c
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

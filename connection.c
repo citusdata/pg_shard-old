@@ -1,12 +1,10 @@
 /*-------------------------------------------------------------------------
  *
  * connection.c
- *		  Connection hash for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions to implement a connection hash.
  *
- * IDENTIFICATION
- *		  connection.h
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */

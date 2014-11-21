@@ -1,12 +1,10 @@
 /*-------------------------------------------------------------------------
  *
  * distribution_metadata.h
- *		  Cluster metadata handling for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Declarations for public functions and types related to metadata handling.
  *
- * IDENTIFICATION
- *		  distribution_metadata.h
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -73,6 +71,7 @@
 #define SHARD_ID_SEQUENCE_NAME "shard_id_sequence"
 #define SHARD_PLACEMENT_ID_SEQUENCE_NAME "shard_placement_id_sequence"
 
+
 /* ShardState represents the last known state of a shard on a given node */
 typedef enum
 {
@@ -132,6 +131,7 @@ typedef struct ShardIntervalListCacheEntry
 } ShardIntervalListCacheEntry;
 
 
+/* function declarations to access and manipulate the metadata */
 extern List * LookupShardIntervalList(Oid distributedTableId);
 extern List * LoadShardIntervalList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);

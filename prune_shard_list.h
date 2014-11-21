@@ -1,12 +1,11 @@
 /*-------------------------------------------------------------------------
  *
  * prune_shard_list.h
- *			Pruning function declarations for pg_shard extension
+ * 
+ * Declarations for public functions and types related to shard pruning
+ * functionality.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
- *
- * IDENTIFICATION
- *			prune_shard_list.h
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -22,10 +21,17 @@
 #include "nodes/primnodes.h"
 
 
-#define DISTRIBUTE_BY_HASH			'h'
-#define RESERVED_HASHED_COLUMN_ID	MaxAttrNumber
+/* character used to indicate a hash-partitioned table */
+#define DISTRIBUTE_BY_HASH 'h'
+
+/*
+ * Column ID used to signify that a partition column value has been replaced by
+ * its hashed value.
+ */
+#define RESERVED_HASHED_COLUMN_ID MaxAttrNumber
 
 
+/* function declarations for shard pruning */
 extern List * PruneShardList(Oid relationId, List *whereClauseList,
 							 List *shardIntervalList);
 extern OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
