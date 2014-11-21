@@ -21,11 +21,11 @@
 #include "nodes/pg_list.h"
 
 
-/* character for separating tablename from shard ID in generated table names */
+/* character for separating table name from shard ID in generated table names */
 #define SHARD_NAME_SEPARATOR '_'
 
 
-/* function declarations to extend DDL commands with shard ID's */
+/* function declarations to extend DDL commands with shard IDs */
 extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,

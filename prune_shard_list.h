@@ -24,7 +24,10 @@
 /* character used to indicate a hash-partitioned table */
 #define DISTRIBUTE_BY_HASH 'h'
 
-/* special column ID used after converting a partition column to its hash value */
+/*
+ * Column ID used to signify that a partition column value has been replaced by
+ * its hashed value.
+ */
 #define RESERVED_HASHED_COLUMN_ID MaxAttrNumber
 
 

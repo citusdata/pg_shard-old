@@ -2,9 +2,8 @@
  *
  * ruleutils.h
  *
- * Declarations for public functions and types related to extending a query to
- * refer to a shard instead of the original table, and deparse it into its SQL
- * form.
+ * Declarations for public functions and types to produce an SQL string
+ * targeting a particular shard based on an initial query and shard ID.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
