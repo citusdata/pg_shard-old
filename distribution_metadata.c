@@ -18,6 +18,7 @@
 #include "distribution_metadata.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "access/attnum.h"
 #include "access/genam.h"
