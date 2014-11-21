@@ -111,7 +111,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
 	int32 workerNodeCount = 0;
- 	uint32 placementAttemptCount = 0;
+	uint32 placementAttemptCount = 0;
 	uint32 hashTokenIncrement = 0;
 	List *existingShardList = NIL;
 

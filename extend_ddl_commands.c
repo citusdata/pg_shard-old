@@ -649,7 +649,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 
 		/* deparse check constraint string */
 		checkContext = deparse_context_for(masterRelationName, masterRelationId);
- 		checkString = deparse_expression(plannedExpression, checkContext, false, false);
+		checkString = deparse_expression(plannedExpression, checkContext, false, false);
 
 		appendStringInfoString(deparsedCreate, checkString);
 	}

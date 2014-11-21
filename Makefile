@@ -19,9 +19,9 @@ PG_CPPFLAGS = -std=c99 -Wall -Wextra -I$(libpq_srcdir)
 # pg_shard function instead.
 OS := $(shell uname)
 ifeq ($(OS), Linux)
-     SHLIB_LINK = $(libpq) -Wl,-Bsymbolic
+	SHLIB_LINK = $(libpq) -Wl,-Bsymbolic
 else
-     SHLIB_LINK = $(libpq)
+	SHLIB_LINK = $(libpq)
 endif
 
 EXTENSION = pg_shard
