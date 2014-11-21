@@ -882,7 +882,7 @@ BuildDistributedPlan(Query *query, List *shardIntervalList)
 		Task *task = NULL;
 		StringInfo queryString = makeStringInfo();
 
-		/* 
+		/*
 		 * Convert the qualifiers to an explicitly and'd clause, which is needed
 		 * before we deparse the query. This applies to SELECT, UPDATE and
 		 * DELETE statements.
@@ -971,7 +971,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			  const char *queryDescription = "create temp table like";
 			  RangeVar *intermediateResultTable = createStmt->relation;
 
-			  ProcessUtility((Node *) createStmt, queryDescription, 
+			  ProcessUtility((Node *) createStmt, queryDescription,
 							 PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
 
 			  /* execute select queries and fetch results into the temp table */
@@ -1154,7 +1154,7 @@ ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
 		}
 
 		/*
-		 * We successfully fetched data into local tuplestore. Now move results from 
+		 * We successfully fetched data into local tuplestore. Now move results from
 		 * the tupleStore into the table.
 		 */
 		Assert(tupleStore != NULL);

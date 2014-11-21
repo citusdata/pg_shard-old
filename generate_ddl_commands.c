@@ -78,13 +78,13 @@ TableDDLCommandList(Oid relationId)
 	/* fetch table schema and column option definitions */
 	tableSchemaDef = pg_shard_get_tableschemadef_string(relationId);
 	tableColumnOptionsDef = pg_shard_get_tablecolumnoptionsdef_string(relationId);
-	
+
 	tableDDLCommandList = lappend(tableDDLCommandList, tableSchemaDef);
 	if (tableColumnOptionsDef != NULL)
 	{
 		tableDDLCommandList = lappend(tableDDLCommandList, tableColumnOptionsDef);
 	}
-	
+
 	/* open system catalog and scan all indexes that belong to this table */
 	pgIndex = heap_open(IndexRelationId, AccessShareLock);
 
@@ -135,7 +135,7 @@ TableDDLCommandList(Oid relationId)
 		{
 			statementDef = pg_get_indexdef_string(indexId);
 		}
-		
+
 		/* append found constraint or index definition to the list */
 		tableDDLCommandList = lappend(tableDDLCommandList, statementDef);
 
@@ -163,7 +163,7 @@ TableDDLCommandList(Oid relationId)
  * pg_get_tableschemadef_string returns the definition of a given table. This
  * definition includes table's schema, default column values, not null and check
  * constraints. The definition does not include constraints that trigger index
- * creations; specifically, unique and primary key constraints are excluded.  
+ * creations; specifically, unique and primary key constraints are excluded.
  */
 static char *
 pg_shard_get_tableschemadef_string(Oid tableRelationId)
@@ -242,7 +242,7 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 			{
 				AttrDefault *defaultValueList = NULL;
 				AttrDefault *defaultValue = NULL;
-				
+
 				Node *defaultNode = NULL;
 				List *defaultContext = NULL;
 				char *defaultString = NULL;
@@ -257,7 +257,7 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 
 				Assert(defaultValue->adnum == (attributeIndex + 1));
 				Assert(defaultValueIndex <= tupleConstraints->num_defval);
-				
+
 				/* convert expression to node tree, and prepare deparse context */
 				defaultNode = (Node *) stringToNode(defaultValue->adbin);
 				defaultContext = deparse_context_for(relationName, tableRelationId);
@@ -291,7 +291,7 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 	{
 		ConstrCheck *checkConstraintList = tupleConstraints->check;
 		ConstrCheck *checkConstraint = &(checkConstraintList[constraintIndex]);
-		
+
 		Node *checkNode = NULL;
 		List *checkContext = NULL;
 		char *checkString = NULL;
@@ -486,7 +486,7 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 				appendStringInfo(&statement, "ALTER COLUMN %s ",
 								 quote_identifier(attributeName));
 				appendStringInfo(&statement, "SET STORAGE %s", storageName);
-				
+
 				columnOptionList = lappend(columnOptionList, statement.data);
 			}
 
@@ -511,7 +511,7 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 
 	/*
 	 * Iterate over column storage and statistics statements that we created,
-	 * and append them to a single alter table statement. 
+	 * and append them to a single alter table statement.
 	 */
 	foreach(columnOptionCell, columnOptionList)
 	{
@@ -569,7 +569,7 @@ pg_shard_get_indexclusterdef_string(Oid indexRelationId)
 		char *indexName = get_rel_name(indexRelationId); /* needs to be quoted */
 
 		initStringInfo(&buffer);
-		appendStringInfo(&buffer, "ALTER TABLE %s CLUSTER ON %s", 
+		appendStringInfo(&buffer, "ALTER TABLE %s CLUSTER ON %s",
 						 tableName, quote_identifier(indexName));
 	}
 

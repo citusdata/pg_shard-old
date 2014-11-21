@@ -410,7 +410,7 @@ OpExpressionContainsColumn(OpExpr *operatorExpression, Var *partitionColumn)
 static OpExpr *
 MakeHashedOperatorExpression(OpExpr *operatorExpression)
 {
-	const Oid hashResultTypeId = INT4OID;	
+	const Oid hashResultTypeId = INT4OID;
 	TypeCacheEntry *hashResultTypeEntry = NULL;
 	Oid operatorId = InvalidOid;
 	OpExpr *hashedExpression = NULL;

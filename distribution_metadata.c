@@ -658,7 +658,7 @@ InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
 	simple_heap_insert(shardRelation, heapTuple);
 	CatalogUpdateIndexes(shardRelation, heapTuple);
 	CommandCounterIncrement();
-	
+
 	/* close relation */
 	heap_close(shardRelation, RowExclusiveLock);
 }
