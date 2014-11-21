@@ -125,7 +125,7 @@ worker_copy_shard_placement(PG_FUNCTION_ARGS __attribute__((unused)))
 {
 	ereport(ERROR, (errmsg("worker_copy_shard_placement not implemented")));
 
-	PG_RETURN_BOOL(true);
+	PG_RETURN_VOID();
 }
 
 
