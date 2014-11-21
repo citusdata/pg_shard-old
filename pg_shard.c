@@ -649,9 +649,9 @@ RowAndColumnFilterQuery(Query *query)
 
 	/*
 	 * If the query is a simple "SELECT count(*)", add a NULL constant. This
-     * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
-     * similar string when no columns are selected.
-     */
+	 * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
+	 * similar string when no columns are selected.
+	 */
 	if (uniqueColumnList == NIL)
 	{
 		/* values for NULL const taken from parse_node.c */
@@ -830,34 +830,34 @@ TargetEntryList(List *expressionList)
 static CreateStmt *
 CreateTemporaryTableLikeStmt(Oid sourceRelationId)
 {
-    static unsigned long temporaryTableId = 0;
-    CreateStmt *createStmt = NULL;
-    StringInfo clonedTableName = NULL;
-    RangeVar *clonedRelation = NULL;
+	  static unsigned long temporaryTableId = 0;
+	  CreateStmt *createStmt = NULL;
+	  StringInfo clonedTableName = NULL;
+	  RangeVar *clonedRelation = NULL;
 
-    char *sourceTableName = get_rel_name(sourceRelationId);
-    Oid sourceSchemaId = get_rel_namespace(sourceRelationId);
-    char *sourceSchemaName = get_namespace_name(sourceSchemaId);
-    RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
+	  char *sourceTableName = get_rel_name(sourceRelationId);
+	  Oid sourceSchemaId = get_rel_namespace(sourceRelationId);
+	  char *sourceSchemaName = get_namespace_name(sourceSchemaId);
+	  RangeVar *sourceRelation = makeRangeVar(sourceSchemaName, sourceTableName, -1);
 
-    TableLikeClause *tableLikeClause = makeNode(TableLikeClause);
-    tableLikeClause->relation = sourceRelation;
-    tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
+	  TableLikeClause *tableLikeClause = makeNode(TableLikeClause);
+	  tableLikeClause->relation = sourceRelation;
+	  tableLikeClause->options = 0; /* don't copy over indexes/constraints etc */
 
-    /* create a unique name for the cloned table */
-    clonedTableName = makeStringInfo();
-    appendStringInfo(clonedTableName, "%s_%d_%lu",
-                     TEMPORARY_TABLE_PREFIX, MyProcPid, temporaryTableId);
-    temporaryTableId++;
+	  /* create a unique name for the cloned table */
+	  clonedTableName = makeStringInfo();
+	  appendStringInfo(clonedTableName, "%s_%d_%lu",
+					   TEMPORARY_TABLE_PREFIX, MyProcPid, temporaryTableId);
+	  temporaryTableId++;
 
-    clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
-    clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
+	  clonedRelation = makeRangeVar(NULL, clonedTableName->data, -1);
+	  clonedRelation->relpersistence = RELPERSISTENCE_TEMP;
 
-    createStmt = makeNode(CreateStmt);
-    createStmt->relation = clonedRelation;
-    createStmt->tableElts = list_make1(tableLikeClause);
+	  createStmt = makeNode(CreateStmt);
+	  createStmt->relation = clonedRelation;
+	  createStmt->tableElts = list_make1(tableLikeClause);
 
-    return createStmt;
+	  return createStmt;
 }
 
 
@@ -931,7 +931,7 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 
 		bool selectFromMultipleShards = distributedPlan->selectFromMultipleShards;
 		if (!selectFromMultipleShards)
-        {
+		  {
 			bool topLevel = true;
 			LOCKMODE lockMode = NoLock;
 			EState *executorState = NULL;
@@ -962,34 +962,34 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			 * original one.
 			 */
 			Plan *originalPlan = NULL;
-            RangeTblEntry *sequentialScanRangeTable = NULL;
-            Oid intermediateResultTableId = InvalidOid;
-            bool missingOK = false;
+			  RangeTblEntry *sequentialScanRangeTable = NULL;
+			  Oid intermediateResultTableId = InvalidOid;
+			  bool missingOK = false;
 
-            /* execute the previously created statement to create a temp table */
-            CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
-            const char *queryDescription = "create temp table like";
-            RangeVar *intermediateResultTable = createStmt->relation;
+			  /* execute the previously created statement to create a temp table */
+			  CreateStmt *createStmt = distributedPlan->createTemporaryTableStmt;
+			  const char *queryDescription = "create temp table like";
+			  RangeVar *intermediateResultTable = createStmt->relation;
 
-            ProcessUtility((Node *) createStmt, queryDescription, 
-                           PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
+			  ProcessUtility((Node *) createStmt, queryDescription, 
+							 PROCESS_UTILITY_TOPLEVEL, NULL, None_Receiver, NULL);
 
-            /* execute select queries and fetch results into the temp table */
-            ExecuteMultipleShardSelect(distributedPlan, intermediateResultTable);
+			  /* execute select queries and fetch results into the temp table */
+			  ExecuteMultipleShardSelect(distributedPlan, intermediateResultTable);
 
-            /* update the query descriptor snapshot so results are visible */
-            UnregisterSnapshot(queryDesc->snapshot);
-            UpdateActiveSnapshotCommandId();
-            queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
+			  /* update the query descriptor snapshot so results are visible */
+			  UnregisterSnapshot(queryDesc->snapshot);
+			  UpdateActiveSnapshotCommandId();
+			  queryDesc->snapshot = RegisterSnapshot(GetActiveSnapshot());
 
-            /* update sequential scan's table entry to point to intermediate table */
-            intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
-                                                         NoLock, missingOK);
+			  /* update sequential scan's table entry to point to intermediate table */
+			  intermediateResultTableId = RangeVarGetRelid(intermediateResultTable,
+														   NoLock, missingOK);
 
-            Assert(list_length(plannedStatement->rtable) == 1);
-            sequentialScanRangeTable = linitial(plannedStatement->rtable);
-            Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
-            sequentialScanRangeTable->relid = intermediateResultTableId;
+			  Assert(list_length(plannedStatement->rtable) == 1);
+			  sequentialScanRangeTable = linitial(plannedStatement->rtable);
+			  Assert(sequentialScanRangeTable->rtekind == RTE_RELATION);
+			  sequentialScanRangeTable->relid = intermediateResultTableId;
 
 			/* swap in modified (local) plan for compatibility with standard start hook */
 			originalPlan = distributedPlan->originalPlan;
@@ -1014,9 +1014,9 @@ PgShardExecutorStart(QueryDesc *queryDesc, int eflags)
 			PreviousExecutorStartHook(queryDesc, eflags);
 		}
 		else
-       {
+		 {
 		   standard_ExecutorStart(queryDesc, eflags);
-       }
+		 }
 	}
 }
 
@@ -1558,7 +1558,7 @@ ExecuteDistributedModify(DistributedPlan *plan)
 			ereport(WARNING, (errmsg("modified %d tuples, but expected to modify %d",
 									 currentAffectedTupleCount, affectedTupleCount),
 							  errdetail("modified placement on %s:%d",
-									    nodeName, nodePort)));
+										nodeName, nodePort)));
 		}
 
 		PQclear(result);
