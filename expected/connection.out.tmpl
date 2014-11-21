@@ -1,15 +1,15 @@
 -- ===================================================================
 -- create test functions
 -- ===================================================================
-CREATE FUNCTION initialize_remote_temp_table(text, integer)
+CREATE FUNCTION initialize_remote_temp_table(cstring, integer)
 	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
-CREATE FUNCTION count_remote_temp_table_rows(text, integer)
+CREATE FUNCTION count_remote_temp_table_rows(cstring, integer)
 	RETURNS integer
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
-CREATE FUNCTION get_and_purge_connection(text, integer)
+CREATE FUNCTION get_and_purge_connection(cstring, integer)
 	RETURNS bool
 	AS 'pg_shard'
 	LANGUAGE C STRICT;
@@ -27,7 +27,7 @@ WARNING:  Connection failed to dummy-host-name:$PGPORT
 
 \set VERBOSITY default
 -- try to use hostname over 255 characters
-SELECT initialize_remote_temp_table(repeat('a', 256), $PGPORT);
+SELECT initialize_remote_temp_table(repeat('a', 256)::cstring, $PGPORT);
 ERROR:  hostnames may not exceed 255 characters
 -- connect to localhost and build a temp table
 SELECT initialize_remote_temp_table('localhost', $PGPORT);

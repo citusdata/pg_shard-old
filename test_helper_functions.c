@@ -58,11 +58,11 @@ PG_FUNCTION_INFO_V1(partition_column_id);
 Datum
 initialize_remote_temp_table(PG_FUNCTION_ARGS)
 {
-	text *nodeText = PG_GETARG_TEXT_P(0);
+	char *nodeName = PG_GETARG_CSTRING(0);
 	int32 nodePort = PG_GETARG_INT32(1);
 	PGresult *result = NULL;
 
-	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
+	PGconn *connection = GetConnection(nodeName, nodePort);
 	if (connection == NULL)
 	{
 		PG_RETURN_BOOL(false);
@@ -88,12 +88,12 @@ initialize_remote_temp_table(PG_FUNCTION_ARGS)
 Datum
 count_remote_temp_table_rows(PG_FUNCTION_ARGS)
 {
-	text *nodeText = PG_GETARG_TEXT_P(0);
+	char *nodeName = PG_GETARG_CSTRING(0);
 	int32 nodePort = PG_GETARG_INT32(1);
 	Datum count = Int32GetDatum(-1);
 	PGresult *result = NULL;
 
-	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
+	PGconn *connection = GetConnection(nodeName, nodePort);
 	if (connection == NULL)
 	{
 		PG_RETURN_DATUM(count);
@@ -125,10 +125,10 @@ count_remote_temp_table_rows(PG_FUNCTION_ARGS)
 Datum
 get_and_purge_connection(PG_FUNCTION_ARGS)
 {
-	text *nodeText = PG_GETARG_TEXT_P(0);
+	char *nodeName = PG_GETARG_CSTRING(0);
 	int32 nodePort = PG_GETARG_INT32(1);
 
-	PGconn *connection = GetConnection(text_to_cstring(nodeText), nodePort);
+	PGconn *connection = GetConnection(nodeName, nodePort);
 	if (connection == NULL)
 	{
 		PG_RETURN_BOOL(false);
