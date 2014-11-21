@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * ruleutils.h
- *			Function declarations for deparsing queries.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Declarations for public functions and types related to extending a query to
+ * refer to a shard instead of the original table, and deparse it into its SQL
+ * form.
  *
- * IDENTIFICATION
- *			ruleutils.h
+ * Copyright (c) 2014, Citus Data, Inc.
  *
  *-------------------------------------------------------------------------
  */
@@ -20,6 +20,7 @@
 #include "nodes/parsenodes.h"
 
 
+/* function declarations for extending and deparsing a query */
 extern void deparse_shard_query(Query *query, int64 shardid, StringInfo buffer);
 
 

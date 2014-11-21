@@ -2,13 +2,10 @@
  *
  * pg_shard.c
  *
- * This file contains the function definitions which allow us to intercept the
- * planning and execution logic for queries on distributed tables and perform
- * our own distributed planning and execution.
+ * This file contains functions to perform distributed planning and execution of
+ * distributed tables.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -651,7 +648,7 @@ RowAndColumnFilterQuery(Query *query)
 	}
 
 	/*
-     * If the query is a simple "SELECT count(*)", add a NULL constant. This
+	 * If the query is a simple "SELECT count(*)", add a NULL constant. This
      * constant deparses to "SELECT NULL FROM ...". postgres_fdw generates a
      * similar string when no columns are selected.
      */
@@ -1134,7 +1131,8 @@ CompareTasksByShardId(const void *leftElement, const void *rightElement)
  * plan and inserts the returned rows into the given tableId.
  */
 static void
-ExecuteMultipleShardSelect(DistributedPlan *distributedPlan, RangeVar *intermediateTable)
+ExecuteMultipleShardSelect(DistributedPlan *distributedPlan,
+						   RangeVar *intermediateTable)
 {
 	List *taskList = distributedPlan->taskList;
 	List *targetList = distributedPlan->targetList;

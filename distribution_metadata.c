@@ -2,12 +2,10 @@
  *
  * distribution_metadata.c
  *
- * This file contains functions which allow pg_shard to access, update and
- * manage the distributed table metadata.
+ * This file contains functions to access and manage the distributed table
+ * metadata.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */

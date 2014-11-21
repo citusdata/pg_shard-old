@@ -2,11 +2,9 @@
  *
  * pg_shard.h
  *
- * Type and function declarations for pg_shard extension
+ * Declarations for public functions and types needed by the pg_shard extension.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -22,10 +20,11 @@
 #include "lib/stringinfo.h"
 
 
-#define PG_SHARD_EXTENSION_NAME "pg_shard"
-
 /* prefix used for temporary tables created on the master node */
 #define TEMPORARY_TABLE_PREFIX "pg_shard_temp_table"
+
+/* extension name used to determine if extension has been created */
+#define PG_SHARD_EXTENSION_NAME "pg_shard"
 
 
 /*
@@ -83,7 +82,7 @@ typedef struct Task
 } Task;
 
 
-/* Function declarations for extension loading and unloading */
+/* function declarations for extension loading and unloading */
 extern void _PG_init(void);
 extern void _PG_fini(void);
 

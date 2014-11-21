@@ -2,12 +2,10 @@
  *
  * create_shards.h
  *
- * pg_shard function declarations to initialize distributed tables and their
- * shards.
+ * Declarations for public functions and types related to shard creation
+ * functionality.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -22,6 +20,7 @@
 #include "nodes/pg_list.h"
 
 
+/* name for the file containing worker node and port information */
 #define WORKER_LIST_FILENAME "pg_worker_list.conf"
 
 /* transaction related commands used in talking to the worker nodes */
@@ -30,7 +29,7 @@
 #define ROLLBACK_COMMAND "ROLLBACK"
 
 
-/* In-memory representation of a worker node */
+/* in-memory representation of a worker node */
 typedef struct WorkerNode
 {
 	uint32 nodePort;

@@ -2,11 +2,10 @@
  *
  * connection.h
  *
- * Functions to implement a connection hash for pg_shard.
+ * Declarations for public functions and types related to connection hash
+ * functionality.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -32,6 +31,7 @@
 /* SQL statement for testing */
 #define TEST_SQL "DO $$ BEGIN RAISE EXCEPTION 'Raised remotely!'; END $$"
 
+
 /*
  * NodeConnectionKey acts as the key to index into the (process-local) hash
  * keeping track of open connections. Node name and port are sufficient.
@@ -51,10 +51,10 @@ typedef struct NodeConnectionEntry
 } NodeConnectionEntry;
 
 
-/* Function declarations for obtaining and using a connection */
+/* function declarations for obtaining and using a connection */
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
-void ReportRemoteError(PGconn *connection, PGresult *result);
+extern void ReportRemoteError(PGconn *connection, PGresult *result);
 extern Datum TestPgShardConnection(PG_FUNCTION_ARGS);
 
 

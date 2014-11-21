@@ -2,11 +2,9 @@
  *
  * distribution_metadata.h
  *
- * Functions to enable cluster metadata handling for pg_shard.
+ * Declarations for public functions and types related to metadata handling.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -73,6 +71,7 @@
 #define SHARD_ID_SEQUENCE_NAME "shard_id_sequence"
 #define SHARD_PLACEMENT_ID_SEQUENCE_NAME "shard_placement_id_sequence"
 
+
 /* ShardState represents the last known state of a shard on a given node */
 typedef enum
 {
@@ -132,7 +131,7 @@ typedef struct ShardIntervalListCacheEntry
 } ShardIntervalListCacheEntry;
 
 
-/* Function declarations to access and manipulate the metadata */
+/* function declarations to access and manipulate the metadata */
 extern List * LookupShardIntervalList(Oid distributedTableId);
 extern List * LoadShardIntervalList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);

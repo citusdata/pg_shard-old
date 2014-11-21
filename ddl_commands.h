@@ -2,11 +2,10 @@
  *
  * ddl_commands.h
  *
- * Function declarations to generate and extend ddl commands for a table.
+ * Declarations for public functions related to generating and extending DDL
+ * commands.
  *
  * Copyright (c) 2014, Citus Data, Inc.
- *
- * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -22,11 +21,11 @@
 #include "nodes/pg_list.h"
 
 
-/* separator between tablename and shardId */
+/* character for separating tablename from shard ID in generated table names */
 #define SHARD_NAME_SEPARATOR '_'
 
 
-/* Function declarations to extend ddl commands with shardId's */
+/* function declarations to extend DDL commands with shard ID's */
 extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,
