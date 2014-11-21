@@ -1,13 +1,15 @@
 /*-------------------------------------------------------------------------
  *
  * create_shards.c
- * pg_shard functions to create a distributed table and initialize shards for
- * that table.
+ *
+ * This file contains pg_shard functions to create a distributed table and
+ * initialize shards for that table by creating them on the worker nodes. This
+ * also includes creating the DDL events to recreate the table and extending
+ * them with shardId's.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
- * IDENTIFICATION
- *			create_shards.c
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

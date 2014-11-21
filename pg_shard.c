@@ -1,12 +1,14 @@
 /*-------------------------------------------------------------------------
  *
  * pg_shard.c
- *			Type and function declarations for pg_shard extension
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains the function definitions which allow us to intercept the
+ * planning and execution logic for queries on distributed tables and perform
+ * our own distributed planning and execution.
  *
- * IDENTIFICATION
- *			pg_shard.c
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

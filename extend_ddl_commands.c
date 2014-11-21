@@ -1,13 +1,13 @@
 /*-------------------------------------------------------------------------
  *
  * extend_ddl_commands.c
- * Functions to extend ddl commands for a table. This file contains functions
- * which are borrowed from CitusDB.
+ *
+ * Functions to extend ddl commands for a table with a shardId. This file
+ * contains functions which are borrowed from CitusDB.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *
- * IDENTIFICATION
- *			ddl_commands.c
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

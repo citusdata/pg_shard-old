@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * prune_shard_list.c
- *			Pruning function implementations for pg_shard extension
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Pruning function implementations for pg_shard extension.
  *
- * IDENTIFICATION
- *			prune_shard_list.c
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

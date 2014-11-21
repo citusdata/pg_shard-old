@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * repair_shards.c
- *		  Repair functionality for pg_shard.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Repair functionality for pg_shard.
  *
- * IDENTIFICATION
- *		  repair_shards.c
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

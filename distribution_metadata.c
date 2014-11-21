@@ -1,12 +1,13 @@
 /*-------------------------------------------------------------------------
  *
  * distribution_metadata.c
- *		  Cluster metadata handling for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions which allow pg_shard to access, update and
+ * manage the distributed table metadata.
  *
- * IDENTIFICATION
- *		  shard_metadata.c
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

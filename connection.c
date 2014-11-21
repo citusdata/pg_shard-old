@@ -1,12 +1,14 @@
 /*-------------------------------------------------------------------------
  *
  * connection.c
- *		  Connection hash for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * This file contains functions to manage a connection hash, as used by the
+ * pg_shard extension. This includes opening/closing connections, maintaining
+ * them in a pool, and also managing bad connections.
  *
- * IDENTIFICATION
- *		  connection.h
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */
