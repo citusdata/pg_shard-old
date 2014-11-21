@@ -26,3 +26,7 @@
 # ====================
 
 !/expected/*.out
+
+# Generated test files
+/expected/connection.out
+/sql/connection.sql

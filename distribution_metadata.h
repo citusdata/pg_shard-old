@@ -14,7 +14,6 @@
 
 #include "postgres.h"
 #include "c.h"
-#include "fmgr.h"
 #include "postgres_ext.h"
 
 #include "nodes/pg_list.h"
@@ -150,7 +149,6 @@ extern void InsertShardPlacementRow(uint64 shardPlacementId, uint64 shardId,
 extern void DeleteShardPlacementRow(uint64 shardPlacementId);
 extern uint64 NextSequenceId(char *sequenceName);
 extern void LockShard(int64 shardId, LOCKMODE lockMode);
-extern Datum TestDistributionMetadata(PG_FUNCTION_ARGS);
 
 
 #endif /* PG_SHARD_DISTRIBUTION_METADATA_H */
