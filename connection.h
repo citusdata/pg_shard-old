@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * connection.h
- *		  Connection hash for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Functions to implement a connection hash for pg_shard.
  *
- * IDENTIFICATION
- *		  connection.h
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -51,6 +51,7 @@ typedef struct NodeConnectionEntry
 } NodeConnectionEntry;
 
 
+/* Function declarations for obtaining and using a connection */
 extern PGconn * GetConnection(char *nodeName, int32 nodePort);
 extern void PurgeConnection(PGconn *connection);
 void ReportRemoteError(PGconn *connection, PGresult *result);

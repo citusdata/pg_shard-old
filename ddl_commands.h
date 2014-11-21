@@ -11,8 +11,8 @@
  *-------------------------------------------------------------------------
  */
 
-#ifndef DDL_COMMANDS_H
-#define DDL_COMMANDS_H
+#ifndef PG_SHARD_DDL_COMMANDS_H
+#define PG_SHARD_DDL_COMMANDS_H
 
 #include "c.h"
 #include "fmgr.h"
@@ -22,8 +22,11 @@
 #include "nodes/pg_list.h"
 
 
+/* separator between tablename and shardId */
 #define SHARD_NAME_SEPARATOR '_'
 
+
+/* Function declarations to extend ddl commands with shardId's */
 extern List * TableDDLCommandList(Oid relationId);
 extern void AppendOptionListToString(StringInfo stringBuffer, List *optionList);
 extern List * ExtendedDDLCommandList(Oid masterRelationId, uint64 shardId,
@@ -33,4 +36,4 @@ extern bool ExecuteRemoteCommandList(char *nodeName, uint32 nodePort,
 									 List *sqlCommandList);
 
 
-#endif /* DDL_COMMANDS_H */
+#endif /* PG_SHARD_DDL_COMMANDS_H */

@@ -1,6 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * create_shards.h
+ *
  * pg_shard function declarations to initialize distributed tables and their
  * shards.
  *
@@ -11,8 +12,8 @@
  *-------------------------------------------------------------------------
  */
 
-#ifndef CREATE_SHARDS_H
-#define CREATE_SHARDS_H
+#ifndef PG_SHARD_CREATE_SHARDS_H
+#define PG_SHARD_CREATE_SHARDS_H
 
 #include "postgres.h"
 #include "c.h"
@@ -47,4 +48,4 @@ extern Datum master_create_distributed_table(PG_FUNCTION_ARGS);
 extern Datum master_create_worker_shards(PG_FUNCTION_ARGS);
 
 
-#endif /* CREATE_SHARDS_H */
+#endif /* PG_SHARD_CREATE_SHARDS_H */

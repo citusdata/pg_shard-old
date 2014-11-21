@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * pg_shard.h
- *			Type and function declarations for pg_shard extension
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Type and function declarations for pg_shard extension
  *
- * IDENTIFICATION
- *			pg_shard.h
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */

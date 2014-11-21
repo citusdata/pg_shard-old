@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * distribution_metadata.h
- *		  Cluster metadata handling for pg_shard
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Functions to enable cluster metadata handling for pg_shard.
  *
- * IDENTIFICATION
- *		  distribution_metadata.h
+ * Copyright (c) 2014, Citus Data, Inc.
+ *
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -132,6 +132,7 @@ typedef struct ShardIntervalListCacheEntry
 } ShardIntervalListCacheEntry;
 
 
+/* Function declarations to access and manipulate the metadata */
 extern List * LookupShardIntervalList(Oid distributedTableId);
 extern List * LoadShardIntervalList(Oid distributedTableId);
 extern ShardInterval * LoadShardInterval(int64 shardId);

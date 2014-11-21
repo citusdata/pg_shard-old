@@ -1,12 +1,12 @@
 /*-------------------------------------------------------------------------
  *
  * prune_shard_list.h
- *			Pruning function declarations for pg_shard extension
+ * 
+ * Function declarations to allow shard pruning.
  *
- * Portions Copyright (c) 2014, Citus Data, Inc.
+ * Copyright (c) 2014, Citus Data, Inc.
  *
- * IDENTIFICATION
- *			prune_shard_list.h
+ * $Id$
  *
  *-------------------------------------------------------------------------
  */
@@ -26,6 +26,7 @@
 #define RESERVED_HASHED_COLUMN_ID	MaxAttrNumber
 
 
+/* Function declarations for shard pruning */
 extern List * PruneShardList(Oid relationId, List *whereClauseList,
 							 List *shardIntervalList);
 extern OpExpr * MakeOpExpression(Var *variable, int16 strategyNumber);
