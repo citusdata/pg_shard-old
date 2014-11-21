@@ -21,7 +21,7 @@
 /* SQL statements for testing */
 #define POPULATE_TEMP_TABLE "CREATE TEMPORARY TABLE numbers " \
 							"AS SELECT * FROM generate_series(1, 100);"
-#define COUNT_TEMP_TABLE	"SELECT COUNT(*) FROM numbers;"
+#define COUNT_TEMP_TABLE    "SELECT COUNT(*) FROM numbers;"
 
 
 extern Datum initialize_remote_temp_table(PG_FUNCTION_ARGS);
