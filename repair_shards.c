@@ -42,6 +42,7 @@ static List * RecreateTableDDLCommandList(Oid relationId, int64 shardId);
 
 /* declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(master_copy_shard_placement);
+PG_FUNCTION_INFO_V1(worker_copy_shard_placement);
 
 
 /*
@@ -109,6 +110,20 @@ master_copy_shard_placement(PG_FUNCTION_ARGS)
 							targetPlacement->nodePort);
 
 	RESUME_INTERRUPTS();
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * worker_copy_shard_placement is unimplemented but will connect to a source
+ * shard placement in order to copy all rows from a shard table to an empty
+ * shard table locally.
+ */
+Datum
+worker_copy_shard_placement(PG_FUNCTION_ARGS __attribute__((unused)))
+{
+	ereport(ERROR, (errmsg("worker_copy_shard_placement not implemented")));
 
 	PG_RETURN_VOID();
 }
