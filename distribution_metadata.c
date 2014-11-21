@@ -557,7 +557,7 @@ TupleToShardPlacement(HeapTuple heapTuple, TupleDesc tupleDescriptor)
 	Datum shardIdDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_ID,
 									  tupleDescriptor, &isNull);
 	Datum shardStateDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_SHARD_STATE,
-	                                     tupleDescriptor, &isNull);
+										 tupleDescriptor, &isNull);
 	Datum nodeNameDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_NAME,
 									   tupleDescriptor, &isNull);
 	Datum nodePortDatum = heap_getattr(heapTuple, ATTR_NUM_SHARD_PLACEMENT_NODE_PORT,
@@ -658,7 +658,7 @@ InsertShardRow(Oid distributedTableId, uint64 shardId, char shardStorage,
 	simple_heap_insert(shardRelation, heapTuple);
 	CatalogUpdateIndexes(shardRelation, heapTuple);
 	CommandCounterIncrement();
-	
+
 	/* close relation */
 	heap_close(shardRelation, RowExclusiveLock);
 }

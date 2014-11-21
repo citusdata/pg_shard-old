@@ -214,7 +214,7 @@ ReportRemoteError(PGconn *connection, PGresult *result)
 		/* trim trailing newline, if any */
 		if (lastNewlineIndex != NULL)
 		{
-		    *lastNewlineIndex = '\0';
+			*lastNewlineIndex = '\0';
 		}
 	}
 

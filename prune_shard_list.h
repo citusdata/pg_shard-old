@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * prune_shard_list.h
- * 
+ *
  * Declarations for public functions and types related to shard pruning
  * functionality.
  *

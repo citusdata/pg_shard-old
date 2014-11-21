@@ -290,7 +290,7 @@ AppendShardIdToName(char **name, uint64 shardId)
 	char   extendedName[NAMEDATALEN];
 	uint32 extendedNameLength = 0;
 
-	snprintf(extendedName, NAMEDATALEN, "%s%c" UINT64_FORMAT, 
+	snprintf(extendedName, NAMEDATALEN, "%s%c" UINT64_FORMAT,
 			 (*name), SHARD_NAME_SEPARATOR, shardId);
 
 	/*
@@ -413,7 +413,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 
 				appendStringInfo(setStorageString, "ALTER COLUMN %s ",
 								 quote_identifier(columnName));
-				appendStringInfo(setStorageString, "SET STORAGE %s", 
+				appendStringInfo(setStorageString, "SET STORAGE %s",
 								 storageType);
 
 				deparsedCommandList = lappend(deparsedCommandList,
@@ -432,7 +432,7 @@ DeparseAlterTableStmt(AlterTableStmt *alterTableStmt)
 
 				appendStringInfo(setStatisticsString, "ALTER COLUMN %s ",
 								 quote_identifier(columnName));
-				appendStringInfo(setStatisticsString, "SET STATISTICS %d", 
+				appendStringInfo(setStatisticsString, "SET STATISTICS %d",
 								 newStatsTarget);
 
 				deparsedCommandList = lappend(deparsedCommandList,
@@ -613,7 +613,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 		}
 	}
 
-	/* 
+	/*
 	 * The constraints should be part of the table elements, so we assert that
 	 * this list is NIL before walking over the table elements again.
 	 */
@@ -649,7 +649,7 @@ DeparseCreateStmt(CreateStmt *createStmt, Oid masterRelationId)
 
 		/* deparse check constraint string */
 		checkContext = deparse_context_for(masterRelationName, masterRelationId);
- 		checkString = deparse_expression(plannedExpression, checkContext, false, false);
+		checkString = deparse_expression(plannedExpression, checkContext, false, false);
 
 		appendStringInfoString(deparsedCreate, checkString);
 	}
@@ -782,7 +782,7 @@ DeparseIndexStmt(IndexStmt *indexStmt, Oid masterRelationId)
 			char *masterRelationName = get_rel_name(masterRelationId);
 			List *exprContext = deparse_context_for(masterRelationName, masterRelationId);
 			char *exprString = deparse_expression(expression, exprContext, false, false);
-			
+
 			/* add parentheses if it's not a bare function call */
 			if (IsA(expression, FuncExpr) &&
 				((FuncExpr *) expression)->funcformat == COERCE_EXPLICIT_CALL)
