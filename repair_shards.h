@@ -25,4 +25,5 @@
 extern Datum master_copy_shard_placement(PG_FUNCTION_ARGS);
 extern Datum worker_copy_shard_placement(PG_FUNCTION_ARGS);
 
+
 #endif /* PG_SHARD_REPAIR_SHARDS_H */
