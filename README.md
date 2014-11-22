@@ -1,63 +1,33 @@
 # pg_shard
 
-`pg_shard` is a sharding extension for PostgreSQL that supports executing DML statements in real-time. It enables clients to be completely agnostic to the fact that partitioning is occuring by encapsulating the logic to route data to the proper nodes.
+pg\_shard is a sharding extension for PostgreSQL. The extension shards and replicates your PostgreSQL tables for horizontal scale and high availability. It also natively distributes SQL statements, without requiring any changes to your application logic.
 
-## Features
+As a standalone extension, pg\_shard addresses many NoSQL use-cases. In addition, you get SQL's expressiveness and PostgreSQL's powerful features, such as diverse indexes and semi-structured data types. Further, you can configure different replication set-ups using PostgreSQL's streaming replication, or easily upgrade your pg\_shard to CitusDB to boost your analytic query performance.
 
-`pg_shard` is intentionally limited in scope during its first release, but is fully functional within that scope. By installing this extension, you will be able to:
+This Readme serves as a Quick Start Guide. We provide more details on sharding, shard rebalancing, and distributed consistency in here [XXX:link], and also go over some frequently asked questions. Also, we're actively working on improving pg\_shard, and welcome your feedback and questions in our mailing lists [XXX:link].
 
-  * Horizontally scale write throughput
-  * Distribute incoming data using the hashed value of one column
-  * Replicate shards across two or more nodes
-  * Propagate an existing table schema across a set of nodes
-  * Detect node failures to preserve consistency
-  * Query the cluster using simple `SELECT` statements
-  * Limit queries to a subset of shards using equality predicates
-  * Integrate with PostgreSQL 9.3 and CitusDB 3.0 or higher
+## Building
 
-Features not yet available but under consideration for future releases:
+pg\_shard has been tested on most Linux and OS X platforms. The extension works with PostgreSQL 9.3 or 9.4, and CitusDB 3.2.
 
-  * Range-based partitioning
-  * Modification of schema of existing distributed tables
-  * Identically partitioning sets of tables to ensure their data is colocated
-
-## Requirements
-
-At minimum, you'll need:
-
-  * PostgreSQL 9.3 or later or CitusDB 3.0 or later
-  * `gcc` or `clang`
-  * `make`
-
-You can find information on obtaining PostgreSQL on their [download page](http://www.postgresql.org/download/).
-
-## Installing
-
-Once you have PostgreSQL or CitusDB installed and have downloaded a copy of `pg_shard`, installing the extension is straightforward:
+Once you have PostgreSQL or CitusDB installed, you will need to include the pg\_config directory path in your make command to build. This path is typically the same as your PostgreSQL installation's bin/ directory path. For example:
 
 ```
 PATH=/usr/local/pgsql/bin/:$PATH make
 sudo PATH=/usr/local/pgsql/bin/:$PATH make install
 ```
 
-`pg_shard` includes comprehensive regression tests. To verify your installation, just run `make installcheck`.
+pg\_shard includes comprehensive regression tests. To verify your installation, start you Postgres instance with the `shared_preload_libraries` setting below, and run `make installcheck`.
 
 ## Setup
 
-`pg_shard` uses a master node to store the metadata and act as the interface
-for all queries to the cluster. Before setup, pick one of your cluster nodes as
-the master. The rest of the nodes then are your workers. The instructions below
-should be applied only on the master node.
+pg\_shard uses a master node to store the shard metadata and to act as the interface for all queries to the cluster. Before setup, pick one of your cluster nodes as the master node. The other nodes in the cluster will then be your worker nodes. The following instructions should only be applied on the master node for the simple set-up.
 
-Before using pg_shard you need to add it to `shared_preload_libraries` in your
-`postgresql.conf` and restart Postgres:
+Before using pg\_shard you need to add it to `shared_preload_libraries` in your `postgresql.conf` and restart Postgres:
 
     shared_preload_libraries = 'pg_shard.so'    # (change requires restart)
 
-The master node in `pg_shard` reads worker host information from a file called
-`pg_worker_list.conf` in the data directory. We need to add the hostname and
-port number information for each worker node in our cluster. The below example
-adds two example worker nodes running on port 5432
+The master node in pg\_shard reads worker host information from a file called `pg_worker_list.conf` in the data directory. You need to add the hostname and port number for each worker node in your cluster to this file. For example, to add two worker nodes running on the default PostgreSQL port:
 
     $ emacs -nw $PGDATA/pg_worker_list.conf
 
@@ -73,7 +43,7 @@ Now, let's log into the master node and first create the extension:
 CREATE EXTENSION pg_shard;
 ```
 
-At this point you're ready to distribute a table. To let `pg_shard` know the structure of your table, define its schema as you would with a normal table:
+At this point you're ready to distribute a table. To let pg\_shard know the structure of your table, define its schema as you would do with a normal table:
 
 ```sql
 CREATE TABLE customer_reviews
@@ -96,31 +66,25 @@ CREATE TABLE customer_reviews
 This table will not be used to store any data on the master but rather serves as a _prototype_ of what a `customer_reviews` table should look like on worker nodes. After you're happy with your schema, tell `pg_shard` to distribute your table:
 
 ```sql
--- Pass table name and the column name on which you want to distribute your data
+-- Specify the table to distribute and the column to distribute it on 
 SELECT master_create_distributed_table('customer_reviews', 'customer_id');
 ```
 
-This function informs `pg_shard` that the given table is to be hash partitioned
-the `customer_id` column.
+This function informs pg\_shard that the table `customer_reviews` should be hash partitioned on the `customer_id` column.
 
 Now create shards for this table on the worker nodes:
 
 ```sql
--- Pass the table name, desired shard count and the replication factor
+-- Specify the table name, total shard count and replication factor
 SELECT master_create_worker_shards('customer_reviews', 16, 2);
 ```
 
-This function does a number of things to set up your distributed table:
-
-  1. `shard_count` shards are recorded in `pgs_distribution_metadata.shard`
-  2. For each shard, `replication_factor` nodes are selected. On each node, a table is created whose structure is identical to the prototype table
-  3. These shard placements are recorded in `pgs_distribution_metadata.shard_placement`
+This function creates a total of 16 shards. Each shard owns a portion of a hash token space, and gets replicated on 2 worker nodes. The shard replicas created on the worker nodes have the same table schema, index, and constraint definitions as the table on the master node. Once all replicas are created, this function saves all distributed metadata on the master node.
 
 ## Usage
 
-Issuing `INSERT` and `SELECT` commands against the table will transparently
-route your requests to the correct shard. Currently, `SELECT`, `UPDATE` and
-`DELETE` commands require the partition column in the where-clause.
+Once you created your shards, you can start issuing queries against the cluster. Currently, `SELECT`, `UPDATE` and
+`DELETE` commands require the partition column in the `where` clause.
 
 
 ```sql
@@ -134,7 +98,6 @@ SELECT count(*) FROM customer_reviews WHERE customer_id = 4687;
 SELECT * FROM customer_reviews WHERE customer_id = 4687;
 ```
 
-You can also issue `UPDATE` or `DELETE` commands on the distributed table.
 ```sql
 UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 4687;
 DELETE FROM customer_reviews WHERE customer_id = 4700;
