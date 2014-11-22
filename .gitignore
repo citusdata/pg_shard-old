@@ -1,3 +1,7 @@
+# =====
+# = C =
+# =====
+
 # Object files
 *.o
 *.ko
@@ -16,3 +20,13 @@
 *.exe
 *.out
 *.app
+
+# ====================
+# = Project-Specific =
+# ====================
+
+!/expected/*.out
+
+# Generated test files
+/expected/connection.out
+/sql/connection.sql
