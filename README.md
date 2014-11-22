@@ -2,9 +2,9 @@
 
 pg\_shard is a sharding extension for PostgreSQL. The extension shards and replicates your PostgreSQL tables for horizontal scale and high availability. It also natively distributes SQL statements, without requiring any changes to your application logic.
 
-As a standalone extension, pg\_shard addresses many NoSQL use-cases. In addition, you get SQL's expressiveness and PostgreSQL's powerful features, such as diverse indexes and semi-structured data types. Further, you can configure different replication set-ups using PostgreSQL's streaming replication, or easily upgrade your pg\_shard to CitusDB to boost your analytic query performance.
+As a standalone extension, pg\_shard addresses many NoSQL use cases. In addition, you get SQL's expressiveness and PostgreSQL's powerful features, such as diverse indexes and semi-structured data types. Further, you can configure different replication setups using PostgreSQL's streaming replication, or easily upgrade your pg\_shard to CitusDB to boost your analytic query performance.
 
-This Readme serves as a Quick Start Guide. We provide more details on sharding, shard rebalancing, and distributed consistency in here [XXX:link], and also go over some frequently asked questions. Also, we're actively working on improving pg\_shard, and welcome your feedback and questions in our mailing lists [XXX:link].
+This Readme serves as a Quick Start Guide. We provide more details on sharding, shard rebalancing, and distributed consistency in our webpage [XXX:link], and also go over some frequently asked questions. Also, we're actively working on improving pg\_shard, and welcome your feedback and questions in our mailing lists [XXX:link].
 
 ## Building
 
@@ -86,7 +86,6 @@ This function creates a total of 16 shards. Each shard owns a portion of a hash 
 Once you created your shards, you can start issuing queries against the cluster. Currently, `SELECT`, `UPDATE` and
 `DELETE` commands require the partition column in the `where` clause.
 
-
 ```sql
 INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4687, 5);
 INSERT INTO customer_reviews (customer_id, review_rating, product_title) VALUES (4687, 5, 'Harry Potter');
@@ -102,10 +101,6 @@ SELECT * FROM customer_reviews WHERE customer_id = 4687;
 UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 4687;
 DELETE FROM customer_reviews WHERE customer_id = 4700;
 ```
-
-## Troubleshooting
-
-If a node is unreachable, queries to it will fail immediately. Application operators should alarm on errors to let them know when to inspect nodes. Further support is available by contacting Citus Data. Please include dumps of all tables in the `pg_shard` schema as well as the relevant foreign tables.
 
 ## Limitations
 
