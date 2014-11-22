@@ -219,11 +219,12 @@ pg_shard_get_tableschemadef_string(Oid tableRelationId)
 	for (attributeIndex = 0; attributeIndex < tupleDescriptor->natts; attributeIndex++)
 	{
 		Form_pg_attribute attributeForm = tupleDescriptor->attrs[attributeIndex];
-		const char *attributeName = NULL;
-		const char *attributeTypeName = NULL;
 
 		if (!attributeForm->attisdropped && attributeForm->attinhcount == 0)
 		{
+			const char *attributeName = NULL;
+			const char *attributeTypeName = NULL;
+
 			if (firstAttributePrinted)
 			{
 				appendStringInfoString(&buffer, ", ");
@@ -417,7 +418,6 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 	char relationKind = 0;
 	TupleDesc tupleDescriptor = NULL;
 	AttrNumber attributeIndex = 0;
-	char *columnOptionStatement = NULL;
 	List *columnOptionList = NIL;
 	ListCell *columnOptionCell = NULL;
 	bool firstOptionPrinted = false;
@@ -515,6 +515,8 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 	 */
 	foreach(columnOptionCell, columnOptionList)
 	{
+		char *columnOptionStatement = (char *) lfirst(columnOptionCell);
+
 		if (!firstOptionPrinted)
 		{
 			initStringInfo(&buffer);
@@ -527,7 +529,6 @@ pg_shard_get_tablecolumnoptionsdef_string(Oid tableRelationId)
 		}
 		firstOptionPrinted = true;
 
-		columnOptionStatement = (char *) lfirst(columnOptionCell);
 		appendStringInfoString(&buffer, columnOptionStatement);
 
 		pfree(columnOptionStatement);
