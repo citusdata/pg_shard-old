@@ -10,7 +10,7 @@ This document serves as a quick start guide. We provide architectural details on
 
 pg\_shard has been tested on most Linux and OS X platforms. The extension works with PostgreSQL 9.3 or 9.4, and CitusDB 3.2.
 
-Once you have PostgreSQL or CitusDB installed, you will need to include the pg\_config directory path in your make command to build. This path is typically the same as your PostgreSQL installation's bin/ directory path. As two example paths:
+Once you have PostgreSQL or CitusDB installed, you're ready to build. For this, you will need to include the pg\_config directory path in your make command. This path is typically the same as your PostgreSQL installation's bin/ directory path. For example:
 
 ```
 # Path when PostgreSQL is compiled from source
@@ -26,7 +26,7 @@ pg\_shard also includes regression tests. To verify your installation, start you
 
 ## Setup
 
-pg\_shard uses a master node to store shard metadata. In the simple setup, this node also acts as the interface for all queries to the cluster. As the user, you could pick any one PostgreSQL node as the master, and the other nodes in the cluster will then be your worker nodes.
+pg\_shard uses a master node to store shard metadata. In the simple setup, this node also acts as the interface for all queries to the cluster. As the user, you can pick any one of your PostgreSQL nodes as the master, and the other nodes in the cluster will then be your workers.
 
 An easy way to get started is by running your master and worker nodes on the same machine. In that case, each node will be one PostgreSQL database that runs on a different port. You can simply use ```localhost``` as the hostname in this setup.
 
@@ -74,7 +74,7 @@ CREATE TABLE customer_reviews
 );
 ```
 
-This table will not be used to store any data on the master but serves as a _prototype_ of what a `customer_reviews` table should look like on worker nodes. After you're happy with your schema, tell `pg_shard` to distribute your table:
+This table will not be used to store any data on the master but serves as a prototype of what a `customer_reviews` table should look like on worker nodes. After you're happy with your schema, tell `pg_shard` to distribute your table:
 
 ```sql
 -- Specify the table to distribute and the column to distribute it on 
@@ -100,12 +100,10 @@ INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4687, 5);
 INSERT INTO customer_reviews (customer_id, review_rating, product_title) VALUES (4687, 5, 'Harry Potter');
 INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4700, 10);
 ```
-
 ```sql
 SELECT avg(review_rating) FROM customer_reviews WHERE customer_id = 4687;
 SELECT count(*) FROM customer_reviews;
 ```
-
 ```sql
 UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 4687;
 DELETE FROM customer_reviews WHERE customer_id = 4700;
@@ -113,22 +111,10 @@ DELETE FROM customer_reviews WHERE customer_id = 4700;
 
 ## Limitations
 
-`pg_shard` provides a nice abstraction for sharding, but certain features will never be supported:
+pg\_shard is intentionally limited in scope during its first release, but is fully functional within that scope. We classify pg\_shard's current limitations into two groups. In one group, we have features that we don't intend to support in the medium term due to architectural decisions we made:
 
-  * Distributed `JOIN`s — Upgrade to CitusDB to unlock this feature
-  * Unique constraints on columns other than the partition key
-  * Foreign key constraints
+* Transactional semantics for queries that span across multiple shards - For example, you're a financial institution and you sharded your data based on customer\_id. You'd now like to withdraw money from one customer's account and debit it to another one's account, in a single transaction block.
+* Unique constraints on columns other than the partition key, or foreign key constraints.
+* Distributed JOINs also aren't supported in pg\_shard - If you'd like to run complex analytic queries, please consider upgrading to CitusDB.
 
-### Future
-
-Given enough demand, these features may be included in future releases:
-
-  * Eventual consistency
-  * Marking nodes as unhealthy after a number of failures
-  * Retries to unhealthy nodes
-  * Partitioning using more than one column
-  * Range partitioning
-  * Schema modifications
-  * Partitioning many tables identically based on a common column
-
-If we've missed something, please open an issue.
+For the second group, we also have a list of features that are easier to add. Instead of prioritizing this list ourselves, we decided to keep an open discussion on GitHub issues and hear what you have to say. So if you have a favorite feature missing in pg\_shard, please do get in touch!
