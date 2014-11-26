@@ -46,3 +46,14 @@ EXTRA_CLEAN += ${REGRESS_PREP}
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+
+ifneq (,$(findstring $(MAJORVERSION), 9.3))
+	RULEUTILS_IMPL := ruleutils93.c
+else ifneq (,$(findstring $(MAJORVERSION), 9.4))
+	RULEUTILS_IMPL := ruleutils94.c
+else
+	$(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
+endif
+
+ruleutils.o: $(RULEUTILS_IMPL)
+	$(COMPILE.c) $(OUTPUT_OPTION) $<
