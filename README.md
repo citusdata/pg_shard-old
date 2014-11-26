@@ -8,7 +8,7 @@ This document serves as a quick start guide. We provide architectural details on
 
 ## Building
 
-pg\_shard has been tested on most Linux and OS X platforms. The extension works with PostgreSQL 9.3 or 9.4, and CitusDB 3.2.
+pg\_shard works with PostgreSQL 9.3 or 9.4, and CitusDB 3.2. We tested the extension on Linux and OS X.
 
 Once you have PostgreSQL or CitusDB installed, you're ready to build. For this, you will need to include the pg\_config directory path in your make command. This path is typically the same as your PostgreSQL installation's bin/ directory path. For example:
 
