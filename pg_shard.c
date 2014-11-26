@@ -1794,8 +1794,11 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 		if (relation != NULL)
 		{
 			Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
+			bool isDistributedTable = false;
 
-			bool isDistributedTable = IsDistributedTable(tableId);
+			Assert(rawQuery == NULL);
+
+			isDistributedTable = IsDistributedTable(tableId);
 			if (isDistributedTable)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1810,6 +1813,8 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			List *queryList = pg_analyze_and_rewrite(rawQuery, queryString,
 													 NULL, 0);
 
+			Assert(relation == NULL);
+
 			if (list_length(queryList) != 1)
 			{
 				ereport(ERROR, (errmsg("unexpected rewrite result")));
@@ -1822,8 +1827,8 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 			if (plannerType == PLANNER_TYPE_PG_SHARD)
 			{
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-								errmsg("COPY statements on distributed tables "
-									   "are unsupported")));
+								errmsg("COPY statements involving distributed "
+									   "tables are unsupported")));
 			}
 		}
 	}
