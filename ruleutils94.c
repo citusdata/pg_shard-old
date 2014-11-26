@@ -1,19 +1,17 @@
 /*-------------------------------------------------------------------------
  *
- * ruleutils.c
+ * ruleutils94.c
  *	  Functions to convert stored expressions/querytrees back to
  *	  source text. Used by pg_shard to recreate the text of an
  *	  incoming query with the proper shard identifier added. As
  *	  these methods are static in PostgreSQL proper, we copied
  *	  this file for the time being.
  *
+ *	  Based on src/backend/utils/adt/ruleutils.c from PostgreSQL 9.4.
+ *
  * Portions Copyright (c) 2014, Citus Data, Inc.
  * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- *
- * IDENTIFICATION
- *	  src/backend/utils/adt/ruleutils.c
  *
  *-------------------------------------------------------------------------
  */
