@@ -49,9 +49,9 @@ include $(PGXS)
 
 # Build the 9.3- or 9.4-derived ruleutils, depending upon active version
 ifneq (,$(findstring $(MAJORVERSION), 9.3))
-	RULEUTILS_IMPL := ruleutils93.c
+	RULEUTILS_IMPL := ruleutils_93.c
 else ifneq (,$(findstring $(MAJORVERSION), 9.4))
-	RULEUTILS_IMPL := ruleutils94.c
+	RULEUTILS_IMPL := ruleutils_94.c
 else
 	# Error out if too old altogether
 	$(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
