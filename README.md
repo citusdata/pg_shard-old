@@ -57,7 +57,7 @@ At this point you're ready to distribute a table. To let `pg_shard` know the str
 ```sql
 CREATE TABLE customer_reviews
 (
-    customer_id INTEGER,
+    customer_id TEXT NOT NULL,
     review_date DATE,
     review_rating INTEGER,
     review_votes INTEGER,
@@ -72,7 +72,7 @@ CREATE TABLE customer_reviews
 );
 ```
 
-This table will not be used to store any data on the master but serves as a prototype of what a `customer_reviews` table should look like on the worker nodes. After you're happy with your schema, tell `pg_shard` to distribute your table:
+This table will not be used to store any data on the master but serves as a prototype of what a `customer_reviews` table should look like on the worker nodes. After you're happy with your schema, and created any indexes on your table, tell `pg_shard` to distribute the table table:
 
 ```sql
 -- Specify the table to distribute and the column to distribute it on
@@ -94,16 +94,15 @@ Once you created your shards, you can start issuing queries against the cluster.
 `DELETE` commands require the partition column in the `WHERE` clause.
 
 ```sql
-INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4687, 5);
-INSERT INTO customer_reviews (customer_id, review_rating, product_title) VALUES (4687, 5, 'Harry Potter');
-INSERT INTO customer_reviews (customer_id, review_rating) VALUES (4700, 10);
-```
-```sql
-SELECT avg(review_rating) FROM customer_reviews WHERE customer_id = 4687;
+INSERT INTO customer_reviews (customer_id, review_rating) VALUES ('HN802', 5);
+INSERT INTO customer_reviews VALUES
+  ('HN802', '2004-01-01', 1, 10, 4, 'B00007B5DN', 'Tug of War', 133191, 'Music', 'Indie Music', 'Pop', '{}');
+INSERT INTO customer_reviews (customer_id, review_rating) VALUES ('FA2K1', 10);
+
+SELECT avg(review_rating) FROM customer_reviews WHERE customer_id = 'HN802';
 SELECT count(*) FROM customer_reviews;
-```
-```sql
-UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 4687;
+
+UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 'HN802';
 DELETE FROM customer_reviews WHERE customer_id = 4700;
 ```
 
