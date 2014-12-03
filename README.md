@@ -34,7 +34,7 @@ Alternately, you could start up one PostgreSQL database per machine; this is mor
 
 Once you decide on your cluster setup, you will need to make two changes on the master node. First, you will need to add `pg_shard` to `shared_preload_libraries` in your `postgresql.conf`:
 
-    shared_preload_libraries = 'pg_shard.so'    # (change requires restart)
+    shared_preload_libraries = 'pg_shard'    # (change requires restart)
 
 Second, the master node in `pg_shard` reads worker host information from a file called `pg_worker_list.conf` in the data directory. You need to add the hostname and port number of each worker node in your cluster to this file. For example, to add two worker nodes running on the default PostgreSQL port:
 
