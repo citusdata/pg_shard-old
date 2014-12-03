@@ -29,7 +29,9 @@
 #include <string.h>
 
 #include "access/attnum.h"
+#include "access/heapam.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_class.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
 #include "nodes/primnodes.h"
@@ -40,11 +42,14 @@
 #include "utils/errcodes.h"
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
+#include "utils/rel.h"
+#include "utils/relcache.h"
 
 
 /* local function forward declarations */
 static Oid ResolveRelationId(text *relationName);
 static void CheckHashPartitionedTable(Oid distributedTableId);
+static char ShardStorageTypeForDistributedTable(Oid distributedTableId);
 static List * ParseWorkerNodeFile(char *workerNodeFilename);
 static int CompareWorkerNodes(const void *leftElement, const void *rightElement);
 static bool ExecuteRemoteCommand(PGconn *connection, const char *sqlCommand);
@@ -107,6 +112,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 	int32 replicationFactor = PG_GETARG_INT32(2);
 
 	Oid distributedTableId = ResolveRelationId(tableNameText);
+	char shardStorageType = ShardStorageTypeForDistributedTable(distributedTableId);
 	int32 shardIndex = 0;
 	List *workerNodeList = NIL;
 	List *ddlCommandList = NIL;
@@ -234,7 +240,7 @@ master_create_worker_shards(PG_FUNCTION_ARGS)
 		/* insert the shard metadata row along with its min/max values */
 		minHashTokenText = IntegerToText(shardMinHashToken);
 		maxHashTokenText = IntegerToText(shardMaxHashToken);
-		InsertShardRow(distributedTableId, shardId, SHARD_STORAGE_TABLE,
+		InsertShardRow(distributedTableId, shardId, shardStorageType,
 					   minHashTokenText, maxHashTokenText);
 	}
 
@@ -281,6 +287,37 @@ CheckHashPartitionedTable(Oid distributedTableId)
 	{
 		ereport(ERROR, (errmsg("unsupported table partition type: %c", partitionType)));
 	}
+}
+
+
+/*
+ * ShardStorageTypeForDistributedTable returns the storage type indicator for
+ * the specified distributed table. This function throws an error if the
+ * specified relation is not a foreign or regular table.
+ */
+static char
+ShardStorageTypeForDistributedTable(Oid distributedTableId)
+{
+	Relation relation = relation_open(distributedTableId, AccessShareLock);
+	char shardStorageType = 0;
+
+	if (relation->rd_rel->relkind == RELKIND_RELATION)
+	{
+		shardStorageType = SHARD_STORAGE_TABLE;
+	}
+	else if (relation->rd_rel->relkind == RELKIND_FOREIGN_TABLE)
+	{
+		shardStorageType = SHARD_STORAGE_FOREIGN;
+	}
+	else
+	{
+		ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						errmsg("relation is not a regular or foreign table")));
+	}
+
+	relation_close(relation, AccessShareLock);
+
+	return shardStorageType;
 }
 
 
