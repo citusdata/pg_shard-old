@@ -38,8 +38,8 @@ CREATE SCHEMA pgs_distribution_metadata
 	CREATE INDEX shard_placement_shard_index ON shard_placement (shard_id)
 
 	-- make sequences for shards and placements
-	CREATE SEQUENCE shard_id_sequence MINVALUE 10000;
-	CREATE SEQUENCE shard_placement_id_sequence;
+	CREATE SEQUENCE shard_id_sequence MINVALUE 10000 NO CYCLE;
+	CREATE SEQUENCE shard_placement_id_sequence NO CYCLE;
 
 -- mark each of the above as config tables to have pg_dump preserve them
 SELECT pg_catalog.pg_extension_config_dump(
