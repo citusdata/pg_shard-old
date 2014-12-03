@@ -1,19 +1,17 @@
 /*-------------------------------------------------------------------------
  *
- * ruleutils.c
+ * ruleutils_94.c
  *	  Functions to convert stored expressions/querytrees back to
  *	  source text. Used by pg_shard to recreate the text of an
  *	  incoming query with the proper shard identifier added. As
  *	  these methods are static in PostgreSQL proper, we copied
  *	  this file for the time being.
  *
+ *	  Based on src/backend/utils/adt/ruleutils.c from PostgreSQL 9.4.
+ *
  * Portions Copyright (c) 2014, Citus Data, Inc.
- * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- *
- *
- * IDENTIFICATION
- *	  src/backend/utils/adt/ruleutils.c
  *
  *-------------------------------------------------------------------------
  */
@@ -26,7 +24,7 @@
 #include "pg_config_manual.h"
 #include "postgres_ext.h"
 
-#include "ruleutils.h"
+#include "ruleutils.h" /* IWYU pragma: keep */
 #include "ddl_commands.h"
 
 #include <stddef.h>
@@ -38,6 +36,7 @@
 #include "access/htup.h"
 #include "access/htup_details.h"
 #include "access/tupdesc.h"
+#include "catalog/pg_aggregate.h"
 #include "catalog/pg_attribute.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
@@ -52,10 +51,10 @@
 #include "nodes/plannodes.h"
 #include "nodes/primnodes.h"
 #include "nodes/value.h"
-#include "optimizer/clauses.h"
 #include "optimizer/tlist.h"
 #include "parser/parser.h"
 #include "parser/parsetree.h"
+#include "parser/parse_agg.h"
 #include "parser/parse_func.h"
 #include "parser/parse_oper.h"
 #include "rewrite/rewriteHandler.h"
@@ -63,6 +62,7 @@
 #include "utils/builtins.h"
 #include "utils/elog.h"
 #include "utils/errcodes.h"
+#include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
 #include "utils/palloc.h"
 #include "utils/rel.h"
@@ -72,9 +72,9 @@
 #include "utils/xml.h"
 
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wempty-body"
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wswitch"
+
 
 /* ----------
  * Pretty formatting constants
@@ -379,8 +379,8 @@ static void get_from_clause_item(Node *jtnode, Query *query,
 					 deparse_context *context);
 static void get_column_alias_list(deparse_columns *colinfo,
 					  deparse_context *context);
-static void get_from_clause_coldeflist(deparse_columns *colinfo,
-						   List *types, List *typmods, List *collations,
+static void get_from_clause_coldeflist(RangeTblFunction *rtfunc,
+						   deparse_columns *colinfo,
 						   deparse_context *context);
 static Node *processIndirection(Node *node, deparse_context *context,
 				   bool printit);
@@ -389,11 +389,10 @@ static char *get_relation_name(Oid relid);
 static char *generate_shard_name(Oid relid, int64 shardid);
 static char *generate_function_name(Oid funcid, int nargs,
 					   List *argnames, Oid *argtypes,
-					   bool was_variadic, bool *use_variadic_p);
+					   bool has_variadic, bool *use_variadic_p);
 static char *generate_operator_name(Oid operid, Oid arg1, Oid arg2);
 
 #define only_marker(rte)  ((rte)->inh ? "" : "ONLY ")
-
 
 /*
  * set_rtable_names: select RTE aliases to be used in printing a query
@@ -1777,7 +1776,7 @@ get_shard_query_def(Query *query, StringInfo buf, List *parentnamespace,
 			break;
 
 		case CMD_NOTHING:
-			appendStringInfo(buf, "NOTHING");
+			appendStringInfoString(buf, "NOTHING");
 			break;
 
 		case CMD_UTILITY:
@@ -1966,7 +1965,7 @@ get_select_query_def(Query *query, deparse_context *context,
 							 -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 		if (IsA(query->limitCount, Const) &&
 			((Const *) query->limitCount)->constisnull)
-			appendStringInfo(buf, "ALL");
+			appendStringInfoString(buf, "ALL");
 		else
 			get_rule_expr(query->limitCount, context, false);
 	}
@@ -2006,7 +2005,7 @@ get_select_query_def(Query *query, deparse_context *context,
 							 quote_identifier(get_rtable_name(rc->rti,
 															  context)));
 			if (rc->noWait)
-				appendStringInfo(buf, " NOWAIT");
+				appendStringInfoString(buf, " NOWAIT");
 		}
 	}
 
@@ -2080,14 +2079,14 @@ get_basic_select_query(Query *query, deparse_context *context,
 	/*
 	 * Build up the query string - first we say SELECT
 	 */
-	appendStringInfo(buf, "SELECT");
+	appendStringInfoString(buf, "SELECT");
 
 	/* Add the DISTINCT clause if given */
 	if (query->distinctClause != NIL)
 	{
 		if (query->hasDistinctOn)
 		{
-			appendStringInfo(buf, " DISTINCT ON (");
+			appendStringInfoString(buf, " DISTINCT ON (");
 			sep = "";
 			foreach(l, query->distinctClause)
 			{
@@ -2098,10 +2097,10 @@ get_basic_select_query(Query *query, deparse_context *context,
 										 false, context);
 				sep = ", ";
 			}
-			appendStringInfo(buf, ")");
+			appendStringInfoChar(buf, ')');
 		}
 		else
-			appendStringInfo(buf, " DISTINCT");
+			appendStringInfoString(buf, " DISTINCT");
 	}
 
 	/* Then we tell what to select (the targetlist) */
@@ -2379,7 +2378,7 @@ get_setop_query(Node *setOp, Query *query, deparse_context *context,
 					 (int) op->op);
 		}
 		if (op->all)
-			appendStringInfo(buf, "ALL ");
+			appendStringInfoString(buf, "ALL ");
 
 		/* Always parenthesize if RHS is another setop */
 		need_paren = IsA(op->rarg, SetOperationStmt);
@@ -2479,14 +2478,14 @@ get_rule_orderby(List *orderList, List *targetList,
 		{
 			/* ASC is default, so emit nothing for it */
 			if (srt->nulls_first)
-				appendStringInfo(buf, " NULLS FIRST");
+				appendStringInfoString(buf, " NULLS FIRST");
 		}
 		else if (srt->sortop == typentry->gt_opr)
 		{
-			appendStringInfo(buf, " DESC");
+			appendStringInfoString(buf, " DESC");
 			/* DESC defaults to NULLS FIRST */
 			if (!srt->nulls_first)
-				appendStringInfo(buf, " NULLS LAST");
+				appendStringInfoString(buf, " NULLS LAST");
 		}
 		else
 		{
@@ -2496,9 +2495,9 @@ get_rule_orderby(List *orderList, List *targetList,
 													sortcoltype));
 			/* be specific to eliminate ambiguity */
 			if (srt->nulls_first)
-				appendStringInfo(buf, " NULLS FIRST");
+				appendStringInfoString(buf, " NULLS FIRST");
 			else
-				appendStringInfo(buf, " NULLS LAST");
+				appendStringInfoString(buf, " NULLS LAST");
 		}
 		sep = ", ";
 	}
@@ -2750,7 +2749,7 @@ get_insert_query_def(Query *query, deparse_context *context)
 		}
 	}
 	if (query->targetList)
-		appendStringInfo(buf, ") ");
+		appendStringInfoString(buf, ") ");
 
 	if (select_rte)
 	{
@@ -2775,7 +2774,7 @@ get_insert_query_def(Query *query, deparse_context *context)
 	else
 	{
 		/* No expressions, so it must be DEFAULT VALUES */
-		appendStringInfo(buf, "DEFAULT VALUES");
+		appendStringInfoString(buf, "DEFAULT VALUES");
 	}
 
 	/* Add RETURNING if present */
@@ -2848,7 +2847,7 @@ get_update_query_def(Query *query, deparse_context *context)
 		 */
 		expr = processIndirection((Node *) tle->expr, context, true);
 
-		appendStringInfo(buf, " = ");
+		appendStringInfoString(buf, " = ");
 
 		get_rule_expr(expr, context, false);
 	}
@@ -4257,7 +4256,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				if (!PRETTY_PAREN(context))
 					appendStringInfoChar(buf, '(');
 				get_rule_expr_paren(arg1, context, true, node);
-				appendStringInfo(buf, " IS DISTINCT FROM ");
+				appendStringInfoString(buf, " IS DISTINCT FROM ");
 				get_rule_expr_paren(arg2, context, true, node);
 				if (!PRETTY_PAREN(context))
 					appendStringInfoChar(buf, ')');
@@ -4268,7 +4267,7 @@ get_rule_expr(Node *node, deparse_context *context,
 			{
 				NullIfExpr *nullifexpr = (NullIfExpr *) node;
 
-				appendStringInfo(buf, "NULLIF(");
+				appendStringInfoString(buf, "NULLIF(");
 				get_rule_expr((Node *) nullifexpr->args, context, true);
 				appendStringInfoChar(buf, ')');
 			}
@@ -4311,7 +4310,7 @@ get_rule_expr(Node *node, deparse_context *context,
 											false, node);
 						while (arg)
 						{
-							appendStringInfo(buf, " AND ");
+							appendStringInfoString(buf, " AND ");
 							get_rule_expr_paren((Node *) lfirst(arg), context,
 												false, node);
 							arg = lnext(arg);
@@ -4327,7 +4326,7 @@ get_rule_expr(Node *node, deparse_context *context,
 											false, node);
 						while (arg)
 						{
-							appendStringInfo(buf, " OR ");
+							appendStringInfoString(buf, " OR ");
 							get_rule_expr_paren((Node *) lfirst(arg), context,
 												false, node);
 							arg = lnext(arg);
@@ -4339,7 +4338,7 @@ get_rule_expr(Node *node, deparse_context *context,
 					case NOT_EXPR:
 						if (!PRETTY_PAREN(context))
 							appendStringInfoChar(buf, '(');
-						appendStringInfo(buf, "NOT ");
+						appendStringInfoString(buf, "NOT ");
 						get_rule_expr_paren(first_arg, context,
 											false, node);
 						if (!PRETTY_PAREN(context))
@@ -4380,7 +4379,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				ListCell   *lc;
 
 				/* As above, this can only happen during EXPLAIN */
-				appendStringInfo(buf, "(alternatives: ");
+				appendStringInfoString(buf, "(alternatives: ");
 				foreach(lc, asplan->subplans)
 				{
 					SubPlan    *splan = (SubPlan *) lfirst(lc);
@@ -4389,11 +4388,11 @@ get_rule_expr(Node *node, deparse_context *context,
 					if (splan->useHashTable)
 						appendStringInfo(buf, "hashed %s", splan->plan_name);
 					else
-						appendStringInfo(buf, "%s", splan->plan_name);
+						appendStringInfoString(buf, splan->plan_name);
 					if (lnext(lc))
-						appendStringInfo(buf, " or ");
+						appendStringInfoString(buf, " or ");
 				}
-				appendStringInfo(buf, ")");
+				appendStringInfoChar(buf, ')');
 			}
 			break;
 
@@ -4605,7 +4604,7 @@ get_rule_expr(Node *node, deparse_context *context,
 					appendContextKeyword(context, "WHEN ",
 										 0, 0, 0);
 					get_rule_expr(w, context, false);
-					appendStringInfo(buf, " THEN ");
+					appendStringInfoString(buf, " THEN ");
 					get_rule_expr((Node *) when->result, context, true);
 				}
 				if (!PRETTY_INDENT(context))
@@ -4629,7 +4628,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				 * be unable to avoid that (see comments for CaseExpr).  If we
 				 * do see one, print it as CASE_TEST_EXPR.
 				 */
-				appendStringInfo(buf, "CASE_TEST_EXPR");
+				appendStringInfoString(buf, "CASE_TEST_EXPR");
 			}
 			break;
 
@@ -4637,7 +4636,7 @@ get_rule_expr(Node *node, deparse_context *context,
 			{
 				ArrayExpr  *arrayexpr = (ArrayExpr *) node;
 
-				appendStringInfo(buf, "ARRAY[");
+				appendStringInfoString(buf, "ARRAY[");
 				get_rule_expr((Node *) arrayexpr->elements, context, true);
 				appendStringInfoChar(buf, ']');
 
@@ -4675,7 +4674,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				 * SQL99 allows "ROW" to be omitted when there is more than
 				 * one column, but for simplicity we always print it.
 				 */
-				appendStringInfo(buf, "ROW(");
+				appendStringInfoString(buf, "ROW(");
 				sep = "";
 				i = 0;
 				foreach(arg, rowexpr->args)
@@ -4698,7 +4697,7 @@ get_rule_expr(Node *node, deparse_context *context,
 						if (!tupdesc->attrs[i]->attisdropped)
 						{
 							appendStringInfoString(buf, sep);
-							appendStringInfo(buf, "NULL");
+							appendStringInfoString(buf, "NULL");
 							sep = ", ";
 						}
 						i++;
@@ -4706,7 +4705,7 @@ get_rule_expr(Node *node, deparse_context *context,
 
 					ReleaseTupleDesc(tupdesc);
 				}
-				appendStringInfo(buf, ")");
+				appendStringInfoChar(buf, ')');
 				if (rowexpr->row_format == COERCE_EXPLICIT_CAST)
 					appendStringInfo(buf, "::%s",
 						  format_type_with_typemod(rowexpr->row_typeid, -1));
@@ -4723,7 +4722,7 @@ get_rule_expr(Node *node, deparse_context *context,
 				 * SQL99 allows "ROW" to be omitted when there is more than
 				 * one column, but for simplicity we always print it.
 				 */
-				appendStringInfo(buf, "(ROW(");
+				appendStringInfoString(buf, "(ROW(");
 				sep = "";
 				foreach(arg, rcexpr->largs)
 				{
@@ -4754,7 +4753,7 @@ get_rule_expr(Node *node, deparse_context *context,
 					get_rule_expr(e, context, true);
 					sep = ", ";
 				}
-				appendStringInfo(buf, "))");
+				appendStringInfoString(buf, "))");
 			}
 			break;
 
@@ -4762,7 +4761,7 @@ get_rule_expr(Node *node, deparse_context *context,
 			{
 				CoalesceExpr *coalesceexpr = (CoalesceExpr *) node;
 
-				appendStringInfo(buf, "COALESCE(");
+				appendStringInfoString(buf, "COALESCE(");
 				get_rule_expr((Node *) coalesceexpr->args, context, true);
 				appendStringInfoChar(buf, ')');
 			}
@@ -4775,10 +4774,10 @@ get_rule_expr(Node *node, deparse_context *context,
 				switch (minmaxexpr->op)
 				{
 					case IS_GREATEST:
-						appendStringInfo(buf, "GREATEST(");
+						appendStringInfoString(buf, "GREATEST(");
 						break;
 					case IS_LEAST:
-						appendStringInfo(buf, "LEAST(");
+						appendStringInfoString(buf, "LEAST(");
 						break;
 				}
 				get_rule_expr((Node *) minmaxexpr->args, context, true);
@@ -4953,10 +4952,10 @@ get_rule_expr(Node *node, deparse_context *context,
 				switch (ntest->nulltesttype)
 				{
 					case IS_NULL:
-						appendStringInfo(buf, " IS NULL");
+						appendStringInfoString(buf, " IS NULL");
 						break;
 					case IS_NOT_NULL:
-						appendStringInfo(buf, " IS NOT NULL");
+						appendStringInfoString(buf, " IS NOT NULL");
 						break;
 					default:
 						elog(ERROR, "unrecognized nulltesttype: %d",
@@ -4977,22 +4976,22 @@ get_rule_expr(Node *node, deparse_context *context,
 				switch (btest->booltesttype)
 				{
 					case IS_TRUE:
-						appendStringInfo(buf, " IS TRUE");
+						appendStringInfoString(buf, " IS TRUE");
 						break;
 					case IS_NOT_TRUE:
-						appendStringInfo(buf, " IS NOT TRUE");
+						appendStringInfoString(buf, " IS NOT TRUE");
 						break;
 					case IS_FALSE:
-						appendStringInfo(buf, " IS FALSE");
+						appendStringInfoString(buf, " IS FALSE");
 						break;
 					case IS_NOT_FALSE:
-						appendStringInfo(buf, " IS NOT FALSE");
+						appendStringInfoString(buf, " IS NOT FALSE");
 						break;
 					case IS_UNKNOWN:
-						appendStringInfo(buf, " IS UNKNOWN");
+						appendStringInfoString(buf, " IS UNKNOWN");
 						break;
 					case IS_NOT_UNKNOWN:
-						appendStringInfo(buf, " IS NOT UNKNOWN");
+						appendStringInfoString(buf, " IS NOT UNKNOWN");
 						break;
 					default:
 						elog(ERROR, "unrecognized booltesttype: %d",
@@ -5025,11 +5024,11 @@ get_rule_expr(Node *node, deparse_context *context,
 			break;
 
 		case T_CoerceToDomainValue:
-			appendStringInfo(buf, "VALUE");
+			appendStringInfoString(buf, "VALUE");
 			break;
 
 		case T_SetToDefault:
-			appendStringInfo(buf, "DEFAULT");
+			appendStringInfoString(buf, "DEFAULT");
 			break;
 
 		case T_CurrentOfExpr:
@@ -5220,45 +5219,73 @@ get_agg_expr(Aggref *aggref, deparse_context *context)
 {
 	StringInfo	buf = context->buf;
 	Oid			argtypes[FUNC_MAX_ARGS];
-	List	   *arglist;
 	int			nargs;
-	ListCell   *l;
+	bool		use_variadic;
 
-	/* Extract the regular arguments, ignoring resjunk stuff for the moment */
-	arglist = NIL;
-	nargs = 0;
-	foreach(l, aggref->args)
-	{
-		TargetEntry *tle = (TargetEntry *) lfirst(l);
-		Node	   *arg = (Node *) tle->expr;
+	/* Extract the argument types as seen by the parser */
+	nargs = get_aggregate_argtypes(aggref, argtypes);
 
-		Assert(!IsA(arg, NamedArgExpr));
-		if (tle->resjunk)
-			continue;
-		if (nargs >= FUNC_MAX_ARGS)		/* paranoia */
-			ereport(ERROR,
-					(errcode(ERRCODE_TOO_MANY_ARGUMENTS),
-					 errmsg("too many arguments")));
-		argtypes[nargs] = exprType(arg);
-		arglist = lappend(arglist, arg);
-		nargs++;
-	}
-
+	/* Print the aggregate name, schema-qualified if needed */
 	appendStringInfo(buf, "%s(%s",
 					 generate_function_name(aggref->aggfnoid, nargs,
 											NIL, argtypes,
-											false, NULL),
+											aggref->aggvariadic,
+											&use_variadic),
 					 (aggref->aggdistinct != NIL) ? "DISTINCT " : "");
-	/* aggstar can be set only in zero-argument aggregates */
-	if (aggref->aggstar)
-		appendStringInfoChar(buf, '*');
-	else
-		get_rule_expr((Node *) arglist, context, true);
-	if (aggref->aggorder != NIL)
+
+	if (AGGKIND_IS_ORDERED_SET(aggref->aggkind))
 	{
-		appendStringInfoString(buf, " ORDER BY ");
+		/*
+		 * Ordered-set aggregates do not use "*" syntax.  Also, we needn't
+		 * worry about inserting VARIADIC.  So we can just dump the direct
+		 * args as-is.
+		 */
+		Assert(!aggref->aggvariadic);
+		get_rule_expr((Node *) aggref->aggdirectargs, context, true);
+		Assert(aggref->aggorder != NIL);
+		appendStringInfoString(buf, ") WITHIN GROUP (ORDER BY ");
 		get_rule_orderby(aggref->aggorder, aggref->args, false, context);
 	}
+	else
+	{
+		/* aggstar can be set only in zero-argument aggregates */
+		if (aggref->aggstar)
+			appendStringInfoChar(buf, '*');
+		else
+		{
+			ListCell   *l;
+			int			i;
+
+			i = 0;
+			foreach(l, aggref->args)
+			{
+				TargetEntry *tle = (TargetEntry *) lfirst(l);
+				Node	   *arg = (Node *) tle->expr;
+
+				Assert(!IsA(arg, NamedArgExpr));
+				if (tle->resjunk)
+					continue;
+				if (i++ > 0)
+					appendStringInfoString(buf, ", ");
+				if (use_variadic && i == nargs)
+					appendStringInfoString(buf, "VARIADIC ");
+				get_rule_expr(arg, context, true);
+			}
+		}
+
+		if (aggref->aggorder != NIL)
+		{
+			appendStringInfoString(buf, " ORDER BY ");
+			get_rule_orderby(aggref->aggorder, aggref->args, false, context);
+		}
+	}
+
+	if (aggref->aggfilter != NULL)
+	{
+		appendStringInfoString(buf, ") FILTER (WHERE ");
+		get_rule_expr((Node *) aggref->aggfilter, context, false);
+	}
+
 	appendStringInfoChar(buf, ')');
 }
 
@@ -5299,6 +5326,13 @@ get_windowfunc_expr(WindowFunc *wfunc, deparse_context *context)
 		appendStringInfoChar(buf, '*');
 	else
 		get_rule_expr((Node *) wfunc->args, context, true);
+
+	if (wfunc->aggfilter != NULL)
+	{
+		appendStringInfoString(buf, ") FILTER (WHERE ");
+		get_rule_expr((Node *) wfunc->aggfilter, context, false);
+	}
+
 	appendStringInfoString(buf, ") OVER ");
 
 	foreach(l, context->windowClause)
@@ -5398,7 +5432,7 @@ get_const_expr(Const *constval, deparse_context *context, int showtype)
 		 * Always label the type of a NULL constant to prevent misdecisions
 		 * about type when reparsing.
 		 */
-		appendStringInfo(buf, "NULL");
+		appendStringInfoString(buf, "NULL");
 		if (showtype >= 0)
 		{
 			appendStringInfo(buf, "::%s",
@@ -5460,9 +5494,9 @@ get_const_expr(Const *constval, deparse_context *context, int showtype)
 
 		case BOOLOID:
 			if (strcmp(extval, "t") == 0)
-				appendStringInfo(buf, "true");
+				appendStringInfoString(buf, "true");
 			else
-				appendStringInfo(buf, "false");
+				appendStringInfoString(buf, "false");
 			break;
 
 		default:
@@ -5569,7 +5603,7 @@ get_sublink_expr(SubLink *sublink, deparse_context *context)
 	bool		need_paren;
 
 	if (sublink->subLinkType == ARRAY_SUBLINK)
-		appendStringInfo(buf, "ARRAY(");
+		appendStringInfoString(buf, "ARRAY(");
 	else
 		appendStringInfoChar(buf, '(');
 
@@ -5637,12 +5671,12 @@ get_sublink_expr(SubLink *sublink, deparse_context *context)
 	switch (sublink->subLinkType)
 	{
 		case EXISTS_SUBLINK:
-			appendStringInfo(buf, "EXISTS ");
+			appendStringInfoString(buf, "EXISTS ");
 			break;
 
 		case ANY_SUBLINK:
 			if (strcmp(opname, "=") == 0)		/* Represent = ANY as IN */
-				appendStringInfo(buf, " IN ");
+				appendStringInfoString(buf, " IN ");
 			else
 				appendStringInfo(buf, " %s ANY ", opname);
 			break;
@@ -5675,7 +5709,7 @@ get_sublink_expr(SubLink *sublink, deparse_context *context)
 				  context->indentLevel);
 
 	if (need_paren)
-		appendStringInfo(buf, "))");
+		appendStringInfoString(buf, "))");
 	else
 		appendStringInfoChar(buf, ')');
 }
@@ -5795,6 +5829,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 		RangeTblEntry *rte = rt_fetch(varno, query->rtable);
 		char	   *refname = get_rtable_name(varno, context);
 		deparse_columns *colinfo = deparse_columns_fetch(varno, dpns);
+		RangeTblFunction *rtfunc1 = NULL;
 		bool		printalias;
 
 		if (rte->lateral)
@@ -5819,7 +5854,98 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				break;
 			case RTE_FUNCTION:
 				/* Function RTE */
-				get_rule_expr(rte->funcexpr, context, true);
+				rtfunc1 = (RangeTblFunction *) linitial(rte->functions);
+
+				/*
+				 * Omit ROWS FROM() syntax for just one function, unless it
+				 * has both a coldeflist and WITH ORDINALITY. If it has both,
+				 * we must use ROWS FROM() syntax to avoid ambiguity about
+				 * whether the coldeflist includes the ordinality column.
+				 */
+				if (list_length(rte->functions) == 1 &&
+					(rtfunc1->funccolnames == NIL || !rte->funcordinality))
+				{
+					get_rule_expr(rtfunc1->funcexpr, context, true);
+					/* we'll print the coldeflist below, if it has one */
+				}
+				else
+				{
+					bool		all_unnest;
+					ListCell   *lc;
+
+					/*
+					 * If all the function calls in the list are to unnest,
+					 * and none need a coldeflist, then collapse the list back
+					 * down to UNNEST(args).  (If we had more than one
+					 * built-in unnest function, this would get more
+					 * difficult.)
+					 *
+					 * XXX This is pretty ugly, since it makes not-terribly-
+					 * future-proof assumptions about what the parser would do
+					 * with the output; but the alternative is to emit our
+					 * nonstandard ROWS FROM() notation for what might have
+					 * been a perfectly spec-compliant multi-argument
+					 * UNNEST().
+					 */
+					all_unnest = true;
+					foreach(lc, rte->functions)
+					{
+						RangeTblFunction *rtfunc = (RangeTblFunction *) lfirst(lc);
+
+						if (!IsA(rtfunc->funcexpr, FuncExpr) ||
+							((FuncExpr *) rtfunc->funcexpr)->funcid != F_ARRAY_UNNEST ||
+							rtfunc->funccolnames != NIL)
+						{
+							all_unnest = false;
+							break;
+						}
+					}
+
+					if (all_unnest)
+					{
+						List	   *allargs = NIL;
+
+						foreach(lc, rte->functions)
+						{
+							RangeTblFunction *rtfunc = (RangeTblFunction *) lfirst(lc);
+							List	   *args = ((FuncExpr *) rtfunc->funcexpr)->args;
+
+							allargs = list_concat(allargs, list_copy(args));
+						}
+
+						appendStringInfoString(buf, "UNNEST(");
+						get_rule_expr((Node *) allargs, context, true);
+						appendStringInfoChar(buf, ')');
+					}
+					else
+					{
+						int			funcno = 0;
+
+						appendStringInfoString(buf, "ROWS FROM(");
+						foreach(lc, rte->functions)
+						{
+							RangeTblFunction *rtfunc = (RangeTblFunction *) lfirst(lc);
+
+							if (funcno > 0)
+								appendStringInfoString(buf, ", ");
+							get_rule_expr(rtfunc->funcexpr, context, true);
+							if (rtfunc->funccolnames != NIL)
+							{
+								/* Reconstruct the column definition list */
+								appendStringInfoString(buf, " AS ");
+								get_from_clause_coldeflist(rtfunc,
+														   NULL,
+														   context);
+							}
+							funcno++;
+						}
+						appendStringInfoChar(buf, ')');
+					}
+					/* prevent printing duplicate coldeflist below */
+					rtfunc1 = NULL;
+				}
+				if (rte->funcordinality)
+					appendStringInfoString(buf, " WITH ORDINALITY");
 				break;
 			case RTE_VALUES:
 				/* Values list RTE */
@@ -5861,7 +5987,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 			 * For a function RTE, always print alias.  This covers possible
 			 * renaming of the function and/or instability of the
 			 * FigureColname rules for things that aren't simple functions.
-			 * Also note we'd need to force it anyway for the RECORD case.
+			 * Note we'd need to force it anyway for the columndef list case.
 			 */
 			printalias = true;
 		}
@@ -5879,14 +6005,10 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 			appendStringInfo(buf, " %s", quote_identifier(refname));
 
 		/* Print the column definitions or aliases, if needed */
-		if (rte->rtekind == RTE_FUNCTION && rte->funccoltypes != NIL)
+		if (rtfunc1 && rtfunc1->funccolnames != NIL)
 		{
-			/* Function returning RECORD, reconstruct the columndefs */
-			get_from_clause_coldeflist(colinfo,
-									   rte->funccoltypes,
-									   rte->funccoltypmods,
-									   rte->funccolcollations,
-									   context);
+			/* Reconstruct the columndef list, which is also the aliases */
+			get_from_clause_coldeflist(rtfunc1, colinfo, context);
 		}
 		else
 		{
@@ -5957,7 +6079,7 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 			ListCell   *lc;
 			bool		first = true;
 
-			appendStringInfo(buf, " USING (");
+			appendStringInfoString(buf, " USING (");
 			/* Use the assigned names, not what's in usingClause */
 			foreach(lc, colinfo->usingNames)
 			{
@@ -5966,14 +6088,14 @@ get_from_clause_item(Node *jtnode, Query *query, deparse_context *context)
 				if (first)
 					first = false;
 				else
-					appendStringInfo(buf, ", ");
+					appendStringInfoString(buf, ", ");
 				appendStringInfoString(buf, quote_identifier(colname));
 			}
 			appendStringInfoChar(buf, ')');
 		}
 		else if (j->quals)
 		{
-			appendStringInfo(buf, " ON ");
+			appendStringInfoString(buf, " ON ");
 			if (!PRETTY_PAREN(context))
 				appendStringInfoChar(buf, '(');
 			get_rule_expr(j->quals, context, false);
@@ -6023,7 +6145,7 @@ get_column_alias_list(deparse_columns *colinfo, deparse_context *context)
 			first = false;
 		}
 		else
-			appendStringInfo(buf, ", ");
+			appendStringInfoString(buf, ", ");
 		appendStringInfoString(buf, quote_identifier(colname));
 	}
 	if (!first)
@@ -6033,34 +6155,50 @@ get_column_alias_list(deparse_columns *colinfo, deparse_context *context)
 /*
  * get_from_clause_coldeflist - reproduce FROM clause coldeflist
  *
+ * When printing a top-level coldeflist (which is syntactically also the
+ * relation's column alias list), use column names from colinfo.  But when
+ * printing a coldeflist embedded inside ROWS FROM(), we prefer to use the
+ * original coldeflist's names, which are available in rtfunc->funccolnames.
+ * Pass NULL for colinfo to select the latter behavior.
+ *
  * The coldeflist is appended immediately (no space) to buf.  Caller is
  * responsible for ensuring that an alias or AS is present before it.
  */
 static void
-get_from_clause_coldeflist(deparse_columns *colinfo,
-						   List *types, List *typmods, List *collations,
+get_from_clause_coldeflist(RangeTblFunction *rtfunc,
+						   deparse_columns *colinfo,
 						   deparse_context *context)
 {
 	StringInfo	buf = context->buf;
 	ListCell   *l1;
 	ListCell   *l2;
 	ListCell   *l3;
+	ListCell   *l4;
 	int			i;
 
 	appendStringInfoChar(buf, '(');
 
+	/* there's no forfour(), so must chase one list the hard way */
 	i = 0;
-	forthree(l1, types, l2, typmods, l3, collations)
+	l4 = list_head(rtfunc->funccolnames);
+	forthree(l1, rtfunc->funccoltypes,
+			 l2, rtfunc->funccoltypmods,
+			 l3, rtfunc->funccolcollations)
 	{
-		char	   *attname = colinfo->colnames[i];
 		Oid			atttypid = lfirst_oid(l1);
 		int32		atttypmod = lfirst_int(l2);
 		Oid			attcollation = lfirst_oid(l3);
+		char	   *attname;
+
+		if (colinfo)
+			attname = colinfo->colnames[i];
+		else
+			attname = strVal(lfirst(l4));
 
 		Assert(attname);		/* shouldn't be any dropped columns here */
 
 		if (i > 0)
-			appendStringInfo(buf, ", ");
+			appendStringInfoString(buf, ", ");
 		appendStringInfo(buf, "%s %s",
 						 quote_identifier(attname),
 						 format_type_with_typemod(atttypid, atttypmod));
@@ -6068,6 +6206,8 @@ get_from_clause_coldeflist(deparse_columns *colinfo,
 			attcollation != get_typcollation(atttypid))
 			appendStringInfo(buf, " COLLATE %s",
 							 generate_collation_name(attcollation));
+
+		l4 = lnext(l4);
 		i++;
 	}
 
@@ -6211,17 +6351,17 @@ generate_shard_name(Oid relid, int64 shardid)
  *		types.  (Those matter because of ambiguous-function resolution rules.)
  *
  * If we're dealing with a potentially variadic function (in practice, this
- * means a FuncExpr and not some other way of calling the function), then
- * was_variadic should specify whether variadic arguments have been merged,
+ * means a FuncExpr or Aggref, not some other way of calling a function), then
+ * has_variadic must specify whether variadic arguments have been merged,
  * and *use_variadic_p will be set to indicate whether to print VARIADIC in
- * the output.  For non-FuncExpr cases, was_variadic should be FALSE and
+ * the output.  For non-FuncExpr cases, has_variadic should be FALSE and
  * use_variadic_p can be NULL.
  *
  * The result includes all necessary quoting and schema-prefixing.
  */
 static char *
 generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
-					   bool was_variadic, bool *use_variadic_p)
+					   bool has_variadic, bool *use_variadic_p)
 {
 	char	   *result;
 	HeapTuple	proctup;
@@ -6234,6 +6374,7 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	Oid			p_rettype;
 	bool		p_retset;
 	int			p_nvargs;
+	Oid			p_vatype;
 	Oid		   *p_true_typeids;
 
 	proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
@@ -6246,34 +6387,27 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 	 * Determine whether VARIADIC should be printed.  We must do this first
 	 * since it affects the lookup rules in func_get_detail().
 	 *
-	 * Currently, we always print VARIADIC if the function is variadic and
-	 * takes a variadic type other than ANY.  However, if the function takes
-	 * VARIADIC ANY, then the parser didn't fold the arguments together into
-	 * an array, so we must print VARIADIC if and only if it was used
-	 * originally.
+	 * Currently, we always print VARIADIC if the function has a merged
+	 * variadic-array argument.  Note that this is always the case for
+	 * functions taking a VARIADIC argument type other than VARIADIC ANY.
 	 *
-	 * Note: with the current definition of funcvariadic, we could just set
-	 * use_variadic = was_variadic, which indeed is the solution adopted in
-	 * 9.4.  However, in rules/views stored before 9.3.5, funcvariadic will
-	 * reflect the previous definition (was VARIADIC written in the call?).
-	 * So in 9.3 we cannot trust it unless the function is VARIADIC ANY.
+	 * In principle, if VARIADIC wasn't originally specified and the array
+	 * actual argument is deconstructable, we could print the array elements
+	 * separately and not print VARIADIC, thus more nearly reproducing the
+	 * original input.  For the moment that seems like too much complication
+	 * for the benefit, and anyway we do not know whether VARIADIC was
+	 * originally specified if it's a non-ANY type.
 	 */
 	if (use_variadic_p)
 	{
-		if (OidIsValid(procform->provariadic))
-		{
-			if (procform->provariadic != ANYOID)
-				use_variadic = true;
-			else
-				use_variadic = was_variadic;
-		}
-		else
-			use_variadic = false;
+		/* Parser should not have set funcvariadic unless fn is variadic */
+		Assert(!has_variadic || OidIsValid(procform->provariadic));
+		use_variadic = has_variadic;
 		*use_variadic_p = use_variadic;
 	}
 	else
 	{
-		Assert(!was_variadic);
+		Assert(!has_variadic);
 		use_variadic = false;
 	}
 
@@ -6286,7 +6420,8 @@ generate_function_name(Oid funcid, int nargs, List *argnames, Oid *argtypes,
 							   NIL, argnames, nargs, argtypes,
 							   !use_variadic, true,
 							   &p_funcid, &p_rettype,
-							   &p_retset, &p_nvargs, &p_true_typeids, NULL);
+							   &p_retset, &p_nvargs, &p_vatype,
+							   &p_true_typeids, NULL);
 	if ((p_result == FUNCDETAIL_NORMAL ||
 		 p_result == FUNCDETAIL_AGGREGATE ||
 		 p_result == FUNCDETAIL_WINDOWFUNC) &&

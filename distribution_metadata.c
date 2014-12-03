@@ -145,7 +145,7 @@ LoadShardIntervalList(Oid distributedTableId)
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_OIDEQ,
 				ObjectIdGetDatum(distributedTableId));
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
 									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
@@ -281,7 +281,7 @@ LoadShardPlacementList(int64 shardId)
 
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
 									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
@@ -333,7 +333,7 @@ PartitionColumn(Oid distributedTableId)
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
 				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
+	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
 
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
@@ -382,7 +382,7 @@ PartitionType(Oid distributedTableId)
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
 				F_OIDEQ, ObjectIdGetDatum(distributedTableId));
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
+	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
 
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 	if (HeapTupleIsValid(heapTuple))
@@ -427,7 +427,7 @@ IsDistributedTable(Oid tableId)
 	ScanKeyInit(&scanKey[0], ATTR_NUM_PARTITION_RELATION_ID, InvalidStrategy,
 				F_OIDEQ, ObjectIdGetDatum(tableId));
 
-	scanDesc = heap_beginscan(heapRelation, SnapshotNow, scanKeyCount, scanKey);
+	scanDesc = heap_beginscan(heapRelation, SnapshotSelf, scanKeyCount, scanKey);
 
 	heapTuple = heap_getnext(scanDesc, ForwardScanDirection);
 
@@ -504,7 +504,7 @@ LoadShardIntervalRow(int64 shardId, Oid *relationId, char **minValue,
 
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ, Int64GetDatum(shardId));
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
 									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
@@ -732,7 +732,7 @@ DeleteShardPlacementRow(uint64 shardPlacementId)
 	ScanKeyInit(&scanKey[0], 1, BTEqualStrategyNumber, F_INT8EQ,
 				Int64GetDatum(shardPlacementId));
 
-	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotNow,
+	indexScanDesc = index_beginscan(heapRelation, indexRelation, SnapshotSelf,
 									scanKeyCount, 0);
 	index_rescan(indexScanDesc, scanKey, scanKeyCount, NULL, 0);
 
