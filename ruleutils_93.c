@@ -24,7 +24,7 @@
 #include "pg_config_manual.h"
 #include "postgres_ext.h"
 
-#include "ruleutils.h"
+#include "ruleutils.h" /* IWYU pragma: keep */
 #include "ddl_commands.h"
 
 #include <stddef.h>

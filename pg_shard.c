@@ -62,6 +62,7 @@
 #include "parser/parse_type.h"
 #include "storage/lock.h"
 #include "tcop/dest.h"
+#include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
