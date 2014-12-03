@@ -72,7 +72,7 @@ CREATE TABLE customer_reviews
 );
 ```
 
-This table will not be used to store any data on the master but serves as a prototype of what a `customer_reviews` table should look like on the worker nodes. After you're happy with your schema, and created any indexes on your table, tell `pg_shard` to distribute the table table:
+This table will not be used to store any data on the master but serves as a prototype of what a `customer_reviews` table should look like on the worker nodes. After you're happy with your schema, and have created the desired indexes on your table, tell `pg_shard` to distribute the table:
 
 ```sql
 -- Specify the table to distribute and the column to distribute it on
@@ -109,7 +109,7 @@ DELETE FROM customer_reviews WHERE customer_id = 'FA2K1';
 
 ## What just happened?
 
-When you first distribute a table and create shards for it, `pg_shard` saves related metadata on the master node. You can probe into this metadata by running the following:
+When you distribute a table and create shards for it, `pg_shard` saves related metadata on the master node. You can probe into this metadata by running the following:
 
 ```sql
 SELECT * FROM pgs_distribution_metadata.partition;
@@ -117,14 +117,13 @@ SELECT * FROM pgs_distribution_metadata.shard;
 SELECT * FROM pgs_distribution_metadata.shard_placement;
 ```
 
-The first metadata table indicates to `pg_shard` which PostgreSQL tables are distributed and how. The `shard` metadata table then maps a distributed table to its logical shards, and associates each shard with a portion of a hash token space spanning between ]-2B, +2B[. Last, the `shard_placement` table maintains each shard's location information, in other words, the worker node name and port for that shard. As an example, if you're using a replication factor of 2, then each shard will have two shard placements.
+The `partition` metadata table indicates to `pg_shard` which PostgreSQL tables are distributed and how. The `shard` metadata table then maps a distributed table to its logical shards, and associates each shard with a portion of a hash token space spanning between `]-2B, +2B[`. Last, the `shard_placement` table maintains each shard's location information, in other words, the worker node name and port for that shard. As an example, if you're using a replication factor of 2, then each shard will have two shard placements.
 
-Each shard placement in `pg_shard` corresponds to one PostgreSQL table. You can probe into these tables by connecting to any one of the workers, and running standard Postgres commands:
+Each shard placement in `pg_shard` corresponds to one worker node PostgreSQL table. You can probe into these tables by connecting to any one of the workers, and running standard Postgres commands:
 
-```sql
-# psql -d postgres -h worker-101 -p 5432
-\d
-```
+    psql -d postgres -h worker-101 -p 5432
+    postgres=# \d
+
 
 ## Limitations
 
