@@ -84,8 +84,8 @@ bool UseCitusDBSelectLogic = false;
 
 
 /* planner functions forward declarations */
-static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
-										ParamListInfo boundParams);
+static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
+									ParamListInfo boundParams);
 static PlannerType DeterminePlannerType(Query *query);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static Oid ExtractFirstDistributedTableId(Query *query);
@@ -152,7 +152,7 @@ void
 _PG_init(void)
 {
 	PreviousPlannerHook = planner_hook;
-	planner_hook = PgShardPlannerHook;
+	planner_hook = PgShardPlanner;
 
 	PreviousExecutorStartHook = ExecutorStart_hook;
 	ExecutorStart_hook = PgShardExecutorStart;
@@ -200,14 +200,14 @@ _PG_fini(void)
 
 
 /*
- * PgShardPlannerHook implements custom planner logic to plan queries involving
+ * PgShardPlanner implements custom planner logic to plan queries involving
  * distributed tables. It first calls the standard planner to perform common
  * mutations and normalizations on the query and retrieve the "normal" planned
  * statement for the query. Further functions actually produce the distributed
  * plan should one be necessary.
  */
 static PlannedStmt *
-PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
+PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
 	PlannerType plannerType = DeterminePlannerType(query);
