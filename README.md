@@ -95,8 +95,8 @@ Once you created your shards, you can start issuing queries against the cluster.
 
 ```sql
 INSERT INTO customer_reviews (customer_id, review_rating) VALUES ('HN802', 5);
-INSERT INTO customer_reviews VALUES ('HN802', '2004-01-01', 1, 10, 4, 'B00007B5DN',
-  'Tug of War', 133191, 'Music', 'Indie Music', 'Pop', '{}');
+INSERT INTO customer_reviews VALUES ('HN802', '2004-01-01', 1, 10, 4,
+    'B00007B5DN', 'Tug of War', 133191, 'Music', 'Indie Music', 'Pop', '{}');
 INSERT INTO customer_reviews (customer_id, review_rating) VALUES ('FA2K1', 10);
 
 SELECT avg(review_rating) FROM customer_reviews WHERE customer_id = 'HN802';
