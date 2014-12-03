@@ -121,7 +121,7 @@ SELECT * FROM pgs_distribution_metadata.shard_placement;
 
 The `partition` metadata table indicates to `pg_shard` which PostgreSQL tables are distributed and how. The `shard` metadata table then maps a distributed table to its logical shards, and associates each shard with a portion of a hash token space spanning between `]-2B, +2B[`. Last, the `shard_placement` table maintains each shard's location information, that is, the worker node name and port for that shard. As an example, if you're using a replication factor of 2, then each shard will have two shard placements.
 
-Each shard placement in `pg_shard` corresponds to one worker node PostgreSQL table. You can probe into these tables by connecting to any one of the workers, and running standard Postgres commands:
+Each shard placement in `pg_shard` corresponds to one PostgreSQL table on a worker node. You can probe into these tables by connecting to any one of the workers, and running standard Postgres commands:
 
     psql -d postgres -h worker-101 -p 5432
     postgres=# \d
