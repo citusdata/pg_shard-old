@@ -107,6 +107,25 @@ UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 'HN802';
 DELETE FROM customer_reviews WHERE customer_id = 'FA2K1';
 ```
 
+## What just happened?
+
+`pg_shard` works as an extension to PostgreSQL, and all its operations are transparent to users. When you first distribute a table and create shards for it, `pg_shard` saves metadata on the master node. You can probe into this metadata by running the following commands:
+
+```sql
+SELECT * FROM pgs_distribution_metadata.partition;
+SELECT * FROM pgs_distribution_metadata.shard;
+SELECT * FROM pgs_distribution_metadata.shard_placement;
+```
+
+The first metadata table indicates to `pg_shard` which PostgreSQL tables are distributed and how. The second metadata table maps a distributed table to its logical shards, and also keeps track of the hash token space associated with each shard. The last metadata table then maps each shard to its placements, that is the physical machines where shards are stored. If you set a replication factor of 2 for example, then each shard will have two placements.
+
+Each shard placement in `pg_shard` corresponds to one PostgreSQL table. You can also easily look into these tables by connecting to any one of the workers, and running standard Postgres commands:
+
+```sql
+# psql -d postgres -h worker-101 -p 5432
+\d
+```
+
 ## Limitations
 
 `pg_shard` is intentionally limited in scope during its first release, but is fully functional within that scope. We classify `pg_shard`'s current limitations into two groups. In one group, we have features that we don't intend to support in the medium term due to architectural decisions we made:
