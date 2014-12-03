@@ -104,7 +104,7 @@ SELECT avg(review_rating) FROM customer_reviews WHERE customer_id = 'HN802';
 SELECT count(*) FROM customer_reviews;
 
 UPDATE customer_reviews SET review_votes = 10 WHERE customer_id = 'HN802';
-DELETE FROM customer_reviews WHERE customer_id = 4700;
+DELETE FROM customer_reviews WHERE customer_id = 'FA2K1';
 ```
 
 ## Limitations
