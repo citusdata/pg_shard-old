@@ -1789,10 +1789,10 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 		CopyStmt *copyStatement = (CopyStmt *) parsetree;
 		RangeVar *relation = copyStatement->relation;
 		Node *rawQuery = copyObject(copyStatement->query);
-		bool failOK = true;
 
 		if (relation != NULL)
 		{
+			bool failOK = true;
 			Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
 			bool isDistributedTable = false;
 
