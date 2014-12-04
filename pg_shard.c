@@ -56,9 +56,13 @@
 #include "optimizer/cost.h"
 #include "optimizer/planner.h"
 #include "optimizer/var.h"
+#include "parser/analyze.h"
+#include "parser/parse_node.h"
 #include "parser/parsetree.h"
+#include "parser/parse_type.h"
 #include "storage/lock.h"
 #include "tcop/dest.h"
+#include "tcop/tcopprot.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/elog.h"
@@ -80,8 +84,8 @@ bool UseCitusDBSelectLogic = false;
 
 
 /* planner functions forward declarations */
-static PlannedStmt * PgShardPlannerHook(Query *parse, int cursorOptions,
-										ParamListInfo boundParams);
+static PlannedStmt * PgShardPlanner(Query *parse, int cursorOptions,
+									ParamListInfo boundParams);
 static PlannerType DeterminePlannerType(Query *query);
 static void ErrorIfQueryNotSupported(Query *queryTree);
 static Oid ExtractFirstDistributedTableId(Query *query);
@@ -148,7 +152,7 @@ void
 _PG_init(void)
 {
 	PreviousPlannerHook = planner_hook;
-	planner_hook = PgShardPlannerHook;
+	planner_hook = PgShardPlanner;
 
 	PreviousExecutorStartHook = ExecutorStart_hook;
 	ExecutorStart_hook = PgShardExecutorStart;
@@ -196,14 +200,14 @@ _PG_fini(void)
 
 
 /*
- * PgShardPlannerHook implements custom planner logic to plan queries involving
+ * PgShardPlanner implements custom planner logic to plan queries involving
  * distributed tables. It first calls the standard planner to perform common
  * mutations and normalizations on the query and retrieve the "normal" planned
  * statement for the query. Further functions actually produce the distributed
  * plan should one be necessary.
  */
 static PlannedStmt *
-PgShardPlannerHook(Query *query, int cursorOptions, ParamListInfo boundParams)
+PgShardPlanner(Query *query, int cursorOptions, ParamListInfo boundParams)
 {
 	PlannedStmt *plannedStatement = NULL;
 	PlannerType plannerType = DeterminePlannerType(query);
@@ -1734,6 +1738,98 @@ PgShardProcessUtility(Node *parsetree, const char *queryString,
 				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								errmsg("EXPLAIN statements on distributed tables "
 									   "are unsupported")));
+			}
+		}
+	}
+	else if (statementType == T_PrepareStmt)
+	{
+		PrepareStmt *prepareStatement = (PrepareStmt *) parsetree;
+		Query *parsedQuery = NULL;
+		Node *rawQuery = copyObject(prepareStatement->query);
+		int argumentCount = list_length(prepareStatement->argtypes);
+		Oid *argumentTypeArray = NULL;
+		PlannerType plannerType = PLANNER_INVALID_FIRST;
+
+		/* transform list of TypeNames to array of type OID's if they exist */
+		if (argumentCount > 0)
+		{
+			List *argumentTypeList = prepareStatement->argtypes;
+			ListCell *argumentTypeCell = NULL;
+			uint32 argumentTypeIndex = 0;
+
+			ParseState *parseState = make_parsestate(NULL);
+			parseState->p_sourcetext = queryString;
+
+			argumentTypeArray = (Oid *) palloc0(argumentCount * sizeof(Oid));
+
+			foreach(argumentTypeCell, argumentTypeList)
+			{
+				TypeName *typeName = lfirst(argumentTypeCell);
+				Oid	typeId = typenameTypeId(parseState, typeName);
+
+				argumentTypeArray[argumentTypeIndex] = typeId;
+				argumentTypeIndex++;
+			}
+		}
+
+		/* analyze the statement using these parameter types */
+		parsedQuery = parse_analyze_varparams(rawQuery, queryString,
+											  &argumentTypeArray, &argumentCount);
+
+		/* determine if the query runs on a distributed table */
+		plannerType = DeterminePlannerType(parsedQuery);
+		if (plannerType == PLANNER_TYPE_PG_SHARD)
+		{
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("PREPARE statements on distributed tables "
+								   "are unsupported")));
+		}
+	}
+	else if (statementType == T_CopyStmt)
+	{
+		CopyStmt *copyStatement = (CopyStmt *) parsetree;
+		RangeVar *relation = copyStatement->relation;
+		Node *rawQuery = copyObject(copyStatement->query);
+
+		if (relation != NULL)
+		{
+			bool failOK = true;
+			Oid tableId = RangeVarGetRelid(relation, NoLock, failOK);
+			bool isDistributedTable = false;
+
+			Assert(rawQuery == NULL);
+
+			isDistributedTable = IsDistributedTable(tableId);
+			if (isDistributedTable)
+			{
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("COPY statements on distributed tables "
+									   "are unsupported")));
+			}
+		}
+		else if (rawQuery != NULL)
+		{
+			Query *parsedQuery = NULL;
+			PlannerType plannerType = PLANNER_INVALID_FIRST;
+			List *queryList = pg_analyze_and_rewrite(rawQuery, queryString,
+													 NULL, 0);
+
+			Assert(relation == NULL);
+
+			if (list_length(queryList) != 1)
+			{
+				ereport(ERROR, (errmsg("unexpected rewrite result")));
+			}
+
+			parsedQuery = (Query *) linitial(queryList);
+
+			/* determine if the query runs on a distributed table */
+			plannerType = DeterminePlannerType(parsedQuery);
+			if (plannerType == PLANNER_TYPE_PG_SHARD)
+			{
+				ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("COPY statements involving distributed "
+									   "tables are unsupported")));
 			}
 		}
 	}

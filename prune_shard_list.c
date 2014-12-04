@@ -53,7 +53,6 @@ static OpExpr * MakeOpExpressionWithZeroConst(void);
 static List * BuildRestrictInfoList(List *qualList);
 static Node * BuildBaseConstraint(Var *column);
 static void UpdateConstraint(Node *baseConstraint, ShardInterval *shardInterval);
-static bool SimpleOpExpression(Expr *clause);
 
 
 /*

@@ -25,7 +25,7 @@ else
 endif
 
 EXTENSION = pg_shard
-DATA = pg_shard--1.0.0-rc.sql
+DATA = pg_shard--1.0-gm.sql
 
 # Default to 5432 if PGPORT is undefined. Replace placeholders in our tests
 # with actual port number in order to anticipate correct output during tests.
@@ -46,3 +46,17 @@ EXTRA_CLEAN += ${REGRESS_PREP}
 PG_CONFIG = pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
+
+# Build the 9.3- or 9.4-derived ruleutils, depending upon active version
+ifneq (,$(findstring $(MAJORVERSION), 9.3))
+	RULEUTILS_IMPL := ruleutils_93.c
+else ifneq (,$(findstring $(MAJORVERSION), 9.4))
+	RULEUTILS_IMPL := ruleutils_94.c
+else
+	# Error out if too old altogether
+	$(error PostgreSQL 9.3 or 9.4 is required to compile this extension)
+endif
+
+# Same as implicit %.o rule, except building ruleutils.o from -93/94
+ruleutils.o: $(RULEUTILS_IMPL)
+	$(COMPILE.c) $(OUTPUT_OPTION) $<

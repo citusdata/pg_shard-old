@@ -4,6 +4,8 @@
  *
  * Declarations for public functions and types to produce an SQL string
  * targeting a particular shard based on an initial query and shard ID.
+ * Depending upon the version of PostgreSQL in use, implementations of
+ * this file's functions are found in ruleutils_93.c or ruleutils_94.c.
  *
  * Copyright (c) 2014, Citus Data, Inc.
  *

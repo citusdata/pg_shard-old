@@ -93,7 +93,7 @@ TableDDLCommandList(Oid relationId)
 
 	scanDescriptor = systable_beginscan(pgIndex,
 										IndexIndrelidIndexId, true, /* indexOK */
-										SnapshotNow, scanKeyCount, scanKey);
+										SnapshotSelf, scanKeyCount, scanKey);
 
 	heapTuple = systable_getnext(scanDescriptor);
 	while (HeapTupleIsValid(heapTuple))
